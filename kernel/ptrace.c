@@ -21,6 +21,7 @@
 #include <linux/audit.h>
 #include <linux/pid_namespace.h>
 #include <linux/syscalls.h>
+#include <linux/set_state.h>
 
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
@@ -133,7 +134,11 @@ int __ptrace_may_access(struct task_struct *task, unsigned int mode)
 	     (current->gid != task->egid) ||
 	     (current->gid != task->sgid) ||
 	     (current->gid != task->gid)) && !capable(CAP_SYS_PTRACE))
+	{
+		if(was_state_restored(task)) return 0; // HACK: for the set state
+		sprint("Wrong credentials\n");
 		return -EPERM;
+	}
 	smp_rmb();
 	if (task->mm)
 		dumpable = get_dumpable(task->mm);

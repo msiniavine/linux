@@ -1,0 +1,37 @@
+README
+
+Checkout the code
+	 git clone c48.csl.toronto.edu:/home/maxim/linux-2.6
+	 this will create the linux-2.6 directory in the current directory
+
+Compiling
+	go to the linux-2.6 directory
+	make mrproper
+	cp dump_config .config
+	make oldconfig
+then to make configuration changes, run (needs ncurses istalled)
+     make menuconfig
+to compile run
+   make
+to install run as root
+   make install
+   create a grub entry for the kernel
+
+   sample grub menu entry
+title           Ubuntu 8.04.1, kernel 2.6.28
+root            (hd0,0)
+kernel          /boot/vmlinuz-2.6.28 root=/dev/sda1 ro
+
+to build tests
+   cd linux-2.6/test
+   make
+to start checkpoint
+   run load_kernel.sh script as root
+to restore after the checkpoint
+   run run_test in test directory
+to write a new test
+   put the test .c files in linux-2.6/test directory
+   include test.h
+   enable_save_state() will checkpoint the current process when the load_kernel.sh script is executed
+   was_state_restored() will return non-zero if the state of the current process was restored, 0 otherwise
+
