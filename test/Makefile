@@ -1,8 +1,11 @@
 CFLAGS = -g -Wall -fno-stack-protector
 #LDFLAGS = -lpthread
 
-all: test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal \
-test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread
+all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread
+
+
+syscalls.o: syscalls.S
+	as syscalls.S -o syscalls.o
 
 #test_file: file_test.o syscalls.o libc.o
 #gcc -nostdlib -g syscalls.o file_test.o libc.o -o test_file
@@ -13,8 +16,11 @@ test_altstack test_sigsuspend test_loop run_test set_state test_parent_child sav
 #demand_paging_call.o: demand_paging_call.s
 #as demand_paging_call.s -o demand_paging_call.o
 
-#test_stack: test_stack.o syscalls.o
-#gcc -nostdlib -g test_stack.o syscalls.o -o test_stack
+test_stack: syscalls.o test_stack.o
+	gcc -nostdlib -g test_stack.o syscalls.o -o test_stack
+
+test_simple_fork: syscalls.o test_simple_fork.o
+	gcc -nostdlib -g test_simple_fork.o syscalls.o -o test_simple_fork
 
 #test_brk: test_brk.o
 #gcc -nostdlib -g test_brk.o syscalls.o libc.o -o test_brk
@@ -59,7 +65,9 @@ test_thread: test_thread.o
 
 clean:
 	-rm *.o
+	-rm test_simple_fork
 	-rm test_thread
+	-rm test_stack
 	-rm save_state
 	-rm set_state
 	-rm test_parent_child
