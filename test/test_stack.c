@@ -1,3 +1,4 @@
+#define NO_LIBC
 #include "test.h"
 
 int recursive_call(int n)

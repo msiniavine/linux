@@ -12,6 +12,10 @@ void enable_save_state()
 	__asm__("movl $334, %eax\n");
 	__asm__("int $0x80\n");
 }
+
+int was_state_restored();
+void exit(int);
+int fork();
 #else
 void set_state(void)
 {

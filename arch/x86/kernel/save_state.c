@@ -79,7 +79,28 @@ static int reserve(unsigned long start, unsigned long size)
 /* 	} */
 /* 	kunmap(page); */
 /* } */
+static void reserve_process_memory(struct saved_task_struct* task)
+{
+	struct saved_page* page;
+	struct saved_task_struct* child;
+	for(page = task->pages; page!=NULL; page=page->next)
+	{
+		if(reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE) < 0)
+		{
+			sprint("Failed to reserve pfn: %ld\n", page->pfn);
+		}
+		else
+		{
+			sprint("Reserved pfn: %ld\n", page->pfn);
+		}
+	}
 
+	list_for_each_entry(child, &task->children, sibling)
+	{
+		reserve_process_memory(child);
+	}
+
+}
 void reserve_saved_memory(void)
 {
 	struct saved_task_struct* task;
@@ -92,40 +113,7 @@ void reserve_saved_memory(void)
 	}
 	for(task = state->processes; task != NULL; task = task->next)
 	{
-
-		struct saved_page* page;
-		for(page = task->pages; page!=NULL; page=page->next)
-		{
-			if(reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE) < 0)
-			{
-				sprint("Failed to reserve pfn: %ld\n", page->pfn);
-			}
-			else
-			{
-				sprint("Reserved pfn: %ld\n", page->pfn);
-			}
-		}
-/* 		int i; */
-/* 		for(i = 0; i<SAVED_PGD_SIZE; i++) */
-/* 		{ */
-/* 			pgd_t pgd = task->pgd[i]; */
-/* 			if(pgd_present(pgd) && pgd.pgd != 0) */
-/* 			{ */
-/* 				unsigned long page_table = pgd.pgd & 0xfffff000; */
-/* 				sprint( "pte is at %08lx\n", page_table); */
-/* 					sprint( "page table is in high memory\n"); */
-/* 				if(reserve_bootmem(page_table, PAGE_SIZE, BOOTMEM_EXCLUSIVE) < 0) */
-/* 				{ */
-/* 					sprint( "Failed to reserve page at %08lx\n", page_table); */
-/*       				} */
-/* 				else */
-/* 				{ */
-/* 					sprint( "Reserved page at %08lx\n", page_table); */
-/* 				} */
-
-/* 		       		save_page_table(page_table); */
-/* 			} */
-/* 		} */
+		reserve_process_memory(task);
 
 	}
 }
@@ -227,6 +215,7 @@ static void save_pages(struct saved_task_struct* task, struct vm_area_struct* ar
 	{
 		unsigned long physical_address;
 		struct saved_page* page;
+		struct page* p;
 		if(!get_physical_address(area->vm_mm, virtual_address, &physical_address))
 			continue;
 //		sprint( "Saving page at address: %08lx\n", virtual_address);
@@ -234,7 +223,8 @@ static void save_pages(struct saved_task_struct* task, struct vm_area_struct* ar
 		//	sprint( "Allocated saved_page at: %p\n", page);
 		//sprint( "Physical address was: %08lx\n", physical_address);
 		page->pfn = physical_address >> PAGE_SHIFT;
-		page->mapcount = 1;
+		p = pfn_to_page(page->pfn);
+		page->mapcount = page_mapcount(p);
 		page->next = task->pages;
 		task->pages = page;
 	}
@@ -553,6 +543,34 @@ static void save_running_processes(void)
 	read_unlock(&tasklist_lock);
 }
 
+static void print_saved_process(struct saved_task_struct* task)
+{
+	struct saved_page* page;
+	struct saved_file* file;
+	struct saved_task_struct* child;
+	sprint( "Next process is at: %p\n", task);
+	sprint( "%s %s\n", task->name, task->exe_file);
+	
+	print_regs(&task->registers);
+	sprint("Memory:\n");
+	for(page = task->pages; page!=NULL; page=page->next)
+	{
+		struct page* p = pfn_to_page(page->pfn);
+		sprint("pfn: %lx, count: %d, flags: %08lx, reserved: %s\n", page->pfn, atomic_read(&p->_count), 
+		       p->flags, PageReserved(p) ? "yes" : "no");
+	}
+	for(file = task->open_files; file!=NULL; file = file->next)
+	{
+		sprint("fd: %u - %s\n", file->fd, file->name);
+	}
+
+	list_for_each_entry(child, &task->children, sibling)
+	{
+		print_saved_process(child);
+	}
+	
+}
+
 
 static void print_saved_processes(void)
 {
@@ -562,23 +580,7 @@ static void print_saved_processes(void)
 	sprint( "State is at: %p\n", state);
 	for(task=state->processes; task!=NULL; task = task->next)
 	{
-		struct saved_page* page;
-		struct saved_file* file;
-		sprint( "Next process is at: %p\n", task);
-		sprint( "%s %s\n", task->name, task->exe_file);
-
-		print_regs(&task->registers);
-		sprint("Memory:\n");
-		for(page = task->pages; page!=NULL; page=page->next)
-		{
-			struct page* p = pfn_to_page(page->pfn);
-		    sprint("pfn: %lu, count: %d, flags: %08lx, reserved: %s\n", page->pfn, atomic_read(&p->_count), 
-			   p->flags, PageReserved(p) ? "yes" : "no");
-		}
-		for(file = task->open_files; file!=NULL; file = file->next)
-		{
-			sprint("fd: %u - %s\n", file->fd, file->name);
-		}
+		print_saved_process(task);
 	}
 }
 
