@@ -17,10 +17,10 @@ struct saved_page
 	struct saved_page* next;
 };
 
-struct list_element
+struct shared_resource
 {
-	struct saved_vm_area* area;  // maybe use void* here?
-	struct list_element* next;
+	void* data;  
+	struct list_head list;
 };
 
 struct saved_vm_area
@@ -59,7 +59,7 @@ struct saved_task_struct
 	
 	struct saved_mm_struct* mm;
 
-	struct list_element* memory;
+	struct shared_resource* memory;
 	struct saved_vm_area* stack;
 
 	struct saved_page* pages;

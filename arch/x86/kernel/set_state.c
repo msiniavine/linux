@@ -386,7 +386,7 @@ void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* state, struct used_file* files)
 {
 	int err;
-	struct list_element* elem;
+	struct shared_resource* elem;
 	struct vm_area_struct* vma, *prev;
 	struct rb_node **rb_link, *parent;
 
@@ -395,9 +395,10 @@ static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* stat
 		return err;
 	sprint("Created stack\n");
 
-	for(elem=state->memory; elem!=NULL; elem=elem->next)
-	{
-		struct saved_vm_area* saved_area = elem->area;
+
+	list_for_each_entry(elem, &state->memory->list, list)
+	{ 
+		struct saved_vm_area* saved_area = (struct saved_vm_area*)elem->data;
 		sprint("Restoring area: %08lx-%08lx\n", saved_area->begin, saved_area->end);
 		if(saved_area == state->stack) continue;
 		down_write(&bprm->mm->mmap_sem);

@@ -440,25 +440,24 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	{
 		struct saved_vm_area* prev = find_by_first(head, area);
 		struct saved_vm_area* cur_area = NULL;
-		struct list_element* elem = NULL;
+		struct shared_resource* elem = NULL;
 
 		sprint( "Saving area:%08lx-%08lx\n", area->vm_start, area->vm_end);
 		sprint( "Current area: %p\n", cur_area);
 		sprint( "Current_task %p\n", current_task);
 
 		cur_area = (struct saved_vm_area*)alloc(sizeof(*cur_area));
-		elem = (struct list_element*)alloc(sizeof(*elem));
-		elem->area = cur_area;
+		elem = (struct shared_resource*)alloc(sizeof(*elem));
+		elem->data = cur_area;
+		INIT_LIST_HEAD(&elem->list);
 
 		if(current_task->memory == NULL)
 		{
 			current_task->memory = elem;
-			elem->next = NULL;
 		}
 		else
 		{
-			elem->next = current_task->memory;
-			current_task->memory = elem;
+			list_add(&elem->list, &current_task->memory->list);
 		}
 
 		if(prev == NULL)
