@@ -216,11 +216,13 @@ static void print_mm(struct mm_struct* mm)
 
 static void allocate_saved_pages(struct saved_task_struct* state)
 {
-	struct saved_page* page;
-	for(page = state->pages; page != NULL; page=page->next)
+	struct shared_resource* elem;
+	list_for_each_entry(elem, &state->mm->pages->list, list)
 	{
+		struct saved_page* page = (struct saved_page*)elem->data;
 		alloc_specific_page(page->pfn, page->mapcount);
 	}
+
 }
 
 static int load_saved_binary(struct linux_binprm* bprm, struct saved_task_struct* state)
@@ -468,8 +470,8 @@ static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* s
 		goto err;
 	mm->nr_ptes = state->mm->nr_ptes;
 	sprint( "Setting nr_ptes to: %lu\n", mm->nr_ptes);
-	sprint("mm->pgd: %p, state->pgd: %p\n", mm->pgd, state->pgd);
-	clone_pgd_range(mm->pgd, state->pgd, SAVED_PGD_SIZE);
+	sprint("mm->pgd: %p, state->pgd: %p\n", mm->pgd, state->mm->pgd);
+	clone_pgd_range(mm->pgd, state->mm->pgd, SAVED_PGD_SIZE);
 
 	mm->start_brk = state->mm->start_brk;
 	mm->brk = state->mm->brk;

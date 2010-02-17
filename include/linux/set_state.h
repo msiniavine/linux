@@ -14,7 +14,6 @@ struct saved_page
 {
 	unsigned long pfn;
 	int mapcount;
-	struct saved_page* next;
 };
 
 struct shared_resource
@@ -43,13 +42,16 @@ struct saved_sighand
 	int state;
 };
 
+#define SAVED_PGD_SIZE 3*256
+
 struct saved_mm_struct
 {
 	unsigned long start_brk, brk;
 	unsigned long nr_ptes;
+	struct shared_resource* pages;
+	pgd_t pgd[SAVED_PGD_SIZE];  // leave the upper 256 out of 1024 entries unchanged because they are used by the kernel
 };
 
-#define SAVED_PGD_SIZE 3*256
 
 struct saved_task_struct
 {
@@ -62,15 +64,13 @@ struct saved_task_struct
 	struct shared_resource* memory;
 	struct saved_vm_area* stack;
 
-	struct saved_page* pages;
-
 	char name[16];
 
 	struct pt_regs registers;
 	unsigned int gs;                                      // gs registor is not saved automatically
 	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];  // Thread local storage segment descriptors
 
-	pgd_t pgd[SAVED_PGD_SIZE];  // leave the upper 256 out of 1024 entries unchanged because they are used by the kernel
+
 
 	char exe_file[PATH_LENGTH];         // name of the executable file
 	struct saved_file* open_files;

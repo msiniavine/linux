@@ -81,10 +81,11 @@ static int reserve(unsigned long start, unsigned long size)
 /* } */
 static void reserve_process_memory(struct saved_task_struct* task)
 {
-	struct saved_page* page;
+	struct shared_resource* elem;
 	struct saved_task_struct* child;
-	for(page = task->pages; page!=NULL; page=page->next)
+	list_for_each_entry(elem, &task->mm->pages->list, list)
 	{
+		struct saved_page* page = (struct saved_page*)elem->data;
 		if(reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE) < 0)
 		{
 			sprint("Failed to reserve pfn: %ld\n", page->pfn);
@@ -207,26 +208,48 @@ static int get_physical_address(struct mm_struct* mm, unsigned long virtual_addr
 }
 
 
-static void save_pages(struct saved_task_struct* task, struct vm_area_struct* area)
+static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, struct map_entry* head)
 {
 	unsigned long virtual_address;
-	sprint( "task ponts to %p\n", task);
 	for(virtual_address = area->vm_start; virtual_address < area->vm_end; virtual_address+=PAGE_SIZE)
 	{
 		unsigned long physical_address;
 		struct saved_page* page;
 		struct page* p;
+		struct shared_resource* elem;
 		if(!get_physical_address(area->vm_mm, virtual_address, &physical_address))
 			continue;
 //		sprint( "Saving page at address: %08lx\n", virtual_address);
-		page = (struct saved_page*)alloc(sizeof(*page));
+
 		//	sprint( "Allocated saved_page at: %p\n", page);
 		//sprint( "Physical address was: %08lx\n", physical_address);
-		page->pfn = physical_address >> PAGE_SHIFT;
-		p = pfn_to_page(page->pfn);
-		page->mapcount = page_mapcount(p);
-		page->next = task->pages;
-		task->pages = page;
+
+		p = pfn_to_page(physical_address >> PAGE_SHIFT);
+		page = (struct saved_page*)find_by_first(head, p);
+		if(page && page_mapcount(p) != 0)
+		{
+			page->mapcount += 1;
+		}
+		else if(page == NULL)
+		{
+			page = (struct saved_page*)alloc(sizeof(*page));
+			page->pfn = page_to_pfn(p);
+			page->mapcount = page_mapcount(p) > 0 ? 1 :0;
+			insert_entry(head, p, page);
+		}
+
+		elem = (struct shared_resource*)alloc(sizeof(*elem));
+		elem->data = page;
+		INIT_LIST_HEAD(&elem->list);
+		if(mm->pages == NULL)
+		{
+			mm->pages = elem;
+		}
+		else
+		{
+			list_add(&elem->list, &mm->pages->list);
+		}
+
 	}
 }
 
@@ -238,23 +261,49 @@ void print_regs(struct pt_regs* regs)
 	sprint( "orig_ax: %08lx ip: %08lx flags: %08lx\n", regs->orig_ax, regs->ip, regs->flags);
 }
 
-static void save_pgd(struct mm_struct* mm, struct saved_task_struct* task)
+static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, struct map_entry* head)
 {
 	int i;
 	// 1024 pgds in total, but only copy the first 3/4, the rest belong to the kernel
-	clone_pgd_range(task->pgd, mm->pgd, 3*256);
+	clone_pgd_range(saved_mm->pgd, mm->pgd, 3*256);
 	for(i = 0; i<3*256; i++)
 	{
 		struct saved_page* page;
+		struct page* p;
+		struct shared_resource* elem;
 		pgd_t pgd = mm->pgd[i];
 		if(pgd.pgd == 0 || pgd_bad(pgd) || !pgd_present(pgd))
 			continue;
 		
-		page = (struct saved_page*)alloc(sizeof(*page));
-		page->pfn = pgd.pgd >> 12;
-		page->mapcount = 0;
-		page->next = task->pages;
-		task->pages = page;
+		elem = (struct shared_resource*)alloc(sizeof(*elem));
+		INIT_LIST_HEAD(&elem->list);
+		p = pfn_to_page(pgd.pgd >> 12);
+		page = find_by_first(head, p);
+		if(page == NULL)
+		{
+			page = (struct saved_page*)alloc(sizeof(*page));
+			page->pfn = page_to_pfn(p);
+			if(page_mapcount(p) != 0) panic("Expected 0 mapcount on pgd page\n");
+			page->mapcount = 0;
+			elem->data = page;
+			insert_entry(head, p, page);
+		}
+		else
+		{
+			if(page_mapcount(p) != 0) panic("Expected 0 mapcount on pgd page\n");
+			elem->data = page;
+		}
+
+		if(saved_mm->pages == NULL)
+		{
+			saved_mm->pages = elem;
+		}
+		else
+		{
+			list_add(&elem->list, &saved_mm->pages->list);
+		}
+		
+
      	}
 	sprint( "Saved pgd\n");
 }
@@ -396,6 +445,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	struct saved_task_struct* current_task = (struct saved_task_struct*)alloc(sizeof(*current_task));
 	struct task_struct* child = NULL;
 	struct saved_mm_struct* mm;
+	int need_to_save_pages = 1;
 	
 	INIT_LIST_HEAD(&current_task->children);
 	INIT_LIST_HEAD(&current_task->sibling);
@@ -413,10 +463,12 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		sprint("mm %p not seen previously\n", task->mm);
 		mm = (struct saved_mm_struct*)alloc(sizeof(*mm));
 		insert_entry(head, task->mm, mm);
+		save_pgd(task->mm, mm, head);
 	}
 	else
 	{
 		sprint("mm %p was seen before and was saved to %p\n", task->mm, mm);
+		need_to_save_pages = 0;
 	}
 	current_task->mm = mm;
 	current_task->mm->nr_ptes = task->mm->nr_ptes;
@@ -425,8 +477,6 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	current_task->pid = pid_vnr(task_pid(task));
 	
 	get_file_path(task->mm->exe_file, current_task->exe_file); 
-	save_pgd(task->mm, current_task);
-	memcpy(current_task->pgd, task->mm->pgd, sizeof(current_task->pgd));
 	save_files(task->files, current_task);
 	
 	save_signals(task, current_task);
@@ -481,7 +531,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		cur_area->vm_flags = area->vm_flags;
 		cur_area->vm_pgoff = area->vm_pgoff;
 		
-		save_pages(current_task, area);
+		if(need_to_save_pages) save_pages(current_task->mm, area, head);
 		if(area->vm_start <= task->mm->start_stack && area->vm_end >= task->mm->start_stack)
 		{
 			current_task->stack = cur_area;
@@ -544,7 +594,7 @@ static void save_running_processes(void)
 
 static void print_saved_process(struct saved_task_struct* task)
 {
-	struct saved_page* page;
+	struct shared_resource* elem;
 	struct saved_file* file;
 	struct saved_task_struct* child;
 	sprint( "Next process is at: %p\n", task);
@@ -552,12 +602,14 @@ static void print_saved_process(struct saved_task_struct* task)
 	
 	print_regs(&task->registers);
 	sprint("Memory:\n");
-	for(page = task->pages; page!=NULL; page=page->next)
+	list_for_each_entry(elem, &task->mm->pages->list, list)
 	{
+		struct saved_page* page = (struct saved_page*)elem->data;
 		struct page* p = pfn_to_page(page->pfn);
 		sprint("pfn: %lx, count: %d, flags: %08lx, reserved: %s\n", page->pfn, atomic_read(&p->_count), 
 		       p->flags, PageReserved(p) ? "yes" : "no");
 	}
+
 	for(file = task->open_files; file!=NULL; file = file->next)
 	{
 		sprint("fd: %u - %s\n", file->fd, file->name);
