@@ -820,7 +820,6 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	return 0;
 }
 
-
 int do_set_state(struct state_info* info)
 {
 	struct linux_binprm* bprm;
@@ -890,10 +889,11 @@ int do_set_state(struct state_info* info)
 		sprint("Current pid count:%d\n", atomic_read(&current_pid->count));
 		
 		cpu = get_cpu();
-		current->thread.gs = 0x33;
+		current->thread.gs = state->gs;
 		memcpy(current->thread.tls_array, state->tls_array, GDT_ENTRY_TLS_ENTRIES*sizeof(struct desc_struct));
 		load_TLS(&current->thread, cpu);
 		put_cpu();
+		loadsegment(gs, state->gs);
 	       
 	
 		pid = alloc_orig_pid(state->pid, current->nsproxy->pid_ns);
@@ -952,5 +952,7 @@ out_files:
 out_ret:
 	return retval;
 }
+
+
 
 

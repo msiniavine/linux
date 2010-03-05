@@ -6,6 +6,7 @@
 #define __NR_was_state_restored 335
 #define __NR_save_state 336
 
+int test_syscall();
 #if defined NO_LIBC
 void enable_save_state()
 {
@@ -16,6 +17,7 @@ void enable_save_state()
 int was_state_restored();
 void exit(int);
 int fork();
+int get_pid();
 #else
 void set_state(void)
 {
