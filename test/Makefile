@@ -6,6 +6,7 @@ all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighan
 
 syscalls.o: syscalls.S
 	as syscalls.S -o syscalls.o
+test_syscall.o: test_syscall.S
 
 #test_file: file_test.o syscalls.o libc.o
 #gcc -nostdlib -g syscalls.o file_test.o libc.o -o test_file
@@ -42,15 +43,15 @@ test_sleep: test_sleep.o
 
 test_pid: test_pid.o
 save_state: save_state.o
-test_parent_child: test_parent_child.o
+test_parent_child: test_parent_child.o test_syscall.o
 test_sighandler: test_sighandler.o
 test_sighandler_call: test_sighandler_call.o 
 test_pending_signals: test_pending_signals.o 
 test_restore_signal: test_restore_signal.o
 test_altstack: test_altstack.o 
 test_sigsuspend: test_sigsuspend.o
-test_loop: test_loop.o
-	gcc -nostdlib -g test_loop.o -o test_loop
+test_loop: test_loop.o syscalls.o
+	gcc -nostdlib -g test_loop.o syscalls.o -o test_loop
 run_test: run_test.o
 set_state: set_state.o
 	gcc -nostdlib -g -o set_state set_state.o

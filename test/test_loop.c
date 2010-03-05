@@ -3,8 +3,12 @@
 
 int _start()
 {
-  enable_save_state();
-  while(1);
-  return 0;
+	enable_save_state();
+	//      while(!was_state_restored());
+        while(1)
+	{
+		was_state_restored();
+	}
+        return 0;
 }
 

@@ -1,10 +1,13 @@
 .text
+
+
+	
 .globl was_state_restored
 was_state_restored:	
 	pushl %ebp
 	movl  %esp, %ebp
-	movl  $335, %eax
-	int $0x80
+	movl  $335, %eax	
+	call 0xffffe414
 	popl %ebp
 	ret
 
@@ -27,6 +30,35 @@ fork:
 	movl $2, %eax
 	int $0x80
 	pop %ebp
+	ret
+.globl get_pid
+get_pid:	
+	pushl %ebp
+	movl %esp, %ebp
+	movl $20, %eax
+	int $0x80
+	pop %ebp
+	ret
+
+.globl kernel_syscall_copy
+kernel_syscall_copy:
+	push %ecx
+	push %edx
+	push %ebp
+syscall_restart:	
+	mov %esp, %ebp
+	sysenter
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	jmp syscall_restart
+	pop %ebp
+	pop %edx
+	pop %ecx
 	ret
 
 
