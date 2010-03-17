@@ -19,7 +19,6 @@ struct saved_page
 struct shared_resource
 {
 	void* data;  
-//	struct list_head list;
 	struct shared_resource* next;
 };
 

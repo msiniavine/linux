@@ -160,6 +160,7 @@ void reserve_saved_memory(void)
 static pte_t* get_pte(struct mm_struct* mm, unsigned long virtual_address)
 {
   pgd_t* pgd;
+  pud_t* pud;
   pmd_t* pmd;
   pte_t* pte;
 
@@ -176,7 +177,13 @@ static pte_t* get_pte(struct mm_struct* mm, unsigned long virtual_address)
 	  return NULL;
   }
 
-  pmd = pmd_offset(pgd, virtual_address);
+  pud = pud_offset(pgd, virtual_address);
+  if(pud_none(*pud) || pud_bad(*pud))
+  {
+	  return NULL;
+  }
+
+  pmd = pmd_offset(pud, virtual_address);
   if(pmd_none(*pmd) || pmd_bad(*pmd))
     {
 	    //sprint( "%p has an invalid pmd\n", (void*)virtual_address);
@@ -261,13 +268,6 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 	clone_pgd_range(saved_mm->pgd, mm->pgd, 3*256);
 	for(i = 0; i<3*256; i++)
 	{
-		struct pud_t* pud;
-		struct pmd_t* pmd;
-		struct pte_t* pte;
-
-		struct page* pgd_page;
-		unsigned long pgd_va;
-
 		struct saved_page* page;
 
 		struct page* p;
@@ -275,15 +275,10 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 		pgd_t pgd = mm->pgd[i];
 		if(pgd.pgd == 0 || pgd_bad(pgd) || !pgd_present(pgd))
 			continue;
-
-		pgd_page = pgd_page(pgd);
-		pgd_va = pgd_page_vaddr(pgd);
 		
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		p = pfn_to_page(pgd.pgd >> 12);
 
-		sprint("pgd_page: %p pfn: %lx, va: %lx, old page: %p pfn: %lx\n", pgd_page, page_to_pfn(pgd_page), 
-		       pgd_va, p, page_to_pfn(p));
 		page = find_by_first(head, p);
 		if(page == NULL)
 		{
