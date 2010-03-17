@@ -217,7 +217,7 @@ static void print_mm(struct mm_struct* mm)
 static void allocate_saved_pages(struct saved_task_struct* state)
 {
 	struct shared_resource* elem;
-	list_for_each_entry(elem, &state->mm->pages->list, list)
+	for(elem=state->mm->pages;elem!=NULL;elem=elem->next)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
 		alloc_specific_page(page->pfn, page->mapcount);
@@ -398,7 +398,7 @@ static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* stat
 	sprint("Created stack\n");
 
 
-	list_for_each_entry(elem, &state->memory->list, list)
+	for(elem=state->memory; elem!=NULL; elem=elem->next)
 	{ 
 		struct saved_vm_area* saved_area = (struct saved_vm_area*)elem->data;
 		sprint("Restoring area: %08lx-%08lx\n", saved_area->begin, saved_area->end);

@@ -83,7 +83,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 {
 	struct shared_resource* elem;
 	struct saved_task_struct* child;
-	list_for_each_entry(elem, &task->mm->pages->list, list)
+	for(elem=task->mm->pages; elem!=NULL; elem=elem->next)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
 		if(reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE) < 0)
@@ -240,15 +240,8 @@ static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, 
 
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		elem->data = page;
-		INIT_LIST_HEAD(&elem->list);
-		if(mm->pages == NULL)
-		{
-			mm->pages = elem;
-		}
-		else
-		{
-			list_add(&elem->list, &mm->pages->list);
-		}
+		elem->next = mm->pages;
+		mm->pages = elem;
 
 	}
 }
@@ -268,16 +261,29 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 	clone_pgd_range(saved_mm->pgd, mm->pgd, 3*256);
 	for(i = 0; i<3*256; i++)
 	{
+		struct pud_t* pud;
+		struct pmd_t* pmd;
+		struct pte_t* pte;
+
+		struct page* pgd_page;
+		unsigned long pgd_va;
+
 		struct saved_page* page;
+
 		struct page* p;
 		struct shared_resource* elem;
 		pgd_t pgd = mm->pgd[i];
 		if(pgd.pgd == 0 || pgd_bad(pgd) || !pgd_present(pgd))
 			continue;
+
+		pgd_page = pgd_page(pgd);
+		pgd_va = pgd_page_vaddr(pgd);
 		
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
-		INIT_LIST_HEAD(&elem->list);
 		p = pfn_to_page(pgd.pgd >> 12);
+
+		sprint("pgd_page: %p pfn: %lx, va: %lx, old page: %p pfn: %lx\n", pgd_page, page_to_pfn(pgd_page), 
+		       pgd_va, p, page_to_pfn(p));
 		page = find_by_first(head, p);
 		if(page == NULL)
 		{
@@ -294,15 +300,9 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 			elem->data = page;
 		}
 
-		if(saved_mm->pages == NULL)
-		{
-			saved_mm->pages = elem;
-		}
-		else
-		{
-			list_add(&elem->list, &saved_mm->pages->list);
-		}
-		
+		elem->next = saved_mm->pages;
+		saved_mm->pages = elem;
+
 
      	}
 	sprint( "Saved pgd\n");
@@ -499,16 +499,9 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		cur_area = (struct saved_vm_area*)alloc(sizeof(*cur_area));
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		elem->data = cur_area;
-		INIT_LIST_HEAD(&elem->list);
 
-		if(current_task->memory == NULL)
-		{
-			current_task->memory = elem;
-		}
-		else
-		{
-			list_add(&elem->list, &current_task->memory->list);
-		}
+		elem->next = current_task->memory;
+		current_task->memory = elem;
 
 		if(prev == NULL)
 		{
@@ -602,7 +595,7 @@ static void print_saved_process(struct saved_task_struct* task)
 	
 	print_regs(&task->registers);
 	sprint("Memory:\n");
-	list_for_each_entry(elem, &task->mm->pages->list, list)
+	for(elem=task->mm->pages; elem != NULL;elem=elem->next)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
 		struct page* p = pfn_to_page(page->pfn);
@@ -709,7 +702,7 @@ int was_state_restored(struct task_struct* task)
 			return 1;
 		}
 	}
-	sprint("State was not restored for process %d\n", task_pid_nr(task));
+//	sprint("State was not restored for process %d\n", task_pid_nr(task));
 	return 0;
 }
 
