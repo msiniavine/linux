@@ -684,29 +684,17 @@ void restore_signals(struct saved_task_struct* state)
 	spin_unlock_irq(&sighand->siglock);	
 
 	// 179 is the system call number for the rt_sigsuspend
-	if(state->registers.orig_ax == 179)
+	if(state->syscall_restart == 179)
 	{
 		sprint("Process was inside sigsuspend\n");
-		if(state->sighand.state == TASK_INTERRUPTIBLE)
-		{
-			sprint("Process was sleeping\n");
-			current->state = TASK_INTERRUPTIBLE;
-			schedule();
-			set_restore_sigmask();
-			state->registers.ax = -ERESTARTNOHAND;
-		}
-		else
-		{
+		sprint("System call needs to be restarted\n");
+		sprint("Eax: %ld, orig_ax: %ld ip: %lx\n",
+		       state->registers.ax, state->registers.orig_ax, state->registers.ip);
+		current->blocked = *(sigset_t*)state->syscall_data;
+		state->registers.ax = state->registers.orig_ax;
+		state->registers.ip -= 2;
 
-			sprint("System call needs to be restarted\n");
-			sprint("Eax: %ld, orig_ax: %ld ip: %lx\n",
-			       state->registers.ax, state->registers.orig_ax, state->registers.ip);
-			state->registers.ax = state->registers.orig_ax;
-			state->registers.ip -= 2;
-
-		}
-
-
+	   
 //		sprint("System call almost done\n");
 //		set_restore_sigmask();
 	}

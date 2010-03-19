@@ -83,6 +83,10 @@ struct saved_task_struct
 	gid_t gid,egid,sgid,fsgid;
 	kernel_cap_t   cap_effective, cap_inheritable, cap_permitted, cap_bset;
 
+	// number of the system call to restart, 0 if returning restarting directly to user space
+	int syscall_restart; 
+	void* syscall_data;  // what ever data needed to restart a system call
+
 };
 
 

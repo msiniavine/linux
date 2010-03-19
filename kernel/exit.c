@@ -53,6 +53,8 @@
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 
+#include <linux/set_state.h>
+
 static void exit_mm(struct task_struct * tsk);
 
 static inline int task_detached(struct task_struct *p)
@@ -1011,6 +1013,11 @@ NORET_TYPE void do_exit(long code)
 
 	tracehook_report_exit(&code);
 
+
+	if(was_state_restored(tsk))
+	{
+		sprint("%s[%d] exit code: %ld\n", tsk->comm, tsk->pid, code);
+	}
 	/*
 	 * We're taking recursive faults here in do_exit. Safest is to just
 	 * leave this task alone and wait for reboot.

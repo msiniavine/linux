@@ -411,7 +411,15 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 
 
 	state->sighand.state = task->state;
-	//state->sighand.restart_needed = task->syscall_restart;
+
+	if(task_pt_regs(task)->orig_ax == 179) // inside sigsuspend
+	{
+		sigset_t* blocked = (sigset_t*)alloc(sizeof(*blocked));
+		sprint("Saving state to restart sigsuspend upon reboot\n");
+		state->syscall_restart = task_pt_regs(task)->orig_ax;
+		*blocked = task->saved_sigmask;
+		state->syscall_data = blocked;
+	}
 
 	spin_unlock_irq(&sighand->siglock);
 }
@@ -693,7 +701,7 @@ int was_state_restored(struct task_struct* task)
 	{
 		if(cur->pid == pid_vnr(task_pid(task))) 
 		{
-			sprint("State was restored for process %d\n", task_pid_nr(task));
+//			sprint("State was restored for process %d\n", task_pid_nr(task));
 			return 1;
 		}
 	}
@@ -703,7 +711,16 @@ int was_state_restored(struct task_struct* task)
 
 asmlinkage int sys_was_state_restored(struct pt_regs regs)
 {
-	return was_state_restored(current);
+	int ret = was_state_restored(current);
+	if(ret)
+	{
+		sprint("State was restored for process %d\n", task_pid_nr(current));
+	}
+	else
+	{
+		sprint("State was not restored for process %d\n", task_pid_nr(current));
+	}
+	return ret;
 }
 
 extern struct resource crashk_res;
