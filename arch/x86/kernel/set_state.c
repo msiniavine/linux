@@ -28,6 +28,9 @@
 #include <linux/tracehook.h>
 #include <linux/hash.h>
 #include <linux/kthread.h>
+#include <linux/completion.h>
+#include <linux/mutex.h>
+#include <linux/wait.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -216,11 +219,13 @@ static void print_mm(struct mm_struct* mm)
 
 static void allocate_saved_pages(struct saved_task_struct* state)
 {
-	struct saved_page* page;
-	for(page = state->pages; page != NULL; page=page->next)
+	struct shared_resource* elem;
+	for(elem=state->mm->pages;elem!=NULL;elem=elem->next)
 	{
+		struct saved_page* page = (struct saved_page*)elem->data;
 		alloc_specific_page(page->pfn, page->mapcount);
 	}
+
 }
 
 static int load_saved_binary(struct linux_binprm* bprm, struct saved_task_struct* state)
@@ -321,9 +326,9 @@ struct used_file
 	struct file* filep;
 };
 
-struct used_file* init_used_files()
+static struct used_file* init_used_files(void)
 {
-	struct used_file* ret = (struct used_file*)kmalloc(sizeof(*ret), GFP_KERNEL);
+	struct used_file* ret = (struct used_file*)kmalloc(sizeof(struct used_file), GFP_KERNEL);
 	if(!ret)
 	{
 		panic("Could not allocate memory for a used file list");
@@ -386,7 +391,7 @@ void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* state, struct used_file* files)
 {
 	int err;
-	struct list_element* elem;
+	struct shared_resource* elem;
 	struct vm_area_struct* vma, *prev;
 	struct rb_node **rb_link, *parent;
 
@@ -395,9 +400,10 @@ static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* stat
 		return err;
 	sprint("Created stack\n");
 
+
 	for(elem=state->memory; elem!=NULL; elem=elem->next)
-	{
-		struct saved_vm_area* saved_area = elem->area;
+	{ 
+		struct saved_vm_area* saved_area = (struct saved_vm_area*)elem->data;
 		sprint("Restoring area: %08lx-%08lx\n", saved_area->begin, saved_area->end);
 		if(saved_area == state->stack) continue;
 		down_write(&bprm->mm->mmap_sem);
@@ -467,8 +473,8 @@ static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* s
 		goto err;
 	mm->nr_ptes = state->mm->nr_ptes;
 	sprint( "Setting nr_ptes to: %lu\n", mm->nr_ptes);
-	sprint("mm->pgd: %p, state->pgd: %p\n", mm->pgd, state->pgd);
-	clone_pgd_range(mm->pgd, state->pgd, SAVED_PGD_SIZE);
+	sprint("mm->pgd: %p, state->pgd: %p\n", mm->pgd, state->mm->pgd);
+	clone_pgd_range(mm->pgd, state->mm->pgd, SAVED_PGD_SIZE);
 
 	mm->start_brk = state->mm->start_brk;
 	mm->brk = state->mm->brk;
@@ -681,29 +687,17 @@ void restore_signals(struct saved_task_struct* state)
 	spin_unlock_irq(&sighand->siglock);	
 
 	// 179 is the system call number for the rt_sigsuspend
-	if(state->registers.orig_ax == 179)
+	if(state->syscall_restart == 179)
 	{
 		sprint("Process was inside sigsuspend\n");
-		if(state->sighand.state == TASK_INTERRUPTIBLE)
-		{
-			sprint("Process was sleeping\n");
-			current->state = TASK_INTERRUPTIBLE;
-			schedule();
-			set_restore_sigmask();
-			state->registers.ax = -ERESTARTNOHAND;
-		}
-		else
-		{
+		sprint("System call needs to be restarted\n");
+		sprint("Eax: %ld, orig_ax: %ld ip: %lx\n",
+		       state->registers.ax, state->registers.orig_ax, state->registers.ip);
+		current->blocked = *(sigset_t*)state->syscall_data;
+		state->registers.ax = state->registers.orig_ax;
+		state->registers.ip -= 2;
 
-			sprint("System call needs to be restarted\n");
-			sprint("Eax: %ld, orig_ax: %ld ip: %lx\n",
-			       state->registers.ax, state->registers.orig_ax, state->registers.ip);
-			state->registers.ax = state->registers.orig_ax;
-			state->registers.ip -= 2;
-
-		}
-
-
+	   
 //		sprint("System call almost done\n");
 //		set_restore_sigmask();
 	}
@@ -743,12 +737,24 @@ void restore_registers(struct saved_task_struct* state)
 	*regs = state->registers;
 		
 }
+
+struct global_state_info
+{
+	wait_queue_head_t wq;
+	atomic_t processes_left;
+
+	struct completion all_done;
+};
+
 struct state_info
 {
 	struct map_entry* head;
 	struct saved_task_struct* state;
 	struct task_struct* parent;
+	struct global_state_info *global_state;
 };
+
+static struct global_state_info global_state;
 
 int do_set_state(struct state_info* state);
 
@@ -772,7 +778,7 @@ int do_restore(void* data)
 	return 0;
 }
 
-static void restore_children(struct saved_task_struct* state, struct map_entry* head)
+static void restore_children(struct saved_task_struct* state, struct state_info* p_info)
 {
 	struct saved_task_struct* child;
 	struct task_struct* thread;
@@ -781,9 +787,10 @@ static void restore_children(struct saved_task_struct* state, struct map_entry* 
 	{
 		sprint("Restoring child %d\n", child->pid);
 		info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
-		info->head = head;
+		info->head = p_info->head;
 		info->state = child;
 		info->parent = current;
+		info->global_state = p_info->global_state;
 
 		thread = kthread_create(do_restore, info, "child_restore");
 		if(IS_ERR(thread))
@@ -794,16 +801,48 @@ static void restore_children(struct saved_task_struct* state, struct map_entry* 
 	}
 }
 
+int count_processes(struct saved_task_struct* state)
+{
+	int count = 1;
+	struct saved_task_struct* child;
+	list_for_each_entry(child, &state->children, sibling)
+	{
+		count += count_processes(child);
+	}
+	return count;
+}
+
 
 int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
 	struct task_struct* thread;
 	struct state_info* info;
+//	int restore_count;
+//	struct mutex lock;
+//	struct completion all_done;
+//	DECLARE_COMPLETION_ONSTACK(all_done);
+//	wait_queue_head_t wq;
+
+	init_waitqueue_head(&global_state.wq);
+	atomic_set(&global_state.processes_left, count_processes(state));
+	init_completion(&global_state.all_done);
+
+//int restore_count;
+//DEFINE_MUTEX(lock);
+//DECLARE_WAIT_QUEUE_HEAD(wq);
+// DECLARE_COMPLETION(all_done);
+
+
+
+
 	sprint("Restoring pid parent: %d\n", state->pid);
+	sprint("Need to restore %d processes\n", atomic_read(&global_state.processes_left));
+
 	info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
 	info->head = new_map();
 	info->state = state;
 	info->parent = NULL;
+	info->global_state = &global_state;
 	thread = kthread_create(do_restore, info, "test_thread");
 	if(IS_ERR(thread))
 	{
@@ -811,12 +850,13 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 		return 0;
 	}
 
- 	wake_up_process(thread);  
-	
-
+ 	wake_up_process(thread);
+	sprint("parent waiting for children\n");
+	wait_event(global_state.wq, atomic_read(&global_state.processes_left) == 0);
+	sprint("parent finishes waiting for children\n");
+	complete_all(&global_state.all_done);
 	return 0;
 }
-
 
 int do_set_state(struct state_info* info)
 {
@@ -887,10 +927,11 @@ int do_set_state(struct state_info* info)
 		sprint("Current pid count:%d\n", atomic_read(&current_pid->count));
 		
 		cpu = get_cpu();
-		current->thread.gs = 0x33;
+		current->thread.gs = state->gs;
 		memcpy(current->thread.tls_array, state->tls_array, GDT_ENTRY_TLS_ENTRIES*sizeof(struct desc_struct));
 		load_TLS(&current->thread, cpu);
 		put_cpu();
+		loadsegment(gs, state->gs);
 	       
 	
 		pid = alloc_orig_pid(state->pid, current->nsproxy->pid_ns);
@@ -917,7 +958,7 @@ int do_set_state(struct state_info* info)
 
 		add_to_restored_list(current);
 
-		restore_children(state, info->head);
+		restore_children(state, info);
 
 		if(info->parent)
 		{
@@ -925,6 +966,12 @@ int do_set_state(struct state_info* info)
 		}
 
 		sprint("Current %d, parent %d %s\n", current->pid, current->real_parent->pid, current->real_parent->comm);
+
+		if (atomic_dec_and_test(&info->global_state->processes_left)) {
+			sprint("child wakes up parent\n");
+			wake_up(&info->global_state->wq);
+		}
+		wait_for_completion(&info->global_state->all_done);
 
 		kfree(info);
 		resume_saved_state();
@@ -949,5 +996,7 @@ out_files:
 out_ret:
 	return retval;
 }
+
+
 
 

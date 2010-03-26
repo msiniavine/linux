@@ -14,13 +14,12 @@ struct saved_page
 {
 	unsigned long pfn;
 	int mapcount;
-	struct saved_page* next;
 };
 
-struct list_element
+struct shared_resource
 {
-	struct saved_vm_area* area;  // maybe use void* here?
-	struct list_element* next;
+	void* data;  
+	struct shared_resource* next;
 };
 
 struct saved_vm_area
@@ -43,13 +42,16 @@ struct saved_sighand
 	int state;
 };
 
+#define SAVED_PGD_SIZE 3*256
+
 struct saved_mm_struct
 {
 	unsigned long start_brk, brk;
 	unsigned long nr_ptes;
+	struct shared_resource* pages;
+	pgd_t pgd[SAVED_PGD_SIZE];  // leave the upper 256 out of 1024 entries unchanged because they are used by the kernel
 };
 
-#define SAVED_PGD_SIZE 3*256
 
 struct saved_task_struct
 {
@@ -59,10 +61,8 @@ struct saved_task_struct
 	
 	struct saved_mm_struct* mm;
 
-	struct list_element* memory;
+	struct shared_resource* memory;
 	struct saved_vm_area* stack;
-
-	struct saved_page* pages;
 
 	char name[16];
 
@@ -70,7 +70,7 @@ struct saved_task_struct
 	unsigned int gs;                                      // gs registor is not saved automatically
 	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];  // Thread local storage segment descriptors
 
-	pgd_t pgd[SAVED_PGD_SIZE];  // leave the upper 256 out of 1024 entries unchanged because they are used by the kernel
+
 
 	char exe_file[PATH_LENGTH];         // name of the executable file
 	struct saved_file* open_files;
@@ -82,6 +82,10 @@ struct saved_task_struct
 	uid_t uid,euid,suid,fsuid;
 	gid_t gid,egid,sgid,fsgid;
 	kernel_cap_t   cap_effective, cap_inheritable, cap_permitted, cap_bset;
+
+	// number of the system call to restart, 0 if returning restarting directly to user space
+	int syscall_restart; 
+	void* syscall_data;  // what ever data needed to restart a system call
 
 };
 

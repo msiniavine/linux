@@ -2,7 +2,7 @@
 
 cd test
 
-./test_parent_child &
+./test_loop &
 
 echo "All test started, rebooting kernel"
 sleep 1
