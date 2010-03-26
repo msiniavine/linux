@@ -28,6 +28,9 @@
 #include <linux/tracehook.h>
 #include <linux/hash.h>
 #include <linux/kthread.h>
+#include <linux/completion.h>
+#include <linux/mutex.h>
+#include <linux/wait.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -739,6 +742,10 @@ struct state_info
 	struct map_entry* head;
 	struct saved_task_struct* state;
 	struct task_struct* parent;
+	int* processes_left;
+	struct mutex* lock;
+	struct completion* all_done;
+	wait_queue_head_t* wq;
 };
 
 int do_set_state(struct state_info* state);
@@ -763,7 +770,12 @@ int do_restore(void* data)
 	return 0;
 }
 
-static void restore_children(struct saved_task_struct* state, struct map_entry* head)
+//int restore_count;
+//DEFINE_MUTEX(lock);
+//DECLARE_WAIT_QUEUE_HEAD(wq);
+DECLARE_COMPLETION(all_done);
+
+static void restore_children(struct saved_task_struct* state, struct state_info* p_info)
 {
 	struct saved_task_struct* child;
 	struct task_struct* thread;
@@ -772,9 +784,13 @@ static void restore_children(struct saved_task_struct* state, struct map_entry* 
 	{
 		sprint("Restoring child %d\n", child->pid);
 		info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
-		info->head = head;
+		info->head = p_info->head;
 		info->state = child;
 		info->parent = current;
+		info->processes_left = p_info->processes_left;
+		info->lock = p_info->lock;
+		info->all_done = p_info->all_done;
+		info->wq = p_info->wq;
 
 		thread = kthread_create(do_restore, info, "child_restore");
 		if(IS_ERR(thread))
@@ -785,16 +801,45 @@ static void restore_children(struct saved_task_struct* state, struct map_entry* 
 	}
 }
 
+int count_processes(struct saved_task_struct* state)
+{
+	int count = 1;
+	struct saved_task_struct* child;
+	list_for_each_entry(child, &state->children, sibling)
+	{
+		count += count_processes(child);
+	}
+	return count;
+}
+
 
 int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
 	struct task_struct* thread;
 	struct state_info* info;
+	int restore_count;
+	struct mutex lock;
+//	struct completion all_done;
+//	DECLARE_COMPLETION_ONSTACK(all_done);
+	wait_queue_head_t wq;
+
+	restore_count = count_processes(state);
+	mutex_init(&lock);
+//	init_completion(&all_done);
+	init_waitqueue_head(&wq);
+
 	sprint("Restoring pid parent: %d\n", state->pid);
+	sprint("Need to restore %d processes\n", restore_count);
+
 	info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
 	info->head = new_map();
 	info->state = state;
 	info->parent = NULL;
+	info->processes_left = &restore_count;
+	info->lock = &lock;
+	info->all_done = &all_done;
+	info->wq = &wq;
+	
 	thread = kthread_create(do_restore, info, "test_thread");
 	if(IS_ERR(thread))
 	{
@@ -804,6 +849,17 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 
  	wake_up_process(thread);  
 	
+	mutex_lock(&lock);
+	while(restore_count != 0)
+	{
+		mutex_unlock(&lock);
+		wait_event(wq, restore_count != 0);
+		mutex_lock(&lock);
+		sprint("Process count is now %d\n", restore_count);
+	}
+	mutex_unlock(&lock);
+	complete_all(&all_done);
+
 
 	return 0;
 }
@@ -908,7 +964,7 @@ int do_set_state(struct state_info* info)
 
 		add_to_restored_list(current);
 
-		restore_children(state, info->head);
+		restore_children(state, info);
 
 		if(info->parent)
 		{
@@ -916,6 +972,14 @@ int do_set_state(struct state_info* info)
 		}
 
 		sprint("Current %d, parent %d %s\n", current->pid, current->real_parent->pid, current->real_parent->comm);
+
+		mutex_lock(info->lock);
+		*(info->processes_left) -= 1;
+//		restore_count -= 1;
+		mutex_unlock(info->lock);
+		wake_up(info->wq);
+
+		wait_for_completion(&all_done);
 
 		kfree(info);
 		resume_saved_state();

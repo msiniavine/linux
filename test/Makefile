@@ -1,7 +1,7 @@
 CFLAGS = -g -Wall -fno-stack-protector
 #LDFLAGS = -lpthread
 
-all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread
+all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait
 
 
 syscalls.o: syscalls.S
@@ -57,6 +57,8 @@ set_state: set_state.o
 	gcc -nostdlib -g -o set_state set_state.o
 test_thread: test_thread.o
 	gcc -g -o test_thread test_thread.o -pthread
+test_wait: test_wait.o syscalls.o
+	gcc -nostdlib -g test_wait.o syscalls.o -o test_wait
 
 #file_test.o: file_test.c
 #gcc -c -nostdlibc file_test.c -o file_test.o
@@ -66,6 +68,7 @@ test_thread: test_thread.o
 
 clean:
 	-rm *.o
+	-rm test_wait
 	-rm test_simple_fork
 	-rm test_thread
 	-rm test_stack

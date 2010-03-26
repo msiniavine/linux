@@ -11,6 +11,25 @@
 #include <asm/e820.h>
 #include <linux/fdtable.h>
 
+/*
+#include <linux/kthread.h>
+
+static void* thread_test_function(void* p)
+{
+	sprint("Running test function\n");
+}
+
+int sys_cond_test(struct pt_regs regs)
+{
+	struct task_struct* thread;
+	thread = kthread_create(thread_test_function, NULL, "condition_test");
+	if(IS_ERR(thread))
+	{
+		sprint("Error creating thread\n");
+	}
+	wake_up_process(thread);
+}
+*/
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
