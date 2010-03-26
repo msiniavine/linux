@@ -1463,6 +1463,7 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount)
 		atomic_inc(&page->_mapcount);
 	}
 	page->flags = 0x40000000;
+	get_page(page);
 //	page->mapping = NULL;
 
 //	if(page->flags & PAGE_FLAGS_CHECK_AT_FREE)

@@ -326,9 +326,9 @@ struct used_file
 	struct file* filep;
 };
 
-struct used_file* init_used_files()
+static struct used_file* init_used_files(void)
 {
-	struct used_file* ret = (struct used_file*)kmalloc(sizeof(*ret), GFP_KERNEL);
+	struct used_file* ret = (struct used_file*)kmalloc(sizeof(struct used_file), GFP_KERNEL);
 	if(!ret)
 	{
 		panic("Could not allocate memory for a used file list");
@@ -737,16 +737,24 @@ void restore_registers(struct saved_task_struct* state)
 	*regs = state->registers;
 		
 }
+
+struct global_state_info
+{
+	wait_queue_head_t wq;
+	atomic_t processes_left;
+
+	struct completion all_done;
+};
+
 struct state_info
 {
 	struct map_entry* head;
 	struct saved_task_struct* state;
 	struct task_struct* parent;
-	int* processes_left;
-	struct mutex* lock;
-	struct completion* all_done;
-	wait_queue_head_t* wq;
+	struct global_state_info *global_state;
 };
+
+static struct global_state_info global_state;
 
 int do_set_state(struct state_info* state);
 
@@ -770,11 +778,6 @@ int do_restore(void* data)
 	return 0;
 }
 
-//int restore_count;
-//DEFINE_MUTEX(lock);
-//DECLARE_WAIT_QUEUE_HEAD(wq);
-DECLARE_COMPLETION(all_done);
-
 static void restore_children(struct saved_task_struct* state, struct state_info* p_info)
 {
 	struct saved_task_struct* child;
@@ -787,10 +790,7 @@ static void restore_children(struct saved_task_struct* state, struct state_info*
 		info->head = p_info->head;
 		info->state = child;
 		info->parent = current;
-		info->processes_left = p_info->processes_left;
-		info->lock = p_info->lock;
-		info->all_done = p_info->all_done;
-		info->wq = p_info->wq;
+		info->global_state = p_info->global_state;
 
 		thread = kthread_create(do_restore, info, "child_restore");
 		if(IS_ERR(thread))
@@ -817,29 +817,32 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
 	struct task_struct* thread;
 	struct state_info* info;
-	int restore_count;
-	struct mutex lock;
+//	int restore_count;
+//	struct mutex lock;
 //	struct completion all_done;
 //	DECLARE_COMPLETION_ONSTACK(all_done);
-	wait_queue_head_t wq;
+//	wait_queue_head_t wq;
 
-	restore_count = count_processes(state);
-	mutex_init(&lock);
-//	init_completion(&all_done);
-	init_waitqueue_head(&wq);
+	init_waitqueue_head(&global_state.wq);
+	atomic_set(&global_state.processes_left, count_processes(state));
+	init_completion(&global_state.all_done);
+
+//int restore_count;
+//DEFINE_MUTEX(lock);
+//DECLARE_WAIT_QUEUE_HEAD(wq);
+// DECLARE_COMPLETION(all_done);
+
+
+
 
 	sprint("Restoring pid parent: %d\n", state->pid);
-	sprint("Need to restore %d processes\n", restore_count);
+	sprint("Need to restore %d processes\n", atomic_read(&global_state.processes_left));
 
 	info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
 	info->head = new_map();
 	info->state = state;
 	info->parent = NULL;
-	info->processes_left = &restore_count;
-	info->lock = &lock;
-	info->all_done = &all_done;
-	info->wq = &wq;
-	
+	info->global_state = &global_state;
 	thread = kthread_create(do_restore, info, "test_thread");
 	if(IS_ERR(thread))
 	{
@@ -847,20 +850,11 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 		return 0;
 	}
 
- 	wake_up_process(thread);  
-	
-	mutex_lock(&lock);
-	while(restore_count != 0)
-	{
-		mutex_unlock(&lock);
-		wait_event(wq, restore_count != 0);
-		mutex_lock(&lock);
-		sprint("Process count is now %d\n", restore_count);
-	}
-	mutex_unlock(&lock);
-	complete_all(&all_done);
-
-
+ 	wake_up_process(thread);
+	sprint("parent waiting for children\n");
+	wait_event(global_state.wq, atomic_read(&global_state.processes_left) == 0);
+	sprint("parent finishes waiting for children\n");
+	complete_all(&global_state.all_done);
 	return 0;
 }
 
@@ -973,13 +967,11 @@ int do_set_state(struct state_info* info)
 
 		sprint("Current %d, parent %d %s\n", current->pid, current->real_parent->pid, current->real_parent->comm);
 
-		mutex_lock(info->lock);
-		*(info->processes_left) -= 1;
-//		restore_count -= 1;
-		mutex_unlock(info->lock);
-		wake_up(info->wq);
-
-		wait_for_completion(&all_done);
+		if (atomic_dec_and_test(&info->global_state->processes_left)) {
+			sprint("child wakes up parent\n");
+			wake_up(&info->global_state->wq);
+		}
+		wait_for_completion(&info->global_state->all_done);
 
 		kfree(info);
 		resume_saved_state();

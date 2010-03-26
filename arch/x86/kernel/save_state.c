@@ -251,6 +251,7 @@ static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, 
 		//sprint( "Physical address was: %08lx\n", physical_address);
 
 		p = pfn_to_page(physical_address >> PAGE_SHIFT);
+		sprint("Page count: %d\n", atomic_read(&p->_count));
 		page = (struct saved_page*)find_by_first(head, p);
 		if(page && page_mapcount(p) != 0)
 		{
@@ -297,6 +298,7 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 		
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		p = pfn_to_page(pgd.pgd >> 12);
+		sprint("Count %d\n", atomic_read(&p->_count));
 
 		page = find_by_first(head, p);
 		if(page == NULL)
