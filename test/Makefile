@@ -2,7 +2,7 @@ CFLAGS = -g -Wall -fno-stack-protector
 #LDFLAGS = -lpthread
 
 
-all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait
+all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait test_my_mutex
 
 
 syscalls.o: syscalls.S
@@ -62,6 +62,9 @@ test_thread: test_thread.o
 test_wait: test_wait.o syscalls.o
 	gcc -nostdlib -g test_wait.o syscalls.o -o test_wait
 
+test_my_mutex: test_my_mutex.o
+	gcc -g -o test_my_mutex test_my_mutex.o -lpthread
+
 #file_test.o: file_test.c
 #gcc -c -nostdlibc file_test.c -o file_test.o
 
@@ -70,6 +73,7 @@ test_wait: test_wait.o syscalls.o
 
 clean:
 	-rm *.o
+	-rm test_my_futex
 	-rm test_wait
 	-rm test_simple_fork
 	-rm test_thread
