@@ -3,49 +3,10 @@
 #define FASTREBOOT_REGION_START (0x1000000 + FASTREBOOT_REGION_SIZE)
 
 #define PATH_LENGTH 256
-#define PIPE_BUFFERS (16)
-
-// File types
-#define REGULAR_FILE 0
-#define READ_PIPE_FILE 1
-#define WRITE_PIPE_FILE 2
-
-struct saved_pipe_buffer {
-	struct page *page;
-	unsigned int offset, len;
-	const struct pipe_buf_operations *ops;
-	unsigned int flags;
-	unsigned long private;
-};
-
-struct saved_pipe
-{
-	unsigned int numbufsreserved;
-	wait_queue_head_t wait;
-	unsigned int nrbufs, curbuf;
-	unsigned int readers;
-	unsigned int writers;
-	unsigned int waiting_writers;
-	unsigned int r_counter;
-	unsigned int w_counter;
-	struct inode *inode;
-	struct saved_pipe_buffer bufs[PIPE_BUFFERS];
-};
-
-struct pipe_restore_temp
-{
-	struct pipe_restore_temp* next;
-	struct inode* pipe_id;
-	struct file* file;
-};
-
 struct saved_file
 {
-	unsigned int type;
 	char name[PATH_LENGTH];
 	unsigned int fd;
-	long count;
-	struct saved_pipe pipe;
 	struct saved_file* next;
 };
 
