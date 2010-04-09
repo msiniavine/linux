@@ -507,6 +507,14 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 		*blocked = task->saved_sigmask;
 		state->syscall_data = blocked;
 	}
+	else if(task_pt_regs(task)->orig_ax == 162 || task_pt_regs(task)->orig_ax == 240
+		|| task_pt_regs(task)->orig_ax == 7)
+	{
+		state->syscall_restart = task_pt_regs(task)->orig_ax;
+		sprint("Saving state to restore %d syscall\n", state->syscall_restart);
+		state->syscall_data = NULL;
+					
+	}
 
 	spin_unlock_irq(&sighand->siglock);
 }
