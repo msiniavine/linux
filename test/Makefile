@@ -59,8 +59,7 @@ set_state: set_state.o
 	gcc -nostdlib -g -o set_state set_state.o
 test_thread: test_thread.o
 	gcc -g -o test_thread test_thread.o -pthread
-test_wait: test_wait.o syscalls.o
-	gcc -nostdlib -g test_wait.o syscalls.o -o test_wait
+test_wait: test_wait.o
 
 test_my_mutex: test_my_mutex.o
 	gcc -g -o test_my_mutex test_my_mutex.o -lpthread

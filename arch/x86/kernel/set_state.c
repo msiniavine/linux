@@ -736,7 +736,7 @@ void restore_registers(struct saved_task_struct* state)
 	regs = task_pt_regs(current);
 	*regs = state->registers;
 
-	if(state->syscall_restart == 162 || state->syscall_restart == 240)
+	if(state->syscall_restart == 162 || state->syscall_restart == 240 ||state->syscall_restart == 7)
 	{
 		sprint("Restarting system call %d\n", state->syscall_restart);
 		state->registers.ax = state->registers.orig_ax;
