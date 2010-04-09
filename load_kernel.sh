@@ -2,7 +2,7 @@
 
 cd test
 
-./test_mutex &
+./test_condvar &
 
 echo "All test started, rebooting kernel"
 sleep 1
