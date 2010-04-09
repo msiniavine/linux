@@ -735,6 +735,14 @@ void restore_registers(struct saved_task_struct* state)
 	sprint("Restoring registers\n");
 	regs = task_pt_regs(current);
 	*regs = state->registers;
+
+	if(state->syscall_restart == 162 || state->syscall_restart == 240)
+	{
+		sprint("Restarting system call %d\n", state->syscall_restart);
+		state->registers.ax = state->registers.orig_ax;
+		state->registers.ip -= 2;
+
+	}
 		
 }
 
@@ -964,6 +972,7 @@ int do_set_state(struct state_info* info)
 		{
 			current->real_parent = info->parent;
 		}
+
 
 		sprint("Current %d, parent %d %s\n", current->pid, current->real_parent->pid, current->real_parent->comm);
 
