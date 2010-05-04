@@ -440,9 +440,9 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	{
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);
-		if(fd == 2) continue; //skip std err for now
+//		if(fd == 2) continue; //skip std err for now
 
-		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
+//		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
 
 		if(f == NULL)
 			continue;
