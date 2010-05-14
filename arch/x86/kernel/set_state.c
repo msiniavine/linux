@@ -757,7 +757,11 @@ void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_h
 			}
 			break;
 		default:
-			file = do_filp_open(-100, f->name, 0, -1074763960); //need real flags, yes thats an accurate number
+			file = do_filp_open(-100, f->name, 0, -1074763960); 
+			if(IS_ERR(file))
+			{
+				panic("Could not open file %s\n", f->name);
+			}
 			sprint("Restoring some normal file.\n");
 			break;
 	}

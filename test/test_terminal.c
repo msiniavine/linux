@@ -20,10 +20,16 @@ void print_all(const char* text)
 
 int main()
 {
+	enable_save_state();
 	print_all("\x1b[2J"); // clear screen
 	print_all("\x1b[20;20H"); // move cursor
 	print_all("test\n");
 
-	sleep(10);
+	while(!was_state_restored())
+	{
+		sleep(10);
+	}
+
+	print_all("Everything is working\n");
 	return 0;
 }
