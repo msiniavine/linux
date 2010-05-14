@@ -148,7 +148,4 @@ void generic_pipe_buf_get(struct pipe_inode_info *, struct pipe_buffer *);
 int generic_pipe_buf_confirm(struct pipe_inode_info *, struct pipe_buffer *);
 int generic_pipe_buf_steal(struct pipe_inode_info *, struct pipe_buffer *);
 
-// Colin Code Hacky
-void set_pipe_ops(struct pipe_buffer* buf);
-
 #endif
