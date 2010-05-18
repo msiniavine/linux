@@ -11,7 +11,9 @@
 #include <asm/e820.h>
 #include <linux/fdtable.h>
 #include <linux/pipe_fs_i.h>
-
+#include <linux/tty.h>
+#include <linux/kd.h>
+#include <linux/console_struct.h>
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
@@ -426,6 +428,53 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 	}
 }
 
+static int file_is_vc_terminal(char* name)
+{
+//TODO
+//I am cheating for now and assuming /tty1 is the terminal i want
+	if(!strcmp("/tty1", name))
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+static void save_vc_term_info(struct file* f, struct saved_file* file)
+{
+	struct tty_struct* tty;
+	struct tty_driver* driver;
+	struct vc_data* vcd;
+	struct saved_vc_data* svcd;
+	unsigned char* screen_buffer;
+
+	tty = (struct tty_struct*)f->private_data;
+	if(tty->magic != TTY_MAGIC)
+	{
+		panic("tty magic does not match expected: %x, got: %x\n", TTY_MAGIC, tty->magic);
+	}
+	driver = tty->driver;
+	if(driver->type != TTY_DRIVER_TYPE_CONSOLE || driver->subtype !=0)
+	{
+		panic("Driver type was not a console type\n");
+	}
+
+	vcd = (struct vc_data*)tty->driver_data;
+	svcd = (struct saved_vc_data*)alloc(sizeof(*svcd));
+	svcd->index = vcd->vc_num;
+	svcd->rows = vcd->vc_rows;
+	svcd->cols = vcd->vc_cols;
+	svcd->screen_buffer_size = vcd->vc_screenbuf_size;
+	screen_buffer = (unsigned char*)alloc(svcd->screen_buffer_size);
+	memcpy(screen_buffer, vcd->vc_screenbuf, svcd->screen_buffer_size);
+	svcd->screen_buffer = screen_buffer;
+	file->type = VC_TTY;
+	file->vcd = svcd;
+	
+}
+
 static void save_files(struct files_struct* files, struct saved_task_struct* task, struct map_entry* head)
 {
 	struct fdtable* fdt;
@@ -435,7 +484,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	fdt = files_fdtable(files);
 	
 	sprint("max_fds: %d\n", fdt->max_fds);
-	for(fd=0; fd<fdt->max_fds; fd++)   // dd only uses 0, 1
+	for(fd=0; fd<fdt->max_fds; fd++)
 	{
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);
@@ -449,6 +498,11 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		sprint("fd %d points to %s\n", fd, file->name);
 		file->fd = fd;
 		file->count = file_count(f);
+
+		if(file_is_vc_terminal(file->name))
+		{
+			save_vc_term_info(f, file);
+		}
 
 		if (file_is_pipe(f))
 			save_pipe_info(task, f, file, head);

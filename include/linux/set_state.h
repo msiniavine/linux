@@ -9,6 +9,8 @@
 #define REGULAR_FILE 0
 #define READ_PIPE_FILE 1
 #define WRITE_PIPE_FILE 2
+// Terminal that outputs to a virtual console
+#define VC_TTY  3
 
 struct saved_pipe_buffer {
 	struct page *page;
@@ -39,6 +41,16 @@ struct pipe_restore_temp
 	struct file* file;
 };
 
+struct saved_vc_data
+{
+	int rows;
+	int cols;
+	int index;
+	int screen_buffer_size;
+	unsigned char* screen_buffer;
+
+};
+
 struct saved_file
 {
 	unsigned int type;
@@ -46,6 +58,7 @@ struct saved_file
 	unsigned int fd;
 	long count;
 	struct saved_pipe pipe;
+	struct saved_vc_data* vcd;
 	struct saved_file* next;
 };
 
