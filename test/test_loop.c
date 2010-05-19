@@ -4,11 +4,10 @@
 int _start()
 {
 	enable_save_state();
-	//      while(!was_state_restored());
-        while(1)
+        while(!was_state_restored())
 	{
-		was_state_restored();
+//		was_state_restored();
 	}
-        return 0;
+        exit(1);
 }
 

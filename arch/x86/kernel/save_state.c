@@ -397,7 +397,7 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 		file->pipe.bufs[i].flags = pipe->bufs[i].flags;
 		file->pipe.bufs[i].private = pipe->bufs[i].private;
 
-		sprint( "Saving pipe buffer page %d", i);
+		sprint( "Saving pipe buffer page %d\n", i);
 		// If buffer page exists, reserve it
 		if (pipe->bufs[i].page != 0)
 		{
@@ -435,10 +435,15 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	fdt = files_fdtable(files);
 	
 	sprint("max_fds: %d\n", fdt->max_fds);
-	for(fd = 3; fd<fdt->max_fds; fd++)  // start with 3 because 0,1,2 are not really files
+//	for(fd = 3; fd<fdt->max_fds; fd++)  // start with 3 because 0,1,2 are not really files
+	for(fd=0; fd<fdt->max_fds; fd++)   // dd only uses 0, 1
 	{
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);
+		if(fd == 2) continue; //skip std err for now
+
+		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
+
 		if(f == NULL)
 			continue;
 		file = (struct saved_file*)alloc(sizeof(*file));

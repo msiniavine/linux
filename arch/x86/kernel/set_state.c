@@ -356,8 +356,8 @@ struct file* add_file(struct used_file* head, char* filename)
 	struct file* filep;
 	entry = (struct used_file*)kmalloc(sizeof(*entry), GFP_KERNEL);
 	if(!entry) panic("Could not allocated a new file list entry");
-	filep = open_exec(filename);
-	if(IS_ERR(filep)) panic("Could not open file %s", filename);
+	filep = do_filp_open(AT_FDCWD, filename, O_RDONLY|O_LARGEFILE, 0);
+	if(IS_ERR(filep)) panic("Could not open file %s err: %ld", filename, PTR_ERR(filep));
 
 	entry->filename = filename;
 	entry->filep = filep;

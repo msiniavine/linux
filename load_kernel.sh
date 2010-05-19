@@ -4,6 +4,9 @@ cd test
 
 ./test_wait &
 
+#cd test
+#./test_loop < Makefile &> trace &
+
 echo "All test started, rebooting kernel"
 sleep 1
 
