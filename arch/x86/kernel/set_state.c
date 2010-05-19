@@ -31,6 +31,7 @@
 #include <linux/completion.h>
 #include <linux/mutex.h>
 #include <linux/wait.h>
+#include <linux/pipe_fs_i.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -498,34 +499,292 @@ err:
 	return err;
 }
 
-void restore_file(unsigned int original_fd, char* filename)
+// Finds the other pipe end from the global table
+struct file* find_other_pipe_end(struct pipe_restore_temp* pipe_restore_head, struct inode* pipe_id)
+{
+	struct pipe_restore_temp* pipe_restore_pointer = pipe_restore_head;
+	struct file* result = NULL;
+
+	while (pipe_restore_pointer != NULL)
+	{
+		if (pipe_restore_pointer->pipe_id == pipe_id)
+		{
+			result = pipe_restore_pointer->file;
+			break;
+		}
+
+		pipe_restore_pointer = pipe_restore_pointer->next; 
+	}
+
+	return result;
+}
+
+// Add pipe end to global table
+void add_to_pipe_restore(struct pipe_restore_temp* pipe_restore_head, struct inode* pipe_id, struct file* file)
+{
+	struct pipe_restore_temp* pipe_restore_pointer = pipe_restore_head;
+
+	// Create a new pipe_restore_temp struct
+	if (pipe_restore_pointer == NULL)
+	{
+		panic("Encountered null pipe pointer");
+	}
+
+	while (pipe_restore_pointer != NULL)
+	{
+		// The first pipe_restore in the linked list will have a null pipe id. Populate that one first.
+		if (pipe_restore_pointer->pipe_id == NULL)
+		{
+			break;
+		}
+		if (pipe_restore_pointer->next == NULL)
+		{
+			pipe_restore_pointer->next = (struct pipe_restore_temp*)kmalloc(sizeof(struct pipe_restore_temp), GFP_KERNEL);
+			pipe_restore_pointer = pipe_restore_pointer->next;
+			break;
+		}
+		else
+		{
+			pipe_restore_pointer = pipe_restore_pointer->next;
+		}
+	}
+
+	pipe_restore_pointer->pipe_id = pipe_id;
+	pipe_restore_pointer->file = file;
+	pipe_restore_pointer->next = NULL;
+}
+
+void restore_pipe_status(struct saved_pipe* saved_pipe, struct pipe_inode_info* new_pipe)
+{
+	int i = 0;
+
+	sprint("New Pipe Buffer Information Before Restore:\n");
+	sprint("new_pipe->wait = %p\n", new_pipe->wait);
+	sprint("new_pipe->nrbufs = %u\n", new_pipe->nrbufs);
+	sprint("new_pipe->curbuf = %u\n", new_pipe->curbuf);
+	sprint("new_pipe->readers = %u\n", new_pipe->readers);
+	sprint("new_pipe->writers = %u\n", new_pipe->writers);
+	sprint("new_pipe->waiting_writers = %u\n", new_pipe->waiting_writers);
+	sprint("new_pipe->r_counter = %u\n", new_pipe->r_counter);
+	sprint("new_pipe->w_counter = %u\n", new_pipe->w_counter);
+
+	// Restore pipe status
+	//new_pipe->wait = saved_pipe->wait;
+	new_pipe->nrbufs = saved_pipe->nrbufs;
+	new_pipe->curbuf = saved_pipe->curbuf;
+	new_pipe->readers = saved_pipe->readers;
+	new_pipe->writers = saved_pipe->writers;
+	new_pipe->waiting_writers = saved_pipe->waiting_writers;
+	new_pipe->r_counter = saved_pipe->r_counter;
+	new_pipe->w_counter = saved_pipe->w_counter;
+
+	sprint("Saved Pipe Buffer Information:\n");
+	sprint("new_pipe->wait = %p\n", saved_pipe->wait);
+	sprint("new_pipe->nrbufs = %u\n", saved_pipe->nrbufs);
+	sprint("new_pipe->curbuf = %u\n", saved_pipe->curbuf);
+	sprint("new_pipe->readers = %u\n", saved_pipe->readers);
+	sprint("new_pipe->writers = %u\n", saved_pipe->writers);
+	sprint("new_pipe->waiting_writers = %u\n", saved_pipe->waiting_writers);
+	sprint("new_pipe->r_counter = %u\n", saved_pipe->r_counter);
+	sprint("new_pipe->w_counter = %u\n", saved_pipe->w_counter);
+	sprint("new_pipe->inode = %u\n", saved_pipe->inode);
+
+	sprint("Non saved pipe buffer information:\n");
+	sprint("new_pipe->page = %p\n", new_pipe->wait);
+	sprint("new_pipe->fasync_readers = %p\n", new_pipe->fasync_readers);
+	sprint("new_pipe->fasync_writers = %p\n", new_pipe->fasync_writers);
+	sprint("new_pipe->inode = %p\n", new_pipe->inode);
+	sprint("new_pipe->bufs = %p\n", new_pipe->bufs);
+	
+	// Restore read pipe buffers
+	for (i=0; i < saved_pipe->nrbufs; i++)
+	{
+		// Print Stuff
+		unsigned long buf_pfn = page_to_pfn(saved_pipe->bufs[i].page);
+		sprint("Before restore buffer information for buf pfn %d: %ld\n", i, buf_pfn); 
+		sprint("new_pipe->bufs[i].page = %p\n", new_pipe->bufs[i].page);
+		sprint("new_pipe->bufs[i].offset = %u\n", new_pipe->bufs[i].offset);
+		sprint("new_pipe->bufs[i].len = %u\n", new_pipe->bufs[i].len);
+		sprint("new_pipe->bufs[i].flags = %u\n", new_pipe->bufs[i].flags);
+		sprint("new_pipe->bufs[i].private = %lu\n", new_pipe->bufs[i].private);		
+
+		sprint("Restore buffer information for buf pfn %d: %ld\n", i, buf_pfn); 
+		sprint("new_pipe->bufs[i].page = %p\n", saved_pipe->bufs[i].page);
+		sprint("new_pipe->bufs[i].offset = %u\n", saved_pipe->bufs[i].offset);
+		sprint("new_pipe->bufs[i].len = %u\n", saved_pipe->bufs[i].len);
+		sprint("new_pipe->bufs[i].flags = %u\n", saved_pipe->bufs[i].flags);
+		sprint("new_pipe->bufs[i].private = %lu\n", saved_pipe->bufs[i].private);
+
+		// Restore stuff
+		new_pipe->bufs[i].page = saved_pipe->bufs[i].page;
+		new_pipe->bufs[i].offset = saved_pipe->bufs[i].offset;
+		new_pipe->bufs[i].len = saved_pipe->bufs[i].len;
+		new_pipe->bufs[i].flags = saved_pipe->bufs[i].flags;
+		new_pipe->bufs[i].private = saved_pipe->bufs[i].private;
+
+		// Weird ops thing
+		sprint("Non saved ops thing: %p\n", new_pipe->bufs[i].ops);
+		set_pipe_ops(&(new_pipe->bufs[i]));
+		sprint("Modified ops thing: %p\n", new_pipe->bufs[i].ops);
+
+	}
+}
+
+struct file* restore_read_pipe_before(struct saved_pipe* saved_read_info, struct pipe_restore_temp* pipe_restore_head)
+{
+	struct file* file;
+	struct pipe_inode_info* read_info;
+
+	sprint("Restoring read pipe before write\n");
+	// Create a write end of pipe
+	file = create_write_pipe(0);
+	read_info = file->f_path.dentry->d_inode->i_pipe;
+
+	// Convert a write pipe to a read pipe (does this work?)
+	file->f_pos = 0;
+	file->f_flags = O_RDONLY;
+	file->f_op = &read_pipefifo_fops;
+	file->f_mode = FMODE_READ;
+	file->f_version = 0;
+
+	restore_pipe_status(saved_read_info, read_info);
+
+	sprint("Actual file f_count = %ld", file_count(file));
+	// Add pipe to pipe restore table
+	add_to_pipe_restore(pipe_restore_head, saved_read_info->inode, file);
+
+	return file;
+}
+
+struct file* restore_read_pipe_after(struct saved_pipe* saved_read_info, struct pipe_restore_temp* pipe_restore_head)
+{
+	struct file* file = NULL;
+	struct file* other_end = NULL;
+	struct pipe_inode_info* read_info;
+
+	sprint("Restoring read pipe after write\n");
+	// Find other end of pipe in pipe restore table and create read pipe
+	other_end = find_other_pipe_end(pipe_restore_head, saved_read_info->inode);
+	sprint("Other end is: %p\n", other_end);
+	file = create_read_pipe(other_end, 0);
+	read_info = file->f_path.dentry->d_inode->i_pipe;
+
+	restore_pipe_status(saved_read_info, read_info);
+	sprint("Actual file f_count = %ld", file_count(file));
+	return file;
+}
+
+struct file* restore_write_pipe_before(struct saved_pipe* saved_write_info, struct pipe_restore_temp* pipe_restore_head)
+{
+	struct file* file;
+	struct pipe_inode_info* write_info;
+
+	sprint("Restoring write pipe before read\n");
+	// Create write pipe
+	file = create_write_pipe(0);
+	write_info = file->f_path.dentry->d_inode->i_pipe;
+
+	restore_pipe_status(saved_write_info, write_info);
+	sprint("Actual file f_count = %ld", file_count(file));
+	// Add pipe to pipe restore table
+	add_to_pipe_restore(pipe_restore_head, saved_write_info->inode, file);
+
+	return file;
+}
+
+struct file* restore_write_pipe_after(struct saved_pipe* saved_write_info, struct pipe_restore_temp* pipe_restore_head)
+{
+	struct file* file;
+	struct file* other_end;
+	struct pipe_inode_info* write_info;
+
+	sprint("Restoring write pipe after read\n");
+	// Find other end of pipe in pipe restore table
+	other_end = find_other_pipe_end(pipe_restore_head, saved_write_info->inode);
+
+	// Create write pipe
+	file = get_empty_filp();
+	if (!file)
+		panic("Unable to restore write pipe after read");
+
+	file->f_path = other_end->f_path;
+	path_get(&other_end->f_path);
+	file->f_mapping = other_end->f_path.dentry->d_inode->i_mapping;
+
+	file->f_pos = 0;
+	file->f_flags = O_WRONLY;
+	file->f_op = &write_pipefifo_fops;
+	file->f_mode = FMODE_WRITE;
+	file->f_version = 0;
+
+	write_info = file->f_path.dentry->d_inode->i_pipe;
+	restore_pipe_status(saved_write_info, write_info);
+	sprint("Actual file f_count = %ld", file_count(file));
+	return file;
+}
+
+void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_head)
 {
 	unsigned int fd;
 	struct file* file;
-	fd = alloc_fd(original_fd, 0); // need real flags
-	if(fd != original_fd)
+	fd = alloc_fd(f->fd, 0); // need real flags
+	if(fd != f->fd)
 	{
-		sprint("Could not get original fd %u, got %u\n", original_fd, fd);
+		sprint("Could not get original fd %u, got %u\n", f->fd, fd);
 		panic("Could not get original fd");
 	}
-	file = do_filp_open(-100, filename, 0, -1074763960); //need real flags, yes thats an accurate number
+
+	switch (f->type)
+	{
+		case READ_PIPE_FILE:
+			if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) != NULL){
+				sprint("Restore read pipe after write\n");
+				file = restore_read_pipe_after(&(f->pipe), pipe_restore_head);
+			}
+			else{
+				sprint("Restore read pipe before write\n");
+				file = restore_read_pipe_before(&(f->pipe), pipe_restore_head);
+			}
+			break;
+		case WRITE_PIPE_FILE:
+			if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) != NULL){
+				sprint("Restore write pipe after read\n");
+				file = restore_write_pipe_after(&(f->pipe), pipe_restore_head);
+			}
+			else{
+				sprint("Restore write pipe before read\n");
+				file = restore_write_pipe_before(&(f->pipe), pipe_restore_head);
+			}
+			break;
+		default:
+			file = do_filp_open(-100, f->name, 0, -1074763960); //need real flags, yes thats an accurate number
+			sprint("Restoring some normal file.\n");
+			break;
+	}
+
+	atomic_long_set(&(file->f_count), f->count);
+	sprint("Set file count value to %ld\n", f->count);
+
 	if(IS_ERR(file))
 	{
-		sprint("Could not open %s error: %ld\n", filename, PTR_ERR(file));
+		sprint("Could not open %s error: %ld\n", f->name, PTR_ERR(file));
 		panic("Could not restore file");
 	}
+	sprint("Return file pointer is: %p\n", file);
 	fd_install(fd, file);
+	sprint("fd_install completed\n");
 }
 
-void restore_files(struct saved_task_struct* state)
+void restore_files(struct saved_task_struct* state, struct pipe_restore_temp* pipe_restore_head)
 {
 	struct saved_file* f;
 	for(f=state->open_files; f!=NULL; f=f->next)
 	{
 		sprint("Restoring fd: %u - %s\n", f->fd, f->name);
-		restore_file(f->fd, f->name);
+		restore_file(f, pipe_restore_head);
 	}
 }
+
 
 int orig_gs, cur_gs;
 
@@ -752,6 +1011,7 @@ struct global_state_info
 	atomic_t processes_left;
 
 	struct completion all_done;
+	struct pipe_restore_temp *pipe_restore_head;
 };
 
 struct state_info
@@ -763,6 +1023,7 @@ struct state_info
 };
 
 static struct global_state_info global_state;
+static struct pipe_restore_temp pipe_restore_head;
 
 int do_set_state(struct state_info* state);
 
@@ -851,6 +1112,10 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	info->state = state;
 	info->parent = NULL;
 	info->global_state = &global_state;
+	info->global_state->pipe_restore_head = &pipe_restore_head;
+	info->global_state->pipe_restore_head->pipe_id = NULL;
+	info->global_state->pipe_restore_head->next = NULL;
+
 	thread = kthread_create(do_restore, info, "test_thread");
 	if(IS_ERR(thread))
 	{
@@ -957,7 +1222,7 @@ int do_set_state(struct state_info* info)
 			put_files_struct(displaced);
 
 		
-		restore_files(state);
+		restore_files(state, info->global_state->pipe_restore_head);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
 		restore_creds(state);
