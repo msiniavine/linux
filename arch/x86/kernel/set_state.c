@@ -32,6 +32,9 @@
 #include <linux/mutex.h>
 #include <linux/wait.h>
 #include <linux/pipe_fs_i.h>
+#include <linux/tty.h>
+#include <linux/kd.h>
+#include <linux/console_struct.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -723,6 +726,41 @@ struct file* restore_write_pipe_after(struct saved_pipe* saved_write_info, struc
 	return file;
 }
 
+void redraw_screen(struct vc_data*, int);
+
+struct file* restore_vc_terminal(struct saved_file* f)
+{
+	struct file* file;
+	struct tty_struct* tty;
+	struct tty_driver* driver;
+	struct vc_data* vcd;
+	struct saved_vc_data* svcd = f->vcd;
+	file = do_filp_open(-100, "/dev/tty1", 0, -1074763960);
+	if(IS_ERR(file))
+	{
+		panic("Could not open terminal file with error: %d\n", PTR_ERR(file));
+	}
+
+	tty = (struct tty_struct*)file->private_data;
+	if(tty->magic != TTY_MAGIC)
+	{
+		panic("tty magic value does not match\n");
+	}
+	driver = tty->driver;
+	if(driver->type != TTY_DRIVER_TYPE_CONSOLE || driver->subtype !=0)
+	{
+		panic("Driver type des not match\n");
+	}
+	vcd = (struct vc_data*)tty->driver_data;
+	if(vcd->vc_screenbuf_size != svcd->screen_buffer_size)
+	{
+		panic("Screen buffer sizes do not match\n");
+	}
+	memcpy(vcd->vc_screenbuf, svcd->screen_buffer, svcd->screen_buffer_size); 
+	redraw_screen(vcd, 0);
+	return file;
+}
+
 void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_head)
 {
 	unsigned int fd;
@@ -755,6 +793,9 @@ void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_h
 				sprint("Restore write pipe before read\n");
 				file = restore_write_pipe_before(&(f->pipe), pipe_restore_head);
 			}
+			break;
+	        case VC_TTY:
+			file = restore_vc_terminal(f);
 			break;
 		default:
 			file = do_filp_open(-100, f->name, 0, -1074763960); 

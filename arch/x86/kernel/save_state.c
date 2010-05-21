@@ -210,8 +210,8 @@ static int get_physical_address(struct mm_struct* mm, unsigned long virtual_addr
 	}
 	
 	page = pte_page(*pte);
-	sprint( "Address %p maps to struct page at %p\n", (void*)virtual_address, page);
-	sprint( "PFN is: %p physical address is: %p\n", (void*)page_to_pfn(page), (void*)(page_to_pfn(page) << PAGE_SHIFT));
+//	sprint( "Address %p maps to struct page at %p\n", (void*)virtual_address, page);
+//	sprint( "PFN is: %p physical address is: %p\n", (void*)page_to_pfn(page), (void*)(page_to_pfn(page) << PAGE_SHIFT));
 	*physical_address = (page_to_pfn(page) << PAGE_SHIFT);
 	pte_unmap(pte);
 	return 1;
