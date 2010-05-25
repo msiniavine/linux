@@ -1069,13 +1069,6 @@ asmlinkage long __weak sys_pipe(int __user *fildes)
 	return sys_pipe2(fildes, 0);
 }
 
-// Start Colin Code - This is hacky!
-void set_pipe_ops(struct pipe_buffer* buf)
-{
-	buf->ops = &anon_pipe_buf_ops;
-}
-// End Colin hacky code
-
 /*
  * pipefs should _never_ be mounted by userland - too much of security hassle,
  * no real gain from having the whole whorehouse mounted. So we don't need
