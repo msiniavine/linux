@@ -62,7 +62,7 @@ int _start()
 	{
 		// Parent process
 		while (!was_state_restored());
-		fd = open("/home/colin/linux-2.6/test/output.txt", 2, 777);
+		fd = open("/home/maxim/linux-2.6/test/output.txt", 2, 777);
 		read(pfd[0], buf, 30);
 		write(fd, buf, 30);
 		close(fd);

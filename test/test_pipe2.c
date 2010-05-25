@@ -16,7 +16,7 @@ int main()
 	enable_save_state();
 	write(STDOUT_FILENO, "Program Starting!\n", sizeof("Program Starting!\n"));
 
-	if (mkfifo("/home/colin/linux-2.6/test/fifopipe", 777) != 0)
+	if (mkfifo("/home/maxim/linux-2.6/test/fifopipe", 777) != 0)
 	{
 		write(STDOUT_FILENO, "Error creating pipe!\n", sizeof("Error creating pipe!\n"));
 		return 1;
@@ -26,17 +26,17 @@ int main()
 
 	if (err == 0)
 	{
-		npfd[1] = open("/home/colin/linux-2.6/test/fifopipe", O_WRONLY);
+		npfd[1] = open("/home/maxim/linux-2.6/test/fifopipe", O_WRONLY);
 			for (i = 0; i < 3; i++)
 		write(npfd[1], "Write to pipe\n", sizeof("Write to pipe\n"));
 		while(!was_state_restored());
 	}
 	else
 	{
-		npfd[0] = open("/home/colin/linux-2.6/test/fifopipe", O_RDONLY);
+		npfd[0] = open("/home/maxim/linux-2.6/test/fifopipe", O_RDONLY);
 		read(npfd[0], buf, 15);
         	while(!was_state_restored());
-		fd = open("/home/colin/linux-2.6/test/output.txt", 2, 777);
+		fd = open("/home/maxim/linux-2.6/test/output.txt", 2, 777);
 		read(npfd[0], buf, 30);
 		write(fd, buf, 30);
 		close(fd);
