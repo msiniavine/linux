@@ -466,6 +466,11 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	svcd->index = vcd->vc_num;
 	svcd->rows = vcd->vc_rows;
 	svcd->cols = vcd->vc_cols;
+	svcd->x = vcd->vc_x;
+	svcd->y = vcd->vc_y;
+	svcd->orig_screenbuf = (unsigned long)vcd->vc_screenbuf;
+	svcd->orig_origin = vcd->vc_origin;
+	svcd->offset = svcd->orig_origin - svcd->orig_screenbuf;
 	svcd->screen_buffer_size = vcd->vc_screenbuf_size;
 	screen_buffer = (unsigned char*)alloc(svcd->screen_buffer_size);
 	memcpy(screen_buffer, vcd->vc_screenbuf, svcd->screen_buffer_size);

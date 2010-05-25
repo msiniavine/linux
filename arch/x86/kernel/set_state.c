@@ -757,6 +757,10 @@ struct file* restore_vc_terminal(struct saved_file* f)
 		panic("Screen buffer sizes do not match\n");
 	}
 	memcpy(vcd->vc_screenbuf, svcd->screen_buffer, svcd->screen_buffer_size); 
+	vcd->vc_x = svcd->x;
+	vcd->vc_y = svcd->y;
+	sprint("x: %d, y: %d\n", svcd->x, svcd->y);
+	sprint("origin: %lx, buf: %lx, offset: %ld\n", svcd->orig_origin, svcd->orig_screenbuf, svcd->offset);
 	redraw_screen(vcd, 0);
 	return file;
 }

@@ -48,7 +48,10 @@ struct saved_vc_data
 	int index;
 	int screen_buffer_size;
 	unsigned char* screen_buffer;
-
+	unsigned int x, y;
+	unsigned long orig_screenbuf;
+	unsigned long orig_origin;
+	long offset;
 };
 
 struct saved_file
@@ -161,8 +164,8 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 
 #define STATE_DEBUG 1
 #if STATE_DEBUG
-#define sprint(format, ...) printk(KERN_ERR format, ##__VA_ARGS__)
-#define csprint(format, ...) if(is_save_enabled(current)) printk(KERN_ERR format, ##__VA_ARGS__)
+#define sprint(format, ...) printk(KERN_WARNING format, ##__VA_ARGS__)
+#define csprint(format, ...) if(is_save_enabled(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
 #else
 #define sprint(format, ...)
 #define csprint(format, ...)
