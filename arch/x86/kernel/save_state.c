@@ -370,21 +370,23 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 	int i = 0;
 	struct pipe_inode_info *pipe = f->f_path.dentry->d_inode->i_pipe;
 
-	// Assign pipe filetype (read end or write end)
-	if (f->f_flags & O_WRONLY)
-		file->type = WRITE_PIPE_FILE;
+	// Assign pipe filetype (unnamed vs named, read vs write end)
+	if (file->name[0] == '/' && file->name[1] == '\0') // Unnamed pipes have no path
+	{
+		if (f->f_flags & O_WRONLY)
+			file->type = WRITE_PIPE_FILE;
+		else
+			file->type = READ_PIPE_FILE;
+	}
 	else
-		file->type = READ_PIPE_FILE;
-
-	file->pipe.numbufsreserved = 0;
-	file->pipe.wait = pipe->wait;
+	{
+		if (f->f_flags & O_WRONLY)
+			file->type = WRITE_FIFO_FILE;
+		else
+			file->type = READ_FIFO_FILE;
+	}
 	file->pipe.nrbufs = pipe->nrbufs;
 	file->pipe.curbuf = pipe->curbuf;
-	file->pipe.readers = pipe->readers;
-	file->pipe.writers = pipe->writers;
-	file->pipe.waiting_writers = pipe->waiting_writers;
-	file->pipe.r_counter = pipe->r_counter;
-	file->pipe.w_counter = pipe->w_counter;
 	// Copying inode only as a unique identifier for the pipe pair
 	file->pipe.inode = pipe->inode; 
 
@@ -394,20 +396,14 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 		file->pipe.bufs[i].page = pipe->bufs[i].page;
 		file->pipe.bufs[i].offset = pipe->bufs[i].offset;
 		file->pipe.bufs[i].len = pipe->bufs[i].len;
-		file->pipe.bufs[i].flags = pipe->bufs[i].flags;
-		file->pipe.bufs[i].private = pipe->bufs[i].private;
 
-		sprint( "Saving pipe buffer page %d\n", i);
 		// If buffer page exists, reserve it
 		if (pipe->bufs[i].page != 0)
 		{
 			struct page* p = pipe->bufs[i].page;
 			struct saved_page* page_to_save;
-			//unsigned long buf_pfn = page_to_pfn(pipe->bufs[i].page);
 
-			file->pipe.numbufsreserved++;
-
-			// See if page has been reserved already
+			// Reserve the page only if it's not already reserved
 			page_to_save = (struct saved_page*)find_by_first(head, p);
 			if (page_to_save == NULL)
 			{
@@ -435,8 +431,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	fdt = files_fdtable(files);
 	
 	sprint("max_fds: %d\n", fdt->max_fds);
-//	for(fd = 3; fd<fdt->max_fds; fd++)  // start with 3 because 0,1,2 are not really files
-	for(fd=0; fd<fdt->max_fds; fd++)   // dd only uses 0, 1
+	for(fd = 3; fd<fdt->max_fds; fd++)  // start with 3 because 0,1,2 are not really files
+//	for(fd=0; fd<fdt->max_fds; fd++)   // dd only uses 0, 1
 	{
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);

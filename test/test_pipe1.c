@@ -1,6 +1,8 @@
 #define NO_LIBC
 #include "test.h"
 
+
+// Test unnamed pipes
 int mystrcmp(const char* p1, const char* p2, int numchars)
 {
 	int dist = 0;

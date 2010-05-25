@@ -9,34 +9,42 @@
 #define REGULAR_FILE 0
 #define READ_PIPE_FILE 1
 #define WRITE_PIPE_FILE 2
+#define READ_FIFO_FILE 3
+#define WRITE_FIFO_FILE 4
 
 struct saved_pipe_buffer {
 	struct page *page;
 	unsigned int offset, len;
-	const struct pipe_buf_operations *ops;
-	unsigned int flags;
-	unsigned long private;
 };
 
 struct saved_pipe
 {
-	unsigned int numbufsreserved;
-	wait_queue_head_t wait;
 	unsigned int nrbufs, curbuf;
-	unsigned int readers;
-	unsigned int writers;
-	unsigned int waiting_writers;
-	unsigned int r_counter;
-	unsigned int w_counter;
 	struct inode *inode;
 	struct saved_pipe_buffer bufs[PIPE_BUFFERS];
+};
+
+struct pipe_pidlist
+{
+	struct pipe_pidlist* next;
+	pid_t process;
 };
 
 struct pipe_restore_temp
 {
 	struct pipe_restore_temp* next;
+	unsigned int type;
 	struct inode* pipe_id;
-	struct file* file;
+	struct pipe_pidlist* processlist;
+	unsigned int read_fd, write_fd;
+	struct file *read_file, *write_file;
+};
+
+struct pipes_to_close
+{
+	struct pipes_to_close* next;
+	pid_t process;
+	unsigned int fd;
 };
 
 struct saved_file
@@ -132,6 +140,16 @@ struct saved_task_struct
 struct saved_state
 {
   struct saved_task_struct* processes;
+};
+
+struct global_state_info
+{
+	wait_queue_head_t wq;
+	atomic_t processes_left;
+
+	struct completion all_done;
+	struct pipe_restore_temp *pipe_restore_head;
+	struct pipes_to_close *pipe_close_head;
 };
 
 extern int set_stack_state;

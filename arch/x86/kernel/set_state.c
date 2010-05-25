@@ -500,230 +500,423 @@ err:
 }
 
 // Finds the other pipe end from the global table
-struct file* find_other_pipe_end(struct pipe_restore_temp* pipe_restore_head, struct inode* pipe_id)
+struct pipe_restore_temp* find_other_pipe_end(struct pipe_restore_temp* pipe_restore_head, struct inode* pipe_id)
 {
-	struct pipe_restore_temp* pipe_restore_pointer = pipe_restore_head;
-	struct file* result = NULL;
+	struct pipe_restore_temp* p;
 
-	while (pipe_restore_pointer != NULL)
+	for (p = pipe_restore_head; p != NULL; p = p->next)
 	{
-		if (pipe_restore_pointer->pipe_id == pipe_id)
+		if (p->pipe_id == pipe_id)
+			return p;
+	}
+	return NULL;
+}
+
+// Add pipe end to global table
+void add_to_pipe_restore(struct pipe_restore_temp* pipe_restore_head, struct inode* pipe_id, pid_t process, unsigned int read_fd, unsigned int write_fd, struct file* read_file, struct file* write_file)
+{
+	struct pipe_restore_temp* p;
+
+	for (p = pipe_restore_head; p != NULL; p = p->next)
+	{
+		if (p->next == NULL)
 		{
-			result = pipe_restore_pointer->file;
+			// Reached end of linked list. Allocate new struct and write to it
+			p->next = (struct pipe_restore_temp*)kmalloc(sizeof(struct pipe_restore_temp), GFP_KERNEL);
+			p = p->next;
 			break;
 		}
+	}
 
-		pipe_restore_pointer = pipe_restore_pointer->next; 
+	p->pipe_id = pipe_id;
+	p->processlist = (struct pipe_pidlist*)kmalloc(sizeof(struct pipe_pidlist), GFP_KERNEL);
+	p->processlist->next = NULL;
+	p->processlist->process = process;
+	p->read_fd = read_fd;
+	p->write_fd = write_fd;
+	p->read_file = read_file;
+	p->write_file = write_file;
+	p->next = NULL;
+}
+
+// Add new process to existing pipe in global table
+void add_process_to_pipe_restore(struct pipe_restore_temp* pipe_restore_head, struct inode* pipe_id, pid_t process)
+{
+	struct pipe_restore_temp* p;
+	struct pipe_pidlist* pidlist;
+
+	// We're guaranteed not to have null pipe_restore_temp or pipe_pidlist because these are allocated in add_to_pipe_restore()
+	for(p = pipe_restore_head; p != NULL; p = p->next)
+	{
+		if (p->pipe_id == pipe_id)
+		{
+			for (pidlist = p->processlist; pidlist != NULL; pidlist = pidlist->next)
+			{
+				if (pidlist->next == NULL)
+				{
+					pidlist->next = (struct pipe_pidlist*)kmalloc(sizeof(struct pipe_pidlist), GFP_KERNEL);
+					pidlist = pidlist->next;
+					pidlist->next = NULL;
+					pidlist->process = process;
+					break;
+				}
+			}
+			break;
+		}
+	}
+}
+
+// Search pipe_restore_temp struct for a particular process
+int search_pipe_for_process(struct pipe_restore_temp* pipe_restore, pid_t pid)
+{
+	struct pipe_pidlist* pid_pointer;
+	int result = 0;
+
+	for(pid_pointer = pipe_restore->processlist; pid_pointer != NULL; pid_pointer = pid_pointer->next)
+	{
+		if (pid_pointer->process == pid)
+		{
+			result = 1;
+			break;
+		}
 	}
 
 	return result;
 }
 
-// Add pipe end to global table
-void add_to_pipe_restore(struct pipe_restore_temp* pipe_restore_head, struct inode* pipe_id, struct file* file)
+// Add pipe end to global table for closing pipes
+void add_to_pipe_close(struct pipes_to_close* pipe_close_head, pid_t process, unsigned int fd)
 {
-	struct pipe_restore_temp* pipe_restore_pointer = pipe_restore_head;
+	struct pipes_to_close* p;
 
-	// Create a new pipe_restore_temp struct
-	if (pipe_restore_pointer == NULL)
+	for (p = pipe_close_head; p != NULL; p = p->next)
 	{
-		panic("Encountered null pipe pointer");
-	}
-
-	while (pipe_restore_pointer != NULL)
-	{
-		// The first pipe_restore in the linked list will have a null pipe id. Populate that one first.
-		if (pipe_restore_pointer->pipe_id == NULL)
+		if (p->next == NULL)
 		{
+			p->next = (struct pipes_to_close*)kmalloc(sizeof(struct pipes_to_close), GFP_KERNEL);
+			p = p->next;
 			break;
-		}
-		if (pipe_restore_pointer->next == NULL)
-		{
-			pipe_restore_pointer->next = (struct pipe_restore_temp*)kmalloc(sizeof(struct pipe_restore_temp), GFP_KERNEL);
-			pipe_restore_pointer = pipe_restore_pointer->next;
-			break;
-		}
-		else
-		{
-			pipe_restore_pointer = pipe_restore_pointer->next;
 		}
 	}
 
-	pipe_restore_pointer->pipe_id = pipe_id;
-	pipe_restore_pointer->file = file;
-	pipe_restore_pointer->next = NULL;
+	p->process = process;
+	p->fd = fd;
+	p->next = NULL;
 }
 
-void restore_pipe_status(struct saved_pipe* saved_pipe, struct pipe_inode_info* new_pipe)
+// Reads existing data from pipe pages and writes to new pipe
+void restore_pipe_data(struct saved_pipe* saved_pipe, unsigned int fd)
 {
-	int i = 0;
+	// Read data from pages
+	unsigned int numpages = saved_pipe->nrbufs;
+	unsigned int curpage = saved_pipe->curbuf;
+	char tempbuf[4096];
 
-	sprint("New Pipe Buffer Information Before Restore:\n");
-	sprint("new_pipe->wait = %p\n", new_pipe->wait);
-	sprint("new_pipe->nrbufs = %u\n", new_pipe->nrbufs);
-	sprint("new_pipe->curbuf = %u\n", new_pipe->curbuf);
-	sprint("new_pipe->readers = %u\n", new_pipe->readers);
-	sprint("new_pipe->writers = %u\n", new_pipe->writers);
-	sprint("new_pipe->waiting_writers = %u\n", new_pipe->waiting_writers);
-	sprint("new_pipe->r_counter = %u\n", new_pipe->r_counter);
-	sprint("new_pipe->w_counter = %u\n", new_pipe->w_counter);
+	sprint("Total number of pipe buffer pages to restore: %u\n", numpages);
+	while(numpages) {
+		struct saved_pipe_buffer *saved_buf = saved_pipe->bufs + curpage;
+		void *addr;
+		size_t chars = saved_buf->len;
+		mm_segment_t old_fs;
+		struct file* file;
+		loff_t temppos = 0;
 
-	// Restore pipe status
-	//new_pipe->wait = saved_pipe->wait;
-	new_pipe->nrbufs = saved_pipe->nrbufs;
-	new_pipe->curbuf = saved_pipe->curbuf;
-	new_pipe->readers = saved_pipe->readers;
-	new_pipe->writers = saved_pipe->writers;
-	new_pipe->waiting_writers = saved_pipe->waiting_writers;
-	new_pipe->r_counter = saved_pipe->r_counter;
-	new_pipe->w_counter = saved_pipe->w_counter;
+		sprint("Reading from buffer page %u with %u bytes.\n", curpage, chars);
 
-	sprint("Saved Pipe Buffer Information:\n");
-	sprint("new_pipe->wait = %p\n", saved_pipe->wait);
-	sprint("new_pipe->nrbufs = %u\n", saved_pipe->nrbufs);
-	sprint("new_pipe->curbuf = %u\n", saved_pipe->curbuf);
-	sprint("new_pipe->readers = %u\n", saved_pipe->readers);
-	sprint("new_pipe->writers = %u\n", saved_pipe->writers);
-	sprint("new_pipe->waiting_writers = %u\n", saved_pipe->waiting_writers);
-	sprint("new_pipe->r_counter = %u\n", saved_pipe->r_counter);
-	sprint("new_pipe->w_counter = %u\n", saved_pipe->w_counter);
-	sprint("new_pipe->inode = %u\n", saved_pipe->inode);
+		// Read from saved buffer
+		addr = kmap(saved_buf->page); // Non-atomic map
+		memcpy(tempbuf, addr + saved_buf->offset, chars);
+		kunmap(saved_buf->page); // Non-atomic unmap
 
-	sprint("Non saved pipe buffer information:\n");
-	sprint("new_pipe->page = %p\n", new_pipe->wait);
-	sprint("new_pipe->fasync_readers = %p\n", new_pipe->fasync_readers);
-	sprint("new_pipe->fasync_writers = %p\n", new_pipe->fasync_writers);
-	sprint("new_pipe->inode = %p\n", new_pipe->inode);
-	sprint("new_pipe->bufs = %p\n", new_pipe->bufs);
+		numpages--;
+		curpage = (curpage + 1) & (PIPE_BUFFERS-1);
+
+		// Write to new buffer
+		old_fs = get_fs();
+		set_fs(KERNEL_DS);
+		file = fget(fd);
+		sprint("Writing to fd: %u\n", fd);
+		if (file)
+		{
+			vfs_write(file, tempbuf, chars, &temppos);
+			fput(file);
+		}
+		set_fs(old_fs);
+		sprint("Wrote to fd: %u\n", fd);
+	}
+	sprint("Finished writing all pipe contents\n");
+}
+
+// Restore unnamed pipes
+void restore_pipe(struct saved_file* f, struct global_state_info* global_state, struct saved_task_struct* state, unsigned int* max_fd)
+{
+	struct saved_file* sfile;
+	struct saved_file* open_files = state->open_files;
+	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
+	struct pipes_to_close* pipe_close_head = global_state->pipe_close_head;
+	struct pipe_restore_temp* other_end = find_other_pipe_end(pipe_restore_head, f->pipe.inode);
+
+	// If pipes have not been created yet, create a pair of pipes even if the process doesn't use both pipes.
+	// Extraneous pipes will be closed later
+	if (other_end == NULL)
+	{
+		int pipe_fd[2];
+		if (do_pipe(pipe_fd) < 0)
+		{
+			sprint("Unable to restore pipe at fd: %u\n", f->fd);
+			panic("Unable to restore pipe");
+		}
+		sprint("Created pipe pair with read end at fd %d and write end at fd %d.\n", pipe_fd[0], pipe_fd[1]);
+
+		// Scan saved file struct and dup the read and write ends to corresponding fds
+		// If the end does not exist, change the fd to max fd+1
+		if (f->type == READ_PIPE_FILE)
+		{
+			int use_maxfd = 1;
+
+			sprint("Restoring read pipe end\n");
+			if (f->fd != pipe_fd[0])
+			{
+				if (sys_dup2(pipe_fd[0], f->fd) != f->fd)
+				{
+					sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[0], f->fd);
+					panic("Unable to change fd of read end");
+				}
+				sprint("Duped read pipe from %d to %u\n", pipe_fd[0], f->fd);
+				sys_close(pipe_fd[0]);
+				pipe_fd[0] = f->fd;
+			}
+			else
+				sprint("Did not need to change fd of read end %d\n", pipe_fd[0]);
+
+			// Scan the saved fd table for other pipe end
+			for(sfile = open_files; sfile != NULL; sfile = sfile->next)
+			{
+				if ((sfile->type == WRITE_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
+				{
+					if (sfile->fd != pipe_fd[1])
+					{
+						if (sys_dup2(pipe_fd[1], sfile->fd) != sfile->fd)
+						{
+							sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[1], sfile->fd);
+							panic("Unable to change fd of read end");
+						}
+						use_maxfd = 0;
+						sprint("Duped write pipe from %d to %u\n", pipe_fd[1], sfile->fd);
+						sys_close(pipe_fd[1]);
+						pipe_fd[1] = sfile->fd;
+					}
+					else
+					{
+						sprint("Did not need to change fd of write end %d\n", pipe_fd[1]);
+					}
+					break;
+				}
+			}
+
+			if (use_maxfd)
+			{
+				*max_fd = *max_fd + 1;
+				if (sys_dup2(pipe_fd[1], *max_fd) != *max_fd)
+				{
+					sprint("Unable to change fd of write end from %d to %u\n", pipe_fd[1], *max_fd);
+					panic("Unable to change fd of write end");
+				}
+				add_to_pipe_close(pipe_close_head, state->pid, *max_fd);
+			}
+		}
+		else if (f->type == WRITE_PIPE_FILE)
+		{
+			int use_maxfd = 1;
+
+			sprint("Restoring write pipe end\n");
+			if (f->fd != pipe_fd[1])
+			{
+				if (sys_dup2(pipe_fd[1], f->fd) != f->fd)
+				{
+					sprint("Unable to change fd of write end from %d to %u\n", pipe_fd[1], f->fd);
+					panic("Unable to change fd of write end");
+				}
+				sprint("Duped write pipe from %d to %u\n", pipe_fd[1], f->fd);
+				sys_close(pipe_fd[1]);
+				pipe_fd[1] = f->fd;
+			}
+			else
+				sprint("Did not need to change fd of write end %d\n", pipe_fd[1]);
+
+			// Scan the saved fd table for other pipe end
+			for(sfile = open_files; sfile != NULL; sfile = sfile->next)
+			{
+				if ((sfile->type == READ_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
+				{
+					if (pipe_fd[0] != sfile->fd)
+					{
+						if (sys_dup2(pipe_fd[0], sfile->fd) != sfile->fd)
+						{
+							sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[0], sfile->fd);
+							panic("Unable to change fd of read end");
+						}
+						use_maxfd = 0;
+						sprint("Duped read pipe from %d to %u\n", pipe_fd[0], sfile->fd);
+						sys_close(pipe_fd[0]);
+						pipe_fd[0] = sfile->fd;
+					}
+					else
+					{
+						sprint("Did not need to change fd of read end %d\n", pipe_fd[0]);
+					}
+					break;
+				}
+			}
+
+			if (use_maxfd)
+			{
+				*max_fd = *max_fd + 1;
+				if (sys_dup2(pipe_fd[0], *max_fd) != *max_fd)
+				{
+					sprint("Unable to change fd of write end from %u to %u\n", pipe_fd[0], *max_fd);
+					panic("Unable to change fd of write end");
+				}
+				add_to_pipe_close(pipe_close_head, state->pid, *max_fd);
+			}
+		}
+
+		// Store pipe information into global table
+		add_to_pipe_restore(pipe_restore_head, f->pipe.inode, state->pid, pipe_fd[0], pipe_fd[1], fcheck(pipe_fd[0]), fcheck(pipe_fd[1]));
+
+		// Write to pipe
+		restore_pipe_data(&(f->pipe), pipe_fd[1]);	
+	}
+	// If the pipes have already been created in this process, do nothing
+	// If they were only created in other processes, copy the pipes to current process
+	else if(search_pipe_for_process(other_end, state->pid) == 0)
+	{
+		int pipe_fd[2];
+
+		pipe_fd[0] = pipe_fd[1] = 0;
+
+		// Scan the saved fd table and restore open pipe ends
+		for(sfile = open_files; sfile != NULL; sfile = sfile->next)
+		{
+			if ((sfile->type == READ_PIPE_FILE)  && (sfile->pipe.inode = f->pipe.inode))
+			{
+				if (alloc_fd(sfile->fd, 0) != sfile->fd)
+				{
+					sprint("Unable to allocate fd %u for pipe read end\n", sfile->fd);
+					panic("Unable to allocate fd for pipe read end");
+				}
+				fd_install(sfile->fd, other_end->read_file);
+				get_file(other_end->read_file);
+				pipe_fd[0] = sfile->fd;
+				sprint("Copied read pipe end to fd %d.\n", pipe_fd[0]);
+			}
+
+			if ((sfile->type == WRITE_PIPE_FILE)  && (sfile->pipe.inode = f->pipe.inode))
+			{
+				if (alloc_fd(sfile->fd, 0) != sfile->fd)
+				{
+					sprint("Unable to allocate fd %u for pipe write end\n", sfile->fd);
+					panic("Unable to allocate fd for pipe write end");
+				}
+				fd_install(sfile->fd, other_end->write_file);
+				get_file(other_end->write_file);
+				pipe_fd[1] = sfile->fd;
+				sprint("Copied write pipe end to fd %d.\n", pipe_fd[1]);
+			}
+		}
+		
+		// Add process to linked list of multiple processes holding the same pipes
+		add_process_to_pipe_restore(pipe_restore_head, f->pipe.inode, state->pid);
+	}
+	else
+	{
+		sprint("This fd does not require any pipe restore.\n");
+	}
+
+	sprint("Pipe restore completed\n");
+}
+
+// Restore named pipes
+void restore_fifo(struct saved_file* f, struct global_state_info* global_state, struct saved_task_struct* state, unsigned int* max_fd)
+{
+	int fd;
+	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
+
+	if (f->type == WRITE_FIFO_FILE)
+	{
+		unsigned int temp_fd = 0;
+
+		sprint("Restoring named pipe: write end\n");
+
+		// Named pipes do not allow a write end to be created if no read end exists.
+		// Create a fake read end if no read end is found.
+		if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) == NULL)
+		{
+			sprint("Creating false read end to allow write end to be created\n");
+			fd = sys_open(f->name, O_RDONLY | O_NONBLOCK, 777);
+			*max_fd = *max_fd + 1;
+			if (sys_dup2(fd, *max_fd) != *max_fd)
+			{
+				sprint("Unable to change fd of false read end from %d to %u\n", fd, *max_fd);
+				panic("Unable to change fd of false read end");
+			}
+			temp_fd = *max_fd;
+		}
+
+		fd = sys_open(f->name, O_WRONLY | O_NONBLOCK, 777);
 	
-	// Restore read pipe buffers
-	for (i=0; i < saved_pipe->nrbufs; i++)
-	{
-		// Print Stuff
-		unsigned long buf_pfn = page_to_pfn(saved_pipe->bufs[i].page);
-		sprint("Before restore buffer information for buf pfn %d: %ld\n", i, buf_pfn); 
-		sprint("new_pipe->bufs[i].page = %p\n", new_pipe->bufs[i].page);
-		sprint("new_pipe->bufs[i].offset = %u\n", new_pipe->bufs[i].offset);
-		sprint("new_pipe->bufs[i].len = %u\n", new_pipe->bufs[i].len);
-		sprint("new_pipe->bufs[i].flags = %u\n", new_pipe->bufs[i].flags);
-		sprint("new_pipe->bufs[i].private = %lu\n", new_pipe->bufs[i].private);		
+		// If not already done, restore data and add pipe to global table
+		if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) == NULL)
+		{
+			restore_pipe_data(&(f->pipe), fd);
+			add_to_pipe_restore(pipe_restore_head, f->pipe.inode, state->pid, 0, 0, NULL, NULL);
+		}
 
-		sprint("Restore buffer information for buf pfn %d: %ld\n", i, buf_pfn); 
-		sprint("new_pipe->bufs[i].page = %p\n", saved_pipe->bufs[i].page);
-		sprint("new_pipe->bufs[i].offset = %u\n", saved_pipe->bufs[i].offset);
-		sprint("new_pipe->bufs[i].len = %u\n", saved_pipe->bufs[i].len);
-		sprint("new_pipe->bufs[i].flags = %u\n", saved_pipe->bufs[i].flags);
-		sprint("new_pipe->bufs[i].private = %lu\n", saved_pipe->bufs[i].private);
-
-		// Restore stuff
-		new_pipe->bufs[i].page = saved_pipe->bufs[i].page;
-		new_pipe->bufs[i].offset = saved_pipe->bufs[i].offset;
-		new_pipe->bufs[i].len = saved_pipe->bufs[i].len;
-		new_pipe->bufs[i].flags = saved_pipe->bufs[i].flags;
-		new_pipe->bufs[i].private = saved_pipe->bufs[i].private;
-
-		// Weird ops thing
-		sprint("Non saved ops thing: %p\n", new_pipe->bufs[i].ops);
-		set_pipe_ops(&(new_pipe->bufs[i]));
-		sprint("Modified ops thing: %p\n", new_pipe->bufs[i].ops);
-
+		// Close fake read end if created
+		if (temp_fd != 0)
+			sys_close(temp_fd);
 	}
+	else
+	{
+		sprint("Restoring named pipe: read end\n");
+
+		fd = sys_open(f->name, O_RDONLY | O_NONBLOCK, 777);
+		
+		// If pipe has not been written to yet, create a write end and write to it first
+		if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) == NULL)
+		{
+			int temp_fd;
+
+			sprint("Creating false write end to fill pipe\n");
+			temp_fd = sys_open(f->name, O_WRONLY | O_NONBLOCK, 777);
+			*max_fd = *max_fd + 1;
+			if (sys_dup2(temp_fd, *max_fd) != *max_fd)
+			{
+				sprint("Unable to change fd of false write end from %d to %u\n", fd, *max_fd);
+				panic("Unable to change fd of false write end");
+			}
+			restore_pipe_data(&(f->pipe), *max_fd);
+			sys_close(*max_fd);
+		}
+
+		add_to_pipe_restore(pipe_restore_head, f->pipe.inode, state->pid, 0, 0, NULL, NULL);
+	}
+
+	// Dup the fd to the right one
+	if (fd != f->fd)
+	{
+		if (sys_dup2(fd, f->fd) != f->fd)
+		{
+			sprint("Could not dup fd of fifo from %d to %u\n", fd, f->fd);
+			panic("Could not dup fd of fifo\n");
+		}
+		sys_close(fd);
+	}
+	sprint("Duped fd of fifo from %d to %u\n", fd, f->fd);
 }
 
-struct file* restore_read_pipe_before(struct saved_pipe* saved_read_info, struct pipe_restore_temp* pipe_restore_head)
-{
-	struct file* file;
-	struct pipe_inode_info* read_info;
-
-	sprint("Restoring read pipe before write\n");
-	// Create a write end of pipe
-	file = create_write_pipe(0);
-	read_info = file->f_path.dentry->d_inode->i_pipe;
-
-	// Convert a write pipe to a read pipe (does this work?)
-	file->f_pos = 0;
-	file->f_flags = O_RDONLY;
-	file->f_op = &read_pipefifo_fops;
-	file->f_mode = FMODE_READ;
-	file->f_version = 0;
-
-	restore_pipe_status(saved_read_info, read_info);
-
-	sprint("Actual file f_count = %ld", file_count(file));
-	// Add pipe to pipe restore table
-	add_to_pipe_restore(pipe_restore_head, saved_read_info->inode, file);
-
-	return file;
-}
-
-struct file* restore_read_pipe_after(struct saved_pipe* saved_read_info, struct pipe_restore_temp* pipe_restore_head)
-{
-	struct file* file = NULL;
-	struct file* other_end = NULL;
-	struct pipe_inode_info* read_info;
-
-	sprint("Restoring read pipe after write\n");
-	// Find other end of pipe in pipe restore table and create read pipe
-	other_end = find_other_pipe_end(pipe_restore_head, saved_read_info->inode);
-	sprint("Other end is: %p\n", other_end);
-	file = create_read_pipe(other_end, 0);
-	read_info = file->f_path.dentry->d_inode->i_pipe;
-
-	restore_pipe_status(saved_read_info, read_info);
-	sprint("Actual file f_count = %ld", file_count(file));
-	return file;
-}
-
-struct file* restore_write_pipe_before(struct saved_pipe* saved_write_info, struct pipe_restore_temp* pipe_restore_head)
-{
-	struct file* file;
-	struct pipe_inode_info* write_info;
-
-	sprint("Restoring write pipe before read\n");
-	// Create write pipe
-	file = create_write_pipe(0);
-	write_info = file->f_path.dentry->d_inode->i_pipe;
-
-	restore_pipe_status(saved_write_info, write_info);
-	sprint("Actual file f_count = %ld", file_count(file));
-	// Add pipe to pipe restore table
-	add_to_pipe_restore(pipe_restore_head, saved_write_info->inode, file);
-
-	return file;
-}
-
-struct file* restore_write_pipe_after(struct saved_pipe* saved_write_info, struct pipe_restore_temp* pipe_restore_head)
-{
-	struct file* file;
-	struct file* other_end;
-	struct pipe_inode_info* write_info;
-
-	sprint("Restoring write pipe after read\n");
-	// Find other end of pipe in pipe restore table
-	other_end = find_other_pipe_end(pipe_restore_head, saved_write_info->inode);
-
-	// Create write pipe
-	file = get_empty_filp();
-	if (!file)
-		panic("Unable to restore write pipe after read");
-
-	file->f_path = other_end->f_path;
-	path_get(&other_end->f_path);
-	file->f_mapping = other_end->f_path.dentry->d_inode->i_mapping;
-
-	file->f_pos = 0;
-	file->f_flags = O_WRONLY;
-	file->f_op = &write_pipefifo_fops;
-	file->f_mode = FMODE_WRITE;
-	file->f_version = 0;
-
-	write_info = file->f_path.dentry->d_inode->i_pipe;
-	restore_pipe_status(saved_write_info, write_info);
-	sprint("Actual file f_count = %ld", file_count(file));
-	return file;
-}
-
-void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_head)
+// Restore a regular file
+void restore_file(struct saved_file* f)
 {
 	unsigned int fd;
 	struct file* file;
@@ -733,55 +926,61 @@ void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_h
 		sprint("Could not get original fd %u, got %u\n", f->fd, fd);
 		panic("Could not get original fd");
 	}
-
-	switch (f->type)
-	{
-		case READ_PIPE_FILE:
-			if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) != NULL){
-				sprint("Restore read pipe after write\n");
-				file = restore_read_pipe_after(&(f->pipe), pipe_restore_head);
-			}
-			else{
-				sprint("Restore read pipe before write\n");
-				file = restore_read_pipe_before(&(f->pipe), pipe_restore_head);
-			}
-			break;
-		case WRITE_PIPE_FILE:
-			if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) != NULL){
-				sprint("Restore write pipe after read\n");
-				file = restore_write_pipe_after(&(f->pipe), pipe_restore_head);
-			}
-			else{
-				sprint("Restore write pipe before read\n");
-				file = restore_write_pipe_before(&(f->pipe), pipe_restore_head);
-			}
-			break;
-		default:
-			file = do_filp_open(-100, f->name, 0, -1074763960); //need real flags, yes thats an accurate number
-			sprint("Restoring some normal file.\n");
-			break;
-	}
-
-	atomic_long_set(&(file->f_count), f->count);
-	sprint("Set file count value to %ld\n", f->count);
+	file = do_filp_open(-100, f->name, 0, -1074763960); //need real flags, yes thats an accurate number
 
 	if(IS_ERR(file))
 	{
 		sprint("Could not open %s error: %ld\n", f->name, PTR_ERR(file));
 		panic("Could not restore file");
 	}
-	sprint("Return file pointer is: %p\n", file);
+	atomic_long_set(&(file->f_count), f->count);
+	sprint("Set file count value to %ld\n", f->count);
 	fd_install(fd, file);
-	sprint("fd_install completed\n");
 }
 
-void restore_files(struct saved_task_struct* state, struct pipe_restore_temp* pipe_restore_head)
+void restore_files(struct saved_task_struct* state, struct global_state_info* global_state)
 {
 	struct saved_file* f;
+	unsigned int max_fd = 0;
+
 	for(f=state->open_files; f!=NULL; f=f->next)
 	{
-		sprint("Restoring fd: %u - %s\n", f->fd, f->name);
-		restore_file(f, pipe_restore_head);
+		if (f->fd > max_fd)
+			max_fd = f->fd;
+	}
+
+	for(f=state->open_files; f!=NULL; f=f->next)
+	{
+		sprint("Restoring fd %u with path %s of file type %u\n", f->fd, f->name, f->type);
+		switch (f->type)
+		{
+			case READ_PIPE_FILE:
+			case WRITE_PIPE_FILE:
+				restore_pipe(f, global_state, state, &max_fd);
+				break;
+			case READ_FIFO_FILE:
+			case WRITE_FIFO_FILE:
+				restore_fifo(f, global_state, state, &max_fd);
+				break;
+			default:
+				restore_file(f);
+				break;
+		}
+	}
+}
+
+void close_unused_pipes(struct saved_task_struct* state, struct global_state_info* global_state)
+{
+	struct pipes_to_close* p;
+
+	// Loop through global close pipes structure and search for pid, closing all marked fds
+	for (p = global_state->pipe_close_head; p != NULL; p = p->next)
+	{
+		if (p->process == state->pid)
+		{
+			sys_close(p->fd);
+			sprint("Closed pipe at fd %u.\n", p->fd);
+		}
 	}
 }
 
@@ -1005,15 +1204,6 @@ void restore_registers(struct saved_task_struct* state)
 		
 }
 
-struct global_state_info
-{
-	wait_queue_head_t wq;
-	atomic_t processes_left;
-
-	struct completion all_done;
-	struct pipe_restore_temp *pipe_restore_head;
-};
-
 struct state_info
 {
 	struct map_entry* head;
@@ -1024,6 +1214,7 @@ struct state_info
 
 static struct global_state_info global_state;
 static struct pipe_restore_temp pipe_restore_head;
+static struct pipes_to_close pipe_close_head;
 
 int do_set_state(struct state_info* state);
 
@@ -1115,6 +1306,9 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	info->global_state->pipe_restore_head = &pipe_restore_head;
 	info->global_state->pipe_restore_head->pipe_id = NULL;
 	info->global_state->pipe_restore_head->next = NULL;
+	info->global_state->pipe_restore_head->processlist = NULL;
+	info->global_state->pipe_close_head = &pipe_close_head;
+	info->global_state->pipe_close_head->next = NULL;
 
 	thread = kthread_create(do_restore, info, "test_thread");
 	if(IS_ERR(thread))
@@ -1222,7 +1416,7 @@ int do_set_state(struct state_info* info)
 			put_files_struct(displaced);
 
 		
-		restore_files(state, info->global_state->pipe_restore_head);
+		restore_files(state, info->global_state);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
 		restore_creds(state);
@@ -1247,6 +1441,8 @@ int do_set_state(struct state_info* info)
 		}
 		wait_for_completion(&info->global_state->all_done);
 
+		// Post-restore, pre-wakeup tasks
+		close_unused_pipes(state, info->global_state);
 		kfree(info);
 		resume_saved_state();
 		return 0;
