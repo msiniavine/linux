@@ -11,7 +11,10 @@
 #include <asm/e820.h>
 #include <linux/fdtable.h>
 #include <linux/pipe_fs_i.h>
-
+#include <linux/tty.h>
+#include <linux/kd.h>
+#include <linux/console_struct.h>
+#include <linux/console.h>
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
@@ -208,8 +211,8 @@ static int get_physical_address(struct mm_struct* mm, unsigned long virtual_addr
 	}
 	
 	page = pte_page(*pte);
-	sprint( "Address %p maps to struct page at %p\n", (void*)virtual_address, page);
-	sprint( "PFN is: %p physical address is: %p\n", (void*)page_to_pfn(page), (void*)(page_to_pfn(page) << PAGE_SHIFT));
+//	sprint( "Address %p maps to struct page at %p\n", (void*)virtual_address, page);
+//	sprint( "PFN is: %p physical address is: %p\n", (void*)page_to_pfn(page), (void*)(page_to_pfn(page) << PAGE_SHIFT));
 	*physical_address = (page_to_pfn(page) << PAGE_SHIFT);
 	pte_unmap(pte);
 	return 1;
@@ -422,6 +425,57 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 	}
 }
 
+static int file_is_vc_terminal(char* name)
+{
+//TODO
+//I am cheating for now and assuming /tty1 is the terminal i want
+	if(!strcmp("/tty1", name))
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+static void save_vc_term_info(struct file* f, struct saved_file* file)
+{
+	struct tty_struct* tty;
+	struct tty_driver* driver;
+	struct vc_data* vcd;
+	struct saved_vc_data* svcd;
+	unsigned char* screen_buffer;
+
+	tty = (struct tty_struct*)f->private_data;
+	if(tty->magic != TTY_MAGIC)
+	{
+		panic("tty magic does not match expected: %x, got: %x\n", TTY_MAGIC, tty->magic);
+	}
+	driver = tty->driver;
+	if(driver->type != TTY_DRIVER_TYPE_CONSOLE || driver->subtype !=0)
+	{
+		panic("Driver type was not a console type\n");
+	}
+
+	vcd = (struct vc_data*)tty->driver_data;
+	svcd = (struct saved_vc_data*)alloc(sizeof(*svcd));
+	svcd->index = vcd->vc_num;
+	svcd->rows = vcd->vc_rows;
+	svcd->cols = vcd->vc_cols;
+	svcd->x = vcd->vc_x;
+	svcd->y = vcd->vc_y;
+	svcd->screen_buffer_size = vcd->vc_screenbuf_size;
+	screen_buffer = (unsigned char*)alloc(svcd->screen_buffer_size);
+
+	vcd->vc_sw->con_save_screen(vcd);  
+	memcpy(screen_buffer, vcd->vc_screenbuf, svcd->screen_buffer_size);
+	svcd->screen_buffer = screen_buffer;
+	file->type = VC_TTY;
+	file->vcd = svcd;
+	
+}
+
 static void save_files(struct files_struct* files, struct saved_task_struct* task, struct map_entry* head)
 {
 	struct fdtable* fdt;
@@ -431,14 +485,12 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	fdt = files_fdtable(files);
 	
 	sprint("max_fds: %d\n", fdt->max_fds);
-	for(fd = 3; fd<fdt->max_fds; fd++)  // start with 3 because 0,1,2 are not really files
-//	for(fd=0; fd<fdt->max_fds; fd++)   // dd only uses 0, 1
+	for(fd=0; fd<fdt->max_fds; fd++)
 	{
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);
-		if(fd == 2) continue; //skip std err for now
 
-		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
+//		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
 
 		if(f == NULL)
 			continue;
@@ -448,8 +500,14 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		file->fd = fd;
 		file->count = file_count(f);
 
-		if (file_is_pipe(f))
+		if(file_is_vc_terminal(file->name))
+		{
+			save_vc_term_info(f, file);
+		}
+		else if (file_is_pipe(f))
+		{
 			save_pipe_info(task, f, file, head);
+		}
 
 		file->next = task->open_files;
 		task->open_files = file;

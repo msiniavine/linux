@@ -11,6 +11,9 @@
 #define WRITE_PIPE_FILE 2
 #define READ_FIFO_FILE 3
 #define WRITE_FIFO_FILE 4
+// Terminal that outputs to a virtual console
+#define VC_TTY  5
+
 
 struct saved_pipe_buffer {
 	struct page *page;
@@ -47,6 +50,16 @@ struct pipes_to_close
 	unsigned int fd;
 };
 
+struct saved_vc_data
+{
+	int rows;
+	int cols;
+	int index;
+	int screen_buffer_size;
+	unsigned char* screen_buffer;
+	unsigned int x, y;
+};
+
 struct saved_file
 {
 	unsigned int type;
@@ -54,6 +67,7 @@ struct saved_file
 	unsigned int fd;
 	long count;
 	struct saved_pipe pipe;
+	struct saved_vc_data* vcd;
 	struct saved_file* next;
 };
 
@@ -166,8 +180,8 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 
 #define STATE_DEBUG 1
 #if STATE_DEBUG
-#define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
-#define csprint(format, ...) if(is_save_enabled(current)) printk(KERN_EMERG format, ##__VA_ARGS__)
+#define sprint(format, ...) printk(KERN_WARNING format, ##__VA_ARGS__)
+#define csprint(format, ...) if(is_save_enabled(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
 #else
 #define sprint(format, ...)
 #define csprint(format, ...)

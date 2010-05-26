@@ -32,6 +32,9 @@
 #include <linux/mutex.h>
 #include <linux/wait.h>
 #include <linux/pipe_fs_i.h>
+#include <linux/tty.h>
+#include <linux/kd.h>
+#include <linux/console_struct.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -915,8 +918,48 @@ void restore_fifo(struct saved_file* f, struct global_state_info* global_state, 
 	sprint("Duped fd of fifo from %d to %u\n", fd, f->fd);
 }
 
+<<<<<<< HEAD:arch/x86/kernel/set_state.c
 // Restore a regular file
 void restore_file(struct saved_file* f)
+=======
+void redraw_screen(struct vc_data*, int);
+
+struct file* restore_vc_terminal(struct saved_file* f)
+{
+	struct file* file;
+	struct tty_struct* tty;
+	struct tty_driver* driver;
+	struct vc_data* vcd;
+	struct saved_vc_data* svcd = f->vcd;
+	file = do_filp_open(-100, "/dev/tty1", 0, -1074763960);
+	if(IS_ERR(file))
+	{
+		panic("Could not open terminal file with error: %d\n", PTR_ERR(file));
+	}
+
+	tty = (struct tty_struct*)file->private_data;
+	if(tty->magic != TTY_MAGIC)
+	{
+		panic("tty magic value does not match\n");
+	}
+	driver = tty->driver;
+	if(driver->type != TTY_DRIVER_TYPE_CONSOLE || driver->subtype !=0)
+	{
+		panic("Driver type des not match\n");
+	}
+	vcd = (struct vc_data*)tty->driver_data;
+	if(vcd->vc_screenbuf_size != svcd->screen_buffer_size)
+	{
+		panic("Screen buffer sizes do not match\n");
+	}
+	memcpy(vcd->vc_screenbuf, svcd->screen_buffer, svcd->screen_buffer_size); 
+	vcd->vc_x = svcd->x;
+	vcd->vc_y = svcd->y;
+	redraw_screen(vcd, 0);
+	return file;
+}
+
+void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_head)
 {
 	unsigned int fd;
 	struct file* file;
@@ -926,7 +969,23 @@ void restore_file(struct saved_file* f)
 		sprint("Could not get original fd %u, got %u\n", f->fd, fd);
 		panic("Could not get original fd");
 	}
-	file = do_filp_open(-100, f->name, 0, -1074763960); //need real flags, yes thats an accurate number
+	switch (f->type)
+	{
+	        case VC_TTY:
+			file = restore_vc_terminal(f);
+			break;
+		default:
+			file = do_filp_open(-100, f->name, 0, -1074763960); 
+			if(IS_ERR(file))
+			{
+				panic("Could not open file %s\n", f->name);
+			}
+			sprint("Restoring some normal file.\n");
+			break;
+	}
+
+	atomic_long_set(&(file->f_count), f->count);
+	sprint("Set file count value to %ld\n", f->count);
 
 	if(IS_ERR(file))
 	{
