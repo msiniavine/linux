@@ -14,6 +14,7 @@
 #include <linux/tty.h>
 #include <linux/kd.h>
 #include <linux/console_struct.h>
+#include <linux/console.h>
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
@@ -468,11 +469,10 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	svcd->cols = vcd->vc_cols;
 	svcd->x = vcd->vc_x;
 	svcd->y = vcd->vc_y;
-	svcd->orig_screenbuf = (unsigned long)vcd->vc_screenbuf;
-	svcd->orig_origin = vcd->vc_origin;
-	svcd->offset = svcd->orig_origin - svcd->orig_screenbuf;
 	svcd->screen_buffer_size = vcd->vc_screenbuf_size;
 	screen_buffer = (unsigned char*)alloc(svcd->screen_buffer_size);
+
+	vcd->vc_sw->con_save_screen(vcd);  
 	memcpy(screen_buffer, vcd->vc_screenbuf, svcd->screen_buffer_size);
 	svcd->screen_buffer = screen_buffer;
 	file->type = VC_TTY;

@@ -49,9 +49,6 @@ struct saved_vc_data
 	int screen_buffer_size;
 	unsigned char* screen_buffer;
 	unsigned int x, y;
-	unsigned long orig_screenbuf;
-	unsigned long orig_origin;
-	long offset;
 };
 
 struct saved_file

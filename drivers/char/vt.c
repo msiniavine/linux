@@ -105,8 +105,6 @@
 #include <asm/system.h>
 #include <linux/uaccess.h>
 
-#include <linux/set_state.h>
-
 #define MAX_NR_CON_DRIVER 16
 
 #define CON_DRIVER_FLAG_MODULE 1
@@ -618,7 +616,6 @@ static void set_origin(struct vc_data *vc)
 {
 	WARN_CONSOLE_UNLOCKED();
 
-	sprint("Current origin: %lu\n", vc->vc_origin);
 	if (!CON_IS_VISIBLE(vc) ||
 	    !vc->vc_sw->con_set_origin ||
 	    !vc->vc_sw->con_set_origin(vc))
@@ -626,8 +623,6 @@ static void set_origin(struct vc_data *vc)
 	vc->vc_visible_origin = vc->vc_origin;
 	vc->vc_scr_end = vc->vc_origin + vc->vc_screenbuf_size;
 	vc->vc_pos = vc->vc_origin + vc->vc_size_row * vc->vc_y + 2 * vc->vc_x;
-	sprint("buf: %lx, origin: %lx, scr_end: %lx, pos: %lx, x:%lu, y:%lu\n", vc->vc_screenbuf, vc->vc_origin, vc->vc_scr_end, 
-	       vc->vc_pos, vc->vc_x, vc->vc_y);
 }
 
 static inline void save_screen(struct vc_data *vc)
@@ -656,7 +651,6 @@ static void clear_buffer_attributes(struct vc_data *vc)
 void redraw_screen(struct vc_data *vc, int is_switch)
 {
 	int redraw = 0;
-	sprint("Redraw screen called\n");
 
 	WARN_CONSOLE_UNLOCKED();
 
@@ -668,7 +662,6 @@ void redraw_screen(struct vc_data *vc, int is_switch)
 
 	if (is_switch) {
 		struct vc_data *old_vc = vc_cons[fg_console].d;
-		sprint("Switching\n");
 		if (old_vc == vc)
 			return;
 		if (!CON_IS_VISIBLE(vc))
@@ -688,7 +681,6 @@ void redraw_screen(struct vc_data *vc, int is_switch)
 	if (redraw) {
 		int update;
 		int old_was_color = vc->vc_can_do_color;
-		sprint("Redrawing\n");
 
 		set_origin(vc);
 		update = vc->vc_sw->con_switch(vc);
@@ -704,10 +696,7 @@ void redraw_screen(struct vc_data *vc, int is_switch)
 			clear_buffer_attributes(vc);
 		}
 		if (update && vc->vc_mode != KD_GRAPHICS)
-		{
-			sprint("Updating region\n");
 			do_update_region(vc, vc->vc_origin, vc->vc_screenbuf_size / 2);
-		}
 	}
 	set_cursor(vc);
 	if (is_switch) {
