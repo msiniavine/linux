@@ -613,9 +613,10 @@ void restore_pipe_data(struct saved_pipe* saved_pipe, unsigned int fd)
 	// Read data from pages
 	unsigned int numpages = saved_pipe->nrbufs;
 	unsigned int curpage = saved_pipe->curbuf;
-	char tempbuf[4096];
+	char* tempbuf;
 
 	sprint("Total number of pipe buffer pages to restore: %u\n", numpages);
+	tempbuf = kmalloc(4096, GFP_KERNEL);
 	while(numpages) {
 		struct saved_pipe_buffer *saved_buf = saved_pipe->bufs + curpage;
 		void *addr;
@@ -647,6 +648,7 @@ void restore_pipe_data(struct saved_pipe* saved_pipe, unsigned int fd)
 		set_fs(old_fs);
 		sprint("Wrote to fd: %u\n", fd);
 	}
+	kfree(tempbuf);
 	sprint("Finished writing all pipe contents\n");
 }
 
@@ -918,10 +920,9 @@ void restore_fifo(struct saved_file* f, struct global_state_info* global_state, 
 	sprint("Duped fd of fifo from %d to %u\n", fd, f->fd);
 }
 
-<<<<<<< HEAD:arch/x86/kernel/set_state.c
+
 // Restore a regular file
-void restore_file(struct saved_file* f)
-=======
+void restore_file(struct saved_file* f);
 void redraw_screen(struct vc_data*, int);
 
 struct file* restore_vc_terminal(struct saved_file* f)
@@ -934,7 +935,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	file = do_filp_open(-100, "/dev/tty1", 0, -1074763960);
 	if(IS_ERR(file))
 	{
-		panic("Could not open terminal file with error: %d\n", PTR_ERR(file));
+		panic("Could not open terminal file with error: %ld\n", PTR_ERR(file));
 	}
 
 	tty = (struct tty_struct*)file->private_data;
@@ -959,7 +960,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	return file;
 }
 
-void restore_file(struct saved_file* f, struct pipe_restore_temp* pipe_restore_head)
+void restore_file(struct saved_file* f)
 {
 	unsigned int fd;
 	struct file* file;
