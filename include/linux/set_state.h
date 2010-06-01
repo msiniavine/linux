@@ -66,6 +66,7 @@ struct saved_file
 	char name[PATH_LENGTH];
 	unsigned int fd;
 	long count;
+	int flags;
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_file* next;
@@ -181,7 +182,7 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 #define STATE_DEBUG 1
 #if STATE_DEBUG
 #define sprint(format, ...) printk(KERN_WARNING format, ##__VA_ARGS__)
-#define csprint(format, ...) if(is_save_enabled(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
+#define csprint(format, ...) if(is_save_enabled(current) || was_state_restored(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
 #else
 #define sprint(format, ...)
 #define csprint(format, ...)

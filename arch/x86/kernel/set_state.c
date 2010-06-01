@@ -932,7 +932,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	struct tty_driver* driver;
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd = f->vcd;
-	file = do_filp_open(-100, "/dev/tty1", 0, -1074763960);
+	file = do_filp_open(-100, "/dev/tty1", f->flags, -1074763960);
 	if(IS_ERR(file))
 	{
 		panic("Could not open terminal file with error: %ld\n", PTR_ERR(file));
@@ -964,6 +964,7 @@ void restore_file(struct saved_file* f)
 {
 	unsigned int fd;
 	struct file* file;
+	sprint("flags: %d\n", f->flags);
 	fd = alloc_fd(f->fd, 0); // need real flags
 	if(fd != f->fd)
 	{
@@ -976,7 +977,7 @@ void restore_file(struct saved_file* f)
 			file = restore_vc_terminal(f);
 			break;
 		default:
-			file = do_filp_open(-100, f->name, 0, -1074763960); 
+			file = do_filp_open(-100, f->name, f->flags, -1074763960); 
 			if(IS_ERR(file))
 			{
 				panic("Could not open file %s\n", f->name);

@@ -499,6 +499,20 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		sprint("fd %d points to %s\n", fd, file->name);
 		file->fd = fd;
 		file->count = file_count(f);
+		
+		if(f->f_mode & FMODE_READ)
+		{
+			file->flags = O_RDONLY;
+		}
+		if(f->f_mode & FMODE_WRITE)
+		{
+			file->flags = O_WRONLY;
+		}
+
+		if((f->f_mode & FMODE_READ) && (f->f_mode & FMODE_WRITE))
+		{
+			file->flags = O_RDWR;
+		}
 
 		if(file_is_vc_terminal(file->name))
 		{
