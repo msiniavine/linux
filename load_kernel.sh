@@ -7,7 +7,7 @@ cd test
     kexec -e
 } &
 
-./test_terminal
+./launcher
 
 #cd test
 #./test_loop < Makefile &> trace &
