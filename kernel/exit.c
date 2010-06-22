@@ -1575,6 +1575,7 @@ static int wait_consider_task(struct task_struct *parent, int ptrace,
 			      int __user *stat_addr, struct rusage __user *ru)
 {
 	int ret = eligible_child(type, pid, options, p);
+	csprint("Eligible: %s\n", ret ? "yes" : "no");
 	if (!ret)
 		return ret;
 
@@ -1641,6 +1642,7 @@ static int do_wait_thread(struct task_struct *tsk, int *notask_error,
 		/*
 		 * Do not consider detached threads.
 		 */
+		csprint("Found task %d %s, detached %s\n", p->pid, p->comm, task_detached(p) ? "yes" : "no");
 		if (!task_detached(p)) {
 			int ret = wait_consider_task(tsk, 0, p, notask_error,
 						     type, pid, options,
@@ -1695,7 +1697,10 @@ repeat:
 	 */
 	retval = -ECHILD;
 	if ((type < PIDTYPE_MAX) && (!pid || hlist_empty(&pid->tasks[type])))
+	{
+		csprint("Exited early\n");
 		goto end;
+	}
 
 	current->state = TASK_INTERRUPTIBLE;
 	read_lock(&tasklist_lock);
@@ -1808,6 +1813,8 @@ asmlinkage long sys_wait4(pid_t upid, int __user *stat_addr,
 	enum pid_type type;
 	long ret;
 
+
+	csprint("%d wait4: %d, %p, %d, %p\n", current->pid, upid, stat_addr, options, ru);
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
 		return -EINVAL;

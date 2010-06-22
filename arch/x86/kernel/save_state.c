@@ -546,6 +546,7 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 	struct sighand_struct* sighand = task->sighand;
 	sigset_t pending;
 	struct sigpending* tmp;
+	sigset_t* blocked;
 
 	sigemptyset(&pending);
 	spin_lock_irq(&sighand->siglock);
@@ -572,21 +573,24 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 
 	state->sighand.state = task->state;
 
-	if(task_pt_regs(task)->orig_ax == 179) // inside sigsuspend
+	switch(task_pt_regs(task)->orig_ax)
 	{
-		sigset_t* blocked = (sigset_t*)alloc(sizeof(*blocked));
+	case 179:    // sigsuspend
+		blocked  = (sigset_t*)alloc(sizeof(*blocked));
 		sprint("Saving state to restart sigsuspend upon reboot\n");
 		state->syscall_restart = task_pt_regs(task)->orig_ax;
 		*blocked = task->saved_sigmask;
 		state->syscall_data = blocked;
-	}
-	else if(task_pt_regs(task)->orig_ax == 162 || task_pt_regs(task)->orig_ax == 240
-		|| task_pt_regs(task)->orig_ax == 7)
-	{
+		break;
+	case 162:  // nanosleep
+	case 240:  // futex
+	case 7:    // waitpid
+	case 114:  // wait4
 		state->syscall_restart = task_pt_regs(task)->orig_ax;
 		sprint("Saving state to restore %d syscall\n", state->syscall_restart);
 		state->syscall_data = NULL;
-					
+		break;
+
 	}
 
 	spin_unlock_irq(&sighand->siglock);

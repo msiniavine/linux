@@ -1253,16 +1253,21 @@ void restore_registers(struct saved_task_struct* state)
 
 	sprint("Restoring registers\n");
 	regs = task_pt_regs(current);
-	*regs = state->registers;
 
-	if(state->syscall_restart == 162 || state->syscall_restart == 240 ||state->syscall_restart == 7)
+
+	switch(state->syscall_restart)
 	{
+	case 162:  // nanosleep
+	case 240:  // futex
+	case 7:    // waitpid
+	case 114:  // wait4
 		sprint("Restarting system call %d\n", state->syscall_restart);
 		state->registers.ax = state->registers.orig_ax;
 		state->registers.ip -= 2;
-
-	}
-		
+		break;
+	}	
+	*regs = state->registers;
+	print_regs(task_pt_regs(current));
 }
 
 struct state_info
