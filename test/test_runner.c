@@ -41,7 +41,8 @@ int main()
 	{
 		start_test(tests[i]);
 	}
-
+	
+	sleep(15);
 	for(i = 0; tests[i] != NULL; i++)
 	{
 		err = wait(&status);

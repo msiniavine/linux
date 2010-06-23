@@ -1651,7 +1651,7 @@ static int do_wait_thread(struct task_struct *tsk, int *notask_error,
 				return ret;
 		}
 	}
-
+	csprint("No children found\n");
 	return 0;
 }
 
@@ -1817,7 +1817,10 @@ asmlinkage long sys_wait4(pid_t upid, int __user *stat_addr,
 	csprint("%d wait4: %d, %p, %d, %p\n", current->pid, upid, stat_addr, options, ru);
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
+	{
+		csprint("Invalid options\n");
 		return -EINVAL;
+	}
 
 	if (upid == -1)
 		type = PIDTYPE_MAX;
@@ -1837,6 +1840,7 @@ asmlinkage long sys_wait4(pid_t upid, int __user *stat_addr,
 
 	/* avoid REGPARM breakage on x86: */
 	asmlinkage_protect(4, ret, upid, stat_addr, options, ru);
+	csprint("Wait4 returns %d\n", ret);
 	return ret;
 }
 

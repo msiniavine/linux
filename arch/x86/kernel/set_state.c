@@ -1309,6 +1309,7 @@ static void restore_children(struct saved_task_struct* state, struct state_info*
 	struct saved_task_struct* child;
 	struct task_struct* thread;
 	struct state_info* info;
+	INIT_LIST_HEAD(&current->children);
 	list_for_each_entry(child, &state->children, sibling)
 	{
 		sprint("Restoring child %d\n", child->pid);
@@ -1496,6 +1497,8 @@ int do_set_state(struct state_info* info)
 		if(info->parent)
 		{
 			current->real_parent = info->parent;
+			INIT_LIST_HEAD(&current->sibling);
+			list_add_tail(&current->sibling, &current->real_parent->children);
 		}
 
 
