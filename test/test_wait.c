@@ -6,7 +6,6 @@ int main()
 {
 	pid_t child;
 	int status;
-	enable_save_state();
 
 	child = fork();
 	if(child == 0)

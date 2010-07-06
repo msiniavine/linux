@@ -8,7 +8,6 @@ int main()
 {
 	sigset_t to_block, pending;
 	
-	enable_save_state();
 	sigemptyset(&to_block);
 	sigemptyset(&pending);
 	sigaddset(&to_block, SIGUSR1);
@@ -34,7 +33,7 @@ int main()
 
 	if(sigismember(&pending, SIGUSR1))
 	{
-		return 42;
+		return 0;
 	}
 	else
 	{

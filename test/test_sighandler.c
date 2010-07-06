@@ -13,7 +13,6 @@ void termination_handler(int signum)
 int main()
 {
 	struct sigaction new_action, old_action;
-	enable_save_state();
 	new_action.sa_handler = termination_handler;
 	sigemptyset(&new_action.sa_mask);
 	new_action.sa_flags = 0;

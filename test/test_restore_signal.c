@@ -23,7 +23,6 @@ int main()
 
 	sigaction(SIGUSR1, &act, NULL);
 
-	enable_save_state();
 	raise(SIGUSR1);
 
 	while(!called)

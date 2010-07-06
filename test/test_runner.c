@@ -9,6 +9,16 @@
 
 char* tests[] = {
 	"test_loop",
+	"test_altstack",
+//	"test_condvar",
+	"test_pending_signals",
+	"test_pid",
+	"test_restore_signal",
+	"test_sighandler",
+	"test_sighandler_call",
+	"test_sigsuspend",
+	"test_stack",
+	"test_wait",
 	NULL
 };
 
@@ -27,7 +37,11 @@ void start_test(char* name)
 	if(child == 0)
 	{
 		printf("%d: %s\n", getpid(), name);
-		execl(path, name, NULL);
+		if(!execl(path, name, NULL))
+		{
+			perror("execl");
+			exit(1);
+		}
 	}
 }
 
@@ -53,7 +67,7 @@ int main()
 			return 1;
 		}
 
-		printf("%d: Normal exits: %s, code: %d\n", err, WIFEXITED(status) ? "yes" : "no", WEXITSTATUS(status));
+		printf("%d: Normal exit: %s, code: %d\n", err, WIFEXITED(status) ? "yes" : "no", WEXITSTATUS(status));
 	}
 	return 0;
 }

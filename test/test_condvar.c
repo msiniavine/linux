@@ -77,7 +77,6 @@ int test_main (int argc, char *argv[])
 int main(int argc, char* argv[])
 {
 	pid_t child;
-	enable_save_state();
 	child = fork();
 	if(child == 0)
 	{

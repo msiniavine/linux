@@ -20,15 +20,15 @@ int main()
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;
 
-	err = sigaction(SIGINT, &act, NULL);
+	err = sigaction(SIGUSR1, &act, NULL);
 //	printf("sigaction returned: %d\n", err);
 	
-	enable_save_state();
-	while(1)
+	while(!was_state_restored())
 	{
-//		sleep(1);
+		sleep(1);
 	}
 //	printf("Received signal\n");
+	raise(SIGUSR1);
 
-	return called;
+	return !called;
 }

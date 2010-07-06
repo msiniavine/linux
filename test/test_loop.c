@@ -8,6 +8,6 @@ int _start()
 	{
 //		was_state_restored();
 	}
-        exit(1);
+        exit(0);
 }
 

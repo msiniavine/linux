@@ -12,7 +12,6 @@ int recursive_call(int n)
 int _start()
 {
 	recursive_call(100);
-	enable_save_state();
 	while(!was_state_restored());
 	recursive_call(1000);
 	exit(0);

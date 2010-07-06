@@ -8,7 +8,6 @@ int main()
 	pid_t new_pid;
 	pid_t original_pid = getpid();
 	printf("Current pid: %d\n", original_pid);
-	enable_save_state();
 	while(!was_state_restored())
 	{
 		sleep(1);

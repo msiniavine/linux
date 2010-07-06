@@ -16,8 +16,6 @@ int main()
 	int err;
 	sigset_t suspend_set;
 	
-	enable_save_state();
-
 	act.sa_handler = sighandler;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;

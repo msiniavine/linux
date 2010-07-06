@@ -19,7 +19,6 @@ int main()
 	struct sigaltstack new;
 	struct sigaction act;
 	int err;
-	enable_save_state();
 	void* stack = malloc(10*1024*1024);
 	new.ss_sp = stack;
 	new.ss_size = 10*1024*1024;
@@ -34,7 +33,6 @@ int main()
 	sigaction(SIGUSR1, &act, NULL);
 
 	raise(SIGUSR1);
-
 	while(!called)
 	{
 
