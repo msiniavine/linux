@@ -836,8 +836,16 @@ late_initcall(fr_init);
 
 asmlinkage int sys_enable_save_state(struct pt_regs regs)
 {
+	pid_t pid = regs.bx; 
 	struct save_state_permission* p = kmalloc(sizeof(*p), GFP_KERNEL);
-	p->pid = pid_vnr(task_pid(current));
+	if(pid)
+	{
+		p->pid = pid;
+	}
+	else
+	{
+		p->pid = pid_vnr(task_pid(current));
+	}
 	p->next = save_permitted;
 	save_permitted = p;
 	sprint("Save state enabled for process %d\n", p->pid);
@@ -893,6 +901,13 @@ asmlinkage int sys_was_state_restored(struct pt_regs regs)
 		sprint("State was not restored for process %d\n", task_pid_nr(current));
 	}
 	return ret;
+}
+
+asmlinkage int sys_state_present(struct pt_regs regs)
+{
+	struct saved_state* state;
+	state = (struct saved_state*)get_reserved_region();
+	return state->processes != NULL;
 }
 
 extern struct resource crashk_res;

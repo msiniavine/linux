@@ -2,32 +2,20 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "test.h"
 
-int main()
+int main(int argc, char* argv[])
 {
-	pid_t child;
-	enable_save_state();
-	child=fork();
-	if(child == -1)
+	pid_t pid;
+	if(argc != 2)
 	{
-		printf("Error calling fork\n");
+		printf("Usage launcher <pid>\n");
 		return 1;
 	}
-	else if(child == 0)
-	{
-		execl("/usr/bin/less", "less", "/home/maxim/linux-2.6/test/test_terminal.c", NULL);
-	}
-	else
-	{
-		while(!was_state_restored())
-		{
-			sleep(10);
-		}
-
-		sleep(100);
-		printf("launcher exiting\n");
-	}
-
+	
+	pid = atoi(argv[1]);
+	enable_save_state_pid(pid);
+	
 	return 0;
 }

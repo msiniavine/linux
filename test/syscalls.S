@@ -99,6 +99,18 @@ exit:
 	popl %ebp
 	ret
 
+.globl enable_save_state_pid
+enable_save_state_pid:
+	pushl %ebp
+	movl  %esp, %ebp
+	push %ebx
+	movl $334, %eax
+	movl 8(%ebp), %ebx
+	int $0x80
+	popl %ebx
+	popl %ebp
+	ret
+
 .globl fork
 fork:
 	pushl %ebp

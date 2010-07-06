@@ -335,6 +335,7 @@ ENTRY(sys_call_table)
 	.long sys_load_saved_state
 	.long sys_enable_save_state
 	.long sys_was_state_restored 	/* 335 */
-	.long sys_save_state	
+	.long sys_save_state
+	.long sys_state_present
 
 	
