@@ -13,6 +13,38 @@
 #define WRITE_FIFO_FILE 4
 // Terminal that outputs to a virtual console
 #define VC_TTY  5
+#define SOCKET 6
+
+struct saved_inet_sock
+{     
+	__be32			daddr;
+	__be32			rcv_saddr;
+	__be16			dport;
+	__u16			num;
+	__be32			saddr;
+	__be16			sport;
+};
+
+struct saved_socket
+{
+        int		        state;
+	short			type;
+	unsigned long		flags;
+        wait_queue_head_t	wait;
+        unsigned char		sock_protocol;
+	unsigned short		sock_type;
+	unsigned short		sock_family;
+        struct saved_inet_sock  inet;
+  int userlocks;
+  int binded;
+};
+
+
+struct saved_ipv6_pinfo
+{
+  //ignore ipv6 for now
+};
+
 
 
 struct saved_pipe_buffer {
@@ -70,6 +102,7 @@ struct saved_file
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_file* next;
+	struct saved_socket socket;
 };
 
 struct saved_page
@@ -176,7 +209,7 @@ void reserve_saved_memory(void);
 int is_save_enabled(struct task_struct*);
 int was_state_restored(struct task_struct*);
 void add_to_restored_list(struct task_struct*);
-
+int sock_attach_fd(struct socket *sock, struct file *file, int flags);
 struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 
 #define STATE_DEBUG 1
