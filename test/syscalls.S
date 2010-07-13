@@ -1,5 +1,20 @@
 .text
 
+.globl socketcall
+socketcall:
+	pushl %ebp
+	movl  %esp, %ebp
+	pushl %ebx
+	pushl %ecx
+	movl $102, %eax
+	movl 8(%ebp), %ebx
+	movl 12(%ebp), %ecx
+	int $0x80
+	popl %ecx
+	popl %ebx
+	popl %ebp
+	ret
+	
 .globl write
 write:
 	pushl %ebp

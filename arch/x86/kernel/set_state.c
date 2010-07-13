@@ -1038,23 +1038,25 @@ struct sockaddr_in servaddr;
    fd_install(fd, file);
    
 
-  
+   //check if the socket has binded or not, if so, apply the appropriate binding.
+   if(sock.binded){
+       switch(sock.type){
+	   case SOCK_DGRAM: 
+	     memset(&servaddr,'\0' ,sizeof(servaddr));
+	     servaddr.sin_family = AF_INET;
 
-   switch(sock.userlocks){
-   case 8: 
-     memset(&servaddr,'\0' ,sizeof(servaddr));
-     servaddr.sin_family = AF_INET;
+	     if(sock.inet.rcv_saddr == 0)
+	     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	     else
+	     servaddr.sin_addr.s_addr = htonl(sock.inet.rcv_saddr);  
 
-     if(sock.inet.rcv_saddr == 0)
-     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-     else
-     servaddr.sin_addr.s_addr = htonl(sock.inet.rcv_saddr);  
+	     servaddr.sin_port = htons(sock.inet.num);
+	     err = socket->ops->bind(socket,(struct sockaddr *)&servaddr, sizeof(servaddr));
 
-     servaddr.sin_port = htons(sock.inet.num);
-    err = socket->ops->bind(socket,(struct sockaddr *)&servaddr, sizeof(servaddr));
-    if(err<0)panic("binding failed");
-// fput_light(socket->file, fput_needed);
-     break;
+	     if(err<0)panic("binding failed");
+
+	   break;
+       }
    }
   return;
 }
@@ -1321,6 +1323,7 @@ void restore_registers(struct saved_task_struct* state)
 
 	switch(state->syscall_restart)
 	{
+	case 4:
 	case 102:
 	case 162:  // nanosleep
 	case 240:  // futex

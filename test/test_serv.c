@@ -26,16 +26,11 @@ int main (int argc, char **argv){
 	bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
 	for ( ; ; ){
-            printf("here\n");
+            //printf("here\n");
 	    len = sizeof(cliaddr);
-	    n = recvfrom(sockfd, msg, 100, 0, (struct sockaddr 
-*)&cliaddr, &len);
+	    n = recvfrom(sockfd, msg, 100, 0, (struct sockaddr *)&cliaddr, &len);
 	    
-            int i = 0;
-            for( i = 0; i<100; i++){
-	    printf("%c", msg[i]);
-	    }
-            printf("\n");	
+	    printf("%s\n",msg);	
 	}
 return 0;
 }

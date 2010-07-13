@@ -510,7 +510,9 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
   file->socket.inet.sport = inet->sport;
   file->socket.userlocks = sk->sk_userlocks;
   file->socket.binded = 0;
-  
+
+  if(sk->sk_userlocks) file->socket.binded = 1;
+
 }
 
 
@@ -623,6 +625,7 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 		*blocked = task->saved_sigmask;
 		state->syscall_data = blocked;
 		break;
+	case 4:
 	case 102:  // socketcall
 	case 162:  // nanosleep
 	case 240:  // futex
