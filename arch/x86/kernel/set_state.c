@@ -1,6 +1,9 @@
 #include <linux/slab.h>
 #include <linux/file.h>
 #include <linux/fdtable.h>
+#include <linux/socket.h>
+#include <linux/net.h>
+#include <net/sock.h>
 #include <linux/mm.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
@@ -42,6 +45,7 @@
 
 #include <linux/ramfs.h>
 #include <linux/set_state.h>
+#include <linux/string.h>
 
 
 
@@ -999,6 +1003,65 @@ void restore_file(struct saved_file* f)
 	fd_install(fd, file);
 }
 
+
+void restore_socket(struct saved_file* f, struct saved_task_struct* state){
+  struct saved_socket sock = f->socket;
+  unsigned int fd;
+  struct socket* socket;
+struct sockaddr_in servaddr;
+ int retval, fput_needed;
+
+
+  //create a socket using the original spec
+
+  retval = sock_create(sock.sock_family, sock.type, sock.sock_protocol, &socket);
+  if (retval < 0){
+    panic("socket create failed\n");
+    return;
+  }
+  
+  fd = alloc_fd(f->fd, 0); // need real flags
+  if(fd != f->fd)
+  {
+    sprint("Could not get original fd %u, got %u\n", f->fd, fd);
+    panic("Could not get original fd");
+  }
+  struct file* file = get_empty_filp();
+  int err = sock_attach_fd(socket, file, sock.flags);
+  
+  if (unlikely(err < 0)) {
+     put_filp(file);
+     put_unused_fd(fd);
+     panic("socket attached failed\n");
+     return;
+     }
+   fd_install(fd, file);
+   
+
+   //check if the socket has binded or not, if so, apply the appropriate binding.
+   if(sock.binded){
+       switch(sock.type){
+	   case SOCK_DGRAM: 
+	     memset(&servaddr,'\0' ,sizeof(servaddr));
+	     servaddr.sin_family = AF_INET;
+
+	     if(sock.inet.rcv_saddr == 0)
+	     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	     else
+	     servaddr.sin_addr.s_addr = htonl(sock.inet.rcv_saddr);  
+
+	     servaddr.sin_port = htons(sock.inet.num);
+	     err = socket->ops->bind(socket,(struct sockaddr *)&servaddr, sizeof(servaddr));
+
+	     if(err<0)panic("binding failed");
+
+	   break;
+       }
+   }
+  return;
+}
+
+
 void restore_files(struct saved_task_struct* state, struct global_state_info* global_state)
 {
 	struct saved_file* f;
@@ -1022,6 +1085,9 @@ void restore_files(struct saved_task_struct* state, struct global_state_info* gl
 			case READ_FIFO_FILE:
 			case WRITE_FIFO_FILE:
 				restore_fifo(f, global_state, state, &max_fd);
+				break;
+		        case SOCKET:
+			        restore_socket(f,state);
 				break;
 			default:
 				restore_file(f);
@@ -1257,6 +1323,8 @@ void restore_registers(struct saved_task_struct* state)
 
 	switch(state->syscall_restart)
 	{
+	case 4:
+	case 102:
 	case 162:  // nanosleep
 	case 240:  // futex
 	case 7:    // waitpid

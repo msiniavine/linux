@@ -4,7 +4,6 @@
 #include <linux/highmem.h>
 #include <linux/syscalls.h>
 #include <asm/linkage.h>
-#include <linux/set_state.h>
 #include <asm/pgtable.h>
 #include <linux/bootmem.h>
 #include <linux/ioport.h>
@@ -15,6 +14,10 @@
 #include <linux/kd.h>
 #include <linux/console_struct.h>
 #include <linux/console.h>
+#include <net/inet_sock.h>
+#include <linux/net.h>
+#include <linux/udp.h>
+#include <linux/set_state.h>
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
@@ -476,6 +479,43 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	
 }
 
+extern struct file_operations socket_file_ops;
+static bool file_is_socket(struct file* file)
+{
+  if (file->f_op == &socket_file_ops)
+    return true;
+  else
+    return false;
+}
+
+static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)
+{
+  int err;
+  struct socket *sock = f->private_data;
+  struct sock *sk = sock->sk;
+  struct inet_sock *inet = inet_sk(sk);
+  file->type = SOCKET;
+  file->socket.type = sock->type;
+  file->socket.state = sock->state;
+  file->socket.flags= sock->flags;
+  file->socket.wait = sock->wait;
+  file->socket.sock_protocol = sk->sk_protocol; 
+  file->socket.sock_type = sk->sk_type;
+  file->socket.sock_family = sk->sk_family;
+  file->socket.inet.daddr = inet->daddr;
+  file->socket.inet.rcv_saddr = inet->rcv_saddr;
+  file->socket.inet.dport = inet->dport;
+  file->socket.inet.saddr = inet->saddr;
+  file->socket.inet.num = inet->num;
+  file->socket.inet.sport = inet->sport;
+  file->socket.userlocks = sk->sk_userlocks;
+  file->socket.binded = 0;
+
+  if(sk->sk_userlocks) file->socket.binded = 1;
+
+}
+
+
 static void save_files(struct files_struct* files, struct saved_task_struct* task, struct map_entry* head)
 {
 	struct fdtable* fdt;
@@ -522,7 +562,10 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		{
 			save_pipe_info(task, f, file, head);
 		}
-
+		else if (file_is_socket(f))
+		{
+		  	save_socket_info(task, f, file, head);
+		}
 		file->next = task->open_files;
 		task->open_files = file;
 		
@@ -582,6 +625,8 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 		*blocked = task->saved_sigmask;
 		state->syscall_data = blocked;
 		break;
+	case 4:
+	case 102:  // socketcall
 	case 162:  // nanosleep
 	case 240:  // futex
 	case 7:    // waitpid
