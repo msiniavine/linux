@@ -2,13 +2,13 @@
 
 cd test
 {
-    sleep 30
+    sleep 15
     kexec -l /boot/vmlinuz-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state debug early_printk"
     kexec -e
 } &
 
 
-./test_cli
+./test_cli_full
 
 #cd test
 #./test_loop < Makefile &> trace &
