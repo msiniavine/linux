@@ -18,7 +18,7 @@ char* tests[] = {
 	"test_sighandler_call",
 	"test_sigsuspend",
 	"test_stack",
-//	"test_wait",
+	"test_wait",
 	NULL
 };
 
