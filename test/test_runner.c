@@ -56,7 +56,12 @@ int main()
 		start_test(tests[i]);
 	}
 	
-	sleep(15);
+	while(!was_state_restored())
+	{
+		sleep(1);
+	}	
+	printf("Starting wait\n");
+	sleep(3);
 	for(i = 0; tests[i] != NULL; i++)
 	{
 		err = wait(&status);

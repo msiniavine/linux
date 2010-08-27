@@ -1565,6 +1565,7 @@ int do_set_state(struct state_info* info)
 		if(info->parent)
 		{
 			current->real_parent = info->parent;
+			current->parent = info->parent;
 			INIT_LIST_HEAD(&current->sibling);
 			list_add_tail(&current->sibling, &current->real_parent->children);
 		}
