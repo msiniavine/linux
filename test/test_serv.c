@@ -10,7 +10,7 @@
 
 int main (int argc, char **argv){
 	int sockfd;
-	int n;
+	int n = 0;
 	socklen_t len;
 	char msg[100];
 	struct sockaddr_in servaddr, cliaddr;
@@ -26,11 +26,12 @@ int main (int argc, char **argv){
 	bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
 	for ( ; ; ){
-            //printf("here\n");
-	    len = sizeof(cliaddr);
-	    n = recvfrom(sockfd, msg, 100, 0, (struct sockaddr *)&cliaddr, &len);
-	    
-	    printf("%s\n",msg);	
+		n+=1;
+		//printf("here\n");
+		len = sizeof(cliaddr);
+		recvfrom(sockfd, msg, 100, 0, (struct sockaddr *)&cliaddr, &len);
+		
+		printf("%d:%s\n",n, msg);	
 	}
 return 0;
 }
