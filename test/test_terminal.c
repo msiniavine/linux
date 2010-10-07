@@ -25,11 +25,12 @@ int main()
 	print_all("\x1b[20;20H"); // move cursor
 	print_all("test\n");
 
-	while(!was_state_restored())
+	//while(!was_state_restored())
+	while(1)
 	{
-		sleep(10);
+		sleep(3);
+		print_all("Everything is working\n");
 	}
 
-	print_all("Everything is working\n");
 	return 0;
 }

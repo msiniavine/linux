@@ -1454,10 +1454,10 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount)
 {
 	//struct page* allocated_page;
 	struct page* page = pfn_to_page(pfn);
-     	sprint("Allocating page %p, pfn: %lx, expected mapcount %d\n", page, pfn, mapcount);
-	sprint("Flags: %08lx, count: %d, mapcount: %d\n", 
-	       page->flags, page_count(page), page_mapcount(page));
-	sprint("Reserved: %s, Free: %s\n", PageReserved(page) ? "yes" : "no", PageBuddy(page) ? "yes" : "no");
+//     	sprint("Allocating page %p, pfn: %lx, expected mapcount %d\n", page, pfn, mapcount);
+	//sprint("Flags: %08lx, count: %d, mapcount: %d\n", 
+//	       page->flags, page_count(page), page_mapcount(page));
+//	sprint("Reserved: %s, Free: %s\n", PageReserved(page) ? "yes" : "no", PageBuddy(page) ? "yes" : "no");
 	if(mapcount && page_mapcount(page) < mapcount)
 	{
 		atomic_inc(&page->_mapcount);

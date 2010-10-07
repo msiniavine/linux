@@ -99,7 +99,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 		}
 		else
 		{
-			sprint("Reserved pfn: %ld\n", page->pfn);
+			//sprint("Reserved pfn: %ld\n", page->pfn);
 		}
 	}
 
@@ -482,15 +482,15 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 extern struct file_operations socket_file_ops;
 static bool file_is_socket(struct file* file)
 {
-  if (file->f_op == &socket_file_ops)
-    return true;
-  else
-    return false;
+	sprint("f_op is %p, expecting %p\n", file->f_op, &socket_file_ops);
+	if (file->f_op == &socket_file_ops)
+		return true;
+	else
+		return false;
 }
 
 static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)
 {
-  int err;
   struct socket *sock = f->private_data;
   struct sock *sk = sock->sk;
   struct inet_sock *inet = inet_sk(sk);
@@ -564,6 +564,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		}
 		else if (file_is_socket(f))
 		{
+			sprint("fd %d is a socket\n", fd);
 		  	save_socket_info(task, f, file, head);
 		}
 		file->next = task->open_files;
@@ -625,17 +626,20 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 		*blocked = task->saved_sigmask;
 		state->syscall_data = blocked;
 		break;
-	case 4:
+	case 4:    // write
 	case 102:  // socketcall
 	case 162:  // nanosleep
 	case 240:  // futex
 	case 7:    // waitpid
 	case 114:  // wait4
+	case 142: // select
 		state->syscall_restart = task_pt_regs(task)->orig_ax;
 		sprint("Saving state to restore %d syscall\n", state->syscall_restart);
 		state->syscall_data = NULL;
 		break;
-
+	default:
+		state->syscall_restart = task_pt_regs(task)->orig_ax;
+		break;
 	}
 
 	spin_unlock_irq(&sighand->siglock);

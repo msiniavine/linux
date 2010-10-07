@@ -1009,7 +1009,9 @@ void restore_socket(struct saved_file* f, struct saved_task_struct* state){
   unsigned int fd;
   struct socket* socket;
 struct sockaddr_in servaddr;
- int retval, fput_needed;
+ int retval;
+ struct file* file;
+ int err;
 
 
   //create a socket using the original spec
@@ -1026,8 +1028,8 @@ struct sockaddr_in servaddr;
     sprint("Could not get original fd %u, got %u\n", f->fd, fd);
     panic("Could not get original fd");
   }
-  struct file* file = get_empty_filp();
-  int err = sock_attach_fd(socket, file, sock.flags);
+  file = get_empty_filp();
+  err = sock_attach_fd(socket, file, sock.flags);
   
   if (unlikely(err < 0)) {
      put_filp(file);
@@ -1324,14 +1326,18 @@ void restore_registers(struct saved_task_struct* state)
 	switch(state->syscall_restart)
 	{
 	case 4:
-	case 102:
+	case 102:  // socketcall
 	case 162:  // nanosleep
 	case 240:  // futex
 	case 7:    // waitpid
 	case 114:  // wait4
+	case 142:  // select
 		sprint("Restarting system call %d\n", state->syscall_restart);
 		state->registers.ax = state->registers.orig_ax;
 		state->registers.ip -= 2;
+		break;
+	default:
+		sprint("Was in system call %d, taking no action\n", state->syscall_restart);
 		break;
 	}	
 	*regs = state->registers;

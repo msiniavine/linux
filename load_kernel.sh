@@ -7,7 +7,7 @@ cd test
     kexec -e
 } &
 
-./test_cli_full
+#./test_cli_full
 
 
 #cd test

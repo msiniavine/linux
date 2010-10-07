@@ -1214,13 +1214,6 @@ ENTRY(asm_resume_saved_state)
 END(asm_resume_saved_state)	
 
 
-ENTRY(restoring_thread_helper)
-	# push arguments on the stack
-	call do_restore
-	jmp restore_all	
-	CFI_ENDPROC
-END(restoring_thread_helper)
-
 
 .section .rodata,"a"
 #include "syscall_table_32.S"
