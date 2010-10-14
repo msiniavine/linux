@@ -46,7 +46,7 @@ test_sleep: test_sleep.o
 #gcc -nostdlib -g test_elfaux.o syscalls.o libc.o -o test_elfaux
 
 test_runner: test_runner.o
-	gcc -g -static -o test_runner test_runner.o
+	gcc -g -o test_runner test_runner.o
 test_pid: test_pid.o
 save_state: save_state.o
 test_parent_child: test_parent_child.o test_syscall.o

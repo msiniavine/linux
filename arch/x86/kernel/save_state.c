@@ -93,9 +93,11 @@ static void reserve_process_memory(struct saved_task_struct* task)
 	for(elem=task->mm->pages; elem!=NULL; elem=elem->next)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
-		if(reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE) < 0)
+		int err;
+		err = reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE);
+		if(err < 0)
 		{
-			sprint("Failed to reserve pfn: %ld\n", page->pfn);
+		  sprint("Failed to reserve pfn: %ld, err: %d\n", page->pfn, err);
 		}
 		else
 		{
@@ -510,6 +512,8 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
   file->socket.inet.sport = inet->sport;
   file->socket.userlocks = sk->sk_userlocks;
   file->socket.binded = 0;
+  if(f->f_flags & O_NONBLOCK)
+    file->flags |= O_NONBLOCK;
 
   if(sk->sk_userlocks) file->socket.binded = 1;
 

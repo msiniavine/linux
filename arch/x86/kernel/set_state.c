@@ -1012,6 +1012,7 @@ struct sockaddr_in servaddr;
  int retval;
  struct file* file;
  int err;
+ int flags = sock.flags;
 
 
   //create a socket using the original spec
@@ -1029,7 +1030,9 @@ struct sockaddr_in servaddr;
     panic("Could not get original fd");
   }
   file = get_empty_filp();
-  err = sock_attach_fd(socket, file, sock.flags);
+  if(f->flags & O_NONBLOCK)
+    flags |= O_NONBLOCK;
+  err = sock_attach_fd(socket, file, flags);
   
   if (unlikely(err < 0)) {
      put_filp(file);
