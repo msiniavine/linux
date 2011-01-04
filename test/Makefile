@@ -2,7 +2,7 @@ CFLAGS = -g -Wall -fno-stack-protector
 #LDFLAGS = -lpthread
 
 
-all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait test_my_mutex test_condvar test_pipe1 test_pipe2 test_terminal launcher test_runner starter test_cli_full test_cli test_serv
+all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait test_my_mutex test_condvar test_pipe1 test_pipe2 test_terminal launcher test_runner starter test_cli_full test_cli test_serv state_present
 
 syscalls.o: syscalls.S
 	as syscalls.S -o syscalls.o
@@ -45,6 +45,7 @@ test_sleep: test_sleep.o
 #test_elfaux: test_elfaux.o syscalls.o libc.o
 #gcc -nostdlib -g test_elfaux.o syscalls.o libc.o -o test_elfaux
 
+state_present: state_present.o
 test_runner: test_runner.o
 	gcc -g -o test_runner test_runner.o
 test_pid: test_pid.o
@@ -85,6 +86,7 @@ test_cli: test_cli.o syscalls.o
 
 clean:
 	-rm *.o
+	-rm state_present
 	-rm test_cli
 	-rm test_cli_full
 	-rm test_serv
