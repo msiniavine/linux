@@ -433,8 +433,8 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 static int file_is_vc_terminal(char* name)
 {
 //TODO
-//I am cheating for now and assuming /tty1 is the terminal i want
-	if(!strcmp("/tty1", name))
+//I am cheating for now and assuming /tty1 or /console are the terminals I want
+	if(!strcmp("/tty1", name) || !strcmp("/console", name))
 	{
 		return 1;
 	}
