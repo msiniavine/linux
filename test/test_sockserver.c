@@ -37,7 +37,11 @@ int main()
 		exit(1);
 	}
 
-	listen(sockfd, 1);
+	if(my_listen(sockfd, 1) < 0)
+	{
+		perror("Error listening on a socket");
+		exit(1);
+	}
 	clilen = sizeof(cli_addr);
 
 	while(1)
@@ -51,7 +55,7 @@ int main()
 		while(1)
 		{
 			bzero(buffer, 256);
-			n = read(newsockfd, buffer, 255);
+			n = my_recv(newsockfd, buffer, 255, 0);
 			if(n < 0)
 			{
 				perror("Error reading from socket");
@@ -64,7 +68,7 @@ int main()
 			}
 
 			printf("ECHO: %s\n", buffer);
-			n=write(newsockfd, buffer, n);
+			n=my_send(newsockfd, buffer, n, 0);
 			if(n < 0)
 			{
 				perror("Error writing");

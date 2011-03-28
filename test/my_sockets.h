@@ -23,6 +23,9 @@ struct my_sockaddr_in
 
 
 int my_socket(int domain, int type, int protocol);
-int my_bind(int fd, const struct my_sockaddr* my_addr, unsigned long addrlen);
-
+int my_bind(int fd, const struct my_sockaddr_in* my_addr, unsigned long addrlen);
+int my_listen(int fd, int backlog);
+int my_accept(int fd, struct my_sockaddr_in* addr, unsigned long* addrlen);
+int my_recv(int fd, void* buff, unsigned long len, int flags);
+int my_send(int fd, const void* buff, unsigned long len, int flags);
 #endif
