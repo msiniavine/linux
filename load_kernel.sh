@@ -7,7 +7,7 @@ cd test
     kexec -e
 } &
 
-#./test_cli_full
+./test_sockserver &
 
 #cd test
 #./test_loop < Makefile &> trace &

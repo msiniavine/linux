@@ -214,7 +214,7 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 
 #define STATE_DEBUG 1
 #if STATE_DEBUG
-#define sprint(format, ...) printk(KERN_WARNING format, ##__VA_ARGS__)
+#define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
 #define csprint(format, ...) if(is_save_enabled(current) || was_state_restored(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
 #else
 #define sprint(format, ...)

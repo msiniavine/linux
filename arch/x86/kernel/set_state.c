@@ -1009,65 +1009,65 @@ void restore_file(struct saved_file* f)
 
 
 void restore_socket(struct saved_file* f, struct saved_task_struct* state){
-  struct saved_socket sock = f->socket;
-  unsigned int fd;
-  struct socket* socket;
-struct sockaddr_in servaddr;
- int retval;
- struct file* file;
- int err;
- int flags = sock.flags;
+	struct saved_socket sock = f->socket;
+	unsigned int fd;
+	struct socket* socket;
+	struct sockaddr_in servaddr;
+	int retval;
+	struct file* file;
+	int err;
+	int flags = sock.flags;
+	
 
+	//create a socket using the original spec
 
-  //create a socket using the original spec
-
-  retval = sock_create(sock.sock_family, sock.type, sock.sock_protocol, &socket);
-  if (retval < 0){
-    panic("socket create failed\n");
-    return;
-  }
+	retval = sock_create(sock.sock_family, sock.type, sock.sock_protocol, &socket);
+	if (retval < 0){
+		panic("socket create failed\n");
+		return;
+	}
   
-  fd = alloc_fd(f->fd, 0); // need real flags
-  if(fd != f->fd)
-  {
-    sprint("Could not get original fd %u, got %u\n", f->fd, fd);
-    panic("Could not get original fd");
-  }
-  file = get_empty_filp();
-  if(f->flags & O_NONBLOCK)
-    flags |= O_NONBLOCK;
-  err = sock_attach_fd(socket, file, flags);
-  
-  if (unlikely(err < 0)) {
-     put_filp(file);
-     put_unused_fd(fd);
-     panic("socket attached failed\n");
-     return;
-     }
-   fd_install(fd, file);
-   
+	fd = alloc_fd(f->fd, 0); // need real flags
+	if(fd != f->fd)
+	{
+		sprint("Could not get original fd %u, got %u\n", f->fd, fd);
+		panic("Could not get original fd");
+	}
+	file = get_empty_filp();
+	if(f->flags & O_NONBLOCK)
+		flags |= O_NONBLOCK;
+	err = sock_attach_fd(socket, file, flags);
+	
+	if (unlikely(err < 0)) {
+		put_filp(file);
+		put_unused_fd(fd);
+		panic("socket attached failed\n");
+		return;
+	}
+	fd_install(fd, file);
+	
+	
+	//check if the socket has binded or not, if so, apply the appropriate binding.
+	if(sock.binded){
+		switch(sock.type){
+		case SOCK_DGRAM: 
+			memset(&servaddr,'\0' ,sizeof(servaddr));
+			servaddr.sin_family = AF_INET;
+			
+			if(sock.inet.rcv_saddr == 0)
+				servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+			else
+				servaddr.sin_addr.s_addr = htonl(sock.inet.rcv_saddr);  
 
-   //check if the socket has binded or not, if so, apply the appropriate binding.
-   if(sock.binded){
-       switch(sock.type){
-	   case SOCK_DGRAM: 
-	     memset(&servaddr,'\0' ,sizeof(servaddr));
-	     servaddr.sin_family = AF_INET;
-
-	     if(sock.inet.rcv_saddr == 0)
-	     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	     else
-	     servaddr.sin_addr.s_addr = htonl(sock.inet.rcv_saddr);  
-
-	     servaddr.sin_port = htons(sock.inet.num);
-	     err = socket->ops->bind(socket,(struct sockaddr *)&servaddr, sizeof(servaddr));
-
-	     if(err<0)panic("binding failed");
-
-	   break;
-       }
-   }
-  return;
+			servaddr.sin_port = htons(sock.inet.num);
+			err = socket->ops->bind(socket,(struct sockaddr *)&servaddr, sizeof(servaddr));
+			
+			if(err<0)panic("binding failed");
+			
+			break;
+		}
+	}
+	return;
 }
 
 

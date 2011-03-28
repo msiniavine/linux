@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <stdlib.h>
 #include "test.h"
 #include "my_mutex.h"
 
