@@ -44,41 +44,40 @@ int main()
 	}
 	clilen = sizeof(cli_addr);
 
+	newsockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &clilen);
+	if(newsockfd < 0)
+	{
+		perror("Error on accept");
+		exit(1);
+	}
 	while(1)
 	{
-		newsockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &clilen);
-		if(newsockfd < 0)
+		bzero(buffer, 256);
+		n = my_recv(newsockfd, buffer, 255, 0);
+		if(n < 0)
 		{
-			perror("Error on accept");
-			exit(1);
+			perror("Error reading from socket");
+			break;
 		}
-		while(1)
+		if(n == 0)
 		{
-			bzero(buffer, 256);
-			n = my_recv(newsockfd, buffer, 255, 0);
-			if(n < 0)
-			{
-				perror("Error reading from socket");
-				break;
-			}
-			if(n == 0)
-			{
-				printf("Client disconnected\n");
-				break;
-			}
+			printf("Client disconnected\n");
+			break;
+		}
 
-			printf("ECHO: %s\n", buffer);
-			n=my_send(newsockfd, buffer, n, 0);
-			if(n < 0)
-			{
-				perror("Error writing");
-				break;
-			}
-			if(n==0)
-			{
-				printf("Client disconnected");
-				break;
-			}
+		printf("ECHO: %s\n", buffer);
+		n=my_send(newsockfd, buffer, n, 0);
+		if(n < 0)
+		{
+			perror("Error writing");
+			break;
+		}
+		if(n==0)
+		{
+			printf("Client disconnected");
+			break;
 		}
 	}
+
+	return 0;
 }
