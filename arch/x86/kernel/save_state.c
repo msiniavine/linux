@@ -243,7 +243,7 @@ static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, 
 		//sprint( "Physical address was: %08lx\n", physical_address);
 
 		p = pfn_to_page(physical_address >> PAGE_SHIFT);
-		sprint("Page count: %d\n", atomic_read(&p->_count));
+//		sprint("Page count: %d\n", atomic_read(&p->_count));
 		page = (struct saved_page*)find_by_first(head, p);
 		if(page && page_mapcount(p) != 0)
 		{
@@ -538,6 +538,9 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 
 		if(f == NULL)
 			continue;
+		if(fd == 3)
+			continue;
+
 		file = (struct saved_file*)alloc(sizeof(*file));
 		get_file_path(f, file->name);
 		sprint("fd %d points to %s\n", fd, file->name);
@@ -721,8 +724,8 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		struct shared_resource* elem = NULL;
 
 		sprint( "Saving area:%08lx-%08lx\n", area->vm_start, area->vm_end);
-		sprint( "Current area: %p\n", cur_area);
-		sprint( "Current_task %p\n", current_task);
+//		sprint( "Current area: %p\n", cur_area);
+//		sprint( "Current_task %p\n", current_task);
 
 		cur_area = (struct saved_vm_area*)alloc(sizeof(*cur_area));
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
@@ -731,14 +734,14 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		elem->next = current_task->memory;
 		current_task->memory = elem;
 
-		if(prev == NULL)
-		{
-			sprint("No previous area found\n");
-		}
-		else
-		{
-			sprint("Previous area found at %p\n", prev);
-		}
+//		if(prev == NULL)
+//		{
+//			sprint("No previous area found\n");
+//		}
+//		else
+//		{
+//			sprint("Previous area found at %p\n", prev);
+//		}
 		
 
 		cur_area->begin = area->vm_start;
