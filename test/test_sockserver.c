@@ -54,6 +54,7 @@ int main()
 	{
 		bzero(buffer, 256);
 		n = my_recv(newsockfd, buffer, 255, 0);
+		printf("recv returned %d\n", n);
 		if(n < 0)
 		{
 			perror("Error reading from socket");
@@ -67,6 +68,7 @@ int main()
 
 		printf("ECHO: %s\n", buffer);
 		n=my_send(newsockfd, buffer, n, 0);
+		printf("send returned %d\n", n);
 		if(n < 0)
 		{
 			perror("Error writing");

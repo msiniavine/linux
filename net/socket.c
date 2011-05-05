@@ -1693,6 +1693,7 @@ asmlinkage long sys_recvfrom(int fd, void __user *ubuf, size_t size,
 	int fput_needed;
 
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	csprint("lookup socket for fd %p\n", sock);
 	if (!sock)
 		goto out;
 
@@ -1708,6 +1709,7 @@ asmlinkage long sys_recvfrom(int fd, void __user *ubuf, size_t size,
 		flags |= MSG_DONTWAIT;
 	err = sock_recvmsg(sock, &msg, size, flags);
 
+	csprint("recv err %d\n", err);
 	if (err >= 0 && addr != NULL) {
 		err2 = move_addr_to_user((struct sockaddr *)&address,
 					 msg.msg_namelen, addr, addr_len);

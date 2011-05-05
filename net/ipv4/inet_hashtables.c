@@ -23,6 +23,8 @@
 #include <net/inet_hashtables.h>
 #include <net/ip.h>
 
+#include <linux/set_state.h>
+
 /*
  * Allocate and initialize a new local port bind bucket.
  * The bindhash mutex for snum's hash chain must be held here.
@@ -248,6 +250,8 @@ struct sock * __inet_lookup_established(struct net *net,
 	sk = NULL;
 out:
 	read_unlock(lock);
+	sprint("%s hit in ehash saddr %u, sport %u, daddr %u\n", (sk ? "got" : "no"), saddr, (__be32)sport, daddr); 
+
 	return sk;
 hit:
 	sock_hold(sk);
@@ -344,6 +348,8 @@ void __inet_hash_nolisten(struct sock *sk)
 
 	WARN_ON(!sk_unhashed(sk));
 
+	sprint("__inet_hash_nolisten\n");
+
 	sk->sk_hash = inet_sk_ehashfn(sk);
 	head = inet_ehash_bucket(hashinfo, sk->sk_hash);
 	list = &head->chain;
@@ -427,6 +433,7 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 	int ret;
 	struct net *net = sock_net(sk);
 
+	sprint("__inet_hash_connect snum %u\n", (unsigned)snum);
 	if (!snum) {
 		int i, remaining, low, high, port;
 		static u32 hint;
@@ -440,6 +447,7 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 		local_bh_disable();
 		for (i = 1; i <= remaining; i++) {
 			port = low + (i + offset) % remaining;
+			sprint("trying port %d\n", port);
 			head = &hinfo->bhash[inet_bhashfn(net, port,
 					hinfo->bhash_size)];
 			spin_lock(&head->lock);
@@ -452,14 +460,21 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 				if (tb->ib_net == net && tb->port == port) {
 					WARN_ON(hlist_empty(&tb->owners));
 					if (tb->fastreuse >= 0)
+					{
+						sprint("fastreuse %d, next_port\n", tb->fastreuse);
 						goto next_port;
+					}
 					if (!check_established(death_row, sk,
 								port, &tw))
+					{
+						sprint("not established, ok\n");
 						goto ok;
+					}
 					goto next_port;
 				}
 			}
-
+			
+			sprint("crating new bhash bucket\n");
 			tb = inet_bind_bucket_create(hinfo->bind_bucket_cachep,
 					net, head, port);
 			if (!tb) {
@@ -479,10 +494,12 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 ok:
 		hint += i;
 
+		sprint("binding socket to port %d\n", port);
 		/* Head lock still held and bh's disabled */
 		inet_bind_hash(sk, tb, port);
 		if (sk_unhashed(sk)) {
 			inet_sk(sk)->sport = htons(port);
+			sprint("calling hash\n");
 			hash(sk);
 		}
 		spin_unlock(&head->lock);

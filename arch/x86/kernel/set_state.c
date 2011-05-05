@@ -4,6 +4,11 @@
 #include <linux/socket.h>
 #include <linux/net.h>
 #include <net/sock.h>
+#include <net/inet_sock.h>
+#include <linux/tcp.h>
+#include <net/route.h>
+#include <net/inet_hashtables.h>
+#include <net/tcp.h>
 #include <linux/mm.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
@@ -1008,7 +1013,116 @@ void restore_file(struct saved_file* f)
 }
 
 
-void restore_socket(struct saved_file* f, struct saved_task_struct* state){
+extern struct inet_timewait_death_row tcp_death_row;
+void restore_tcp_socket(struct saved_file* f)
+{
+	int retval;
+
+	unsigned int fd;
+	struct file* file;
+	struct saved_socket* saved_socket = &f->socket;
+	int flags = saved_socket->flags;
+	struct socket* sock;
+
+	struct inet_sock* inet;
+	struct tcp_sock* tp;
+	struct rtable* rt;
+	__be32 daddr, nexthop;
+	struct sock* sk;
+	sprint("Restoring TCP socket\n");
+	sprint("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
+	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
+	
+	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock);
+	if(retval < 0)
+	{
+		panic("Socket create failed: %d", retval);
+	}
+
+	fd=alloc_fd(f->fd, 0); // need real flags
+	if(fd != f->fd)
+	{
+		sprint("Could not get original fd %u got %u\n", f->fd, fd);
+		panic("Could not get original fd");
+	}
+	
+	file = get_empty_filp();
+	if(f->flags & O_NONBLOCK)
+		flags |=O_NONBLOCK;
+	retval = sock_attach_fd(sock, file, flags);
+	if(retval < 0)
+	{
+		put_filp(file);
+		put_unused_fd(fd);
+		panic("socket attach failed\n");
+	}
+	fd_install(fd, file);
+
+	sk=sock->sk;
+	inet = inet_sk(sk);
+	tp = tcp_sk(sk);
+
+	sprint("Setting state %d\n", saved_socket->tcp->state);
+	tcp_set_state(sk, saved_socket->tcp->state);
+
+	sprint("Setting routing information\n");
+	nexthop = daddr = saved_socket->tcp->daddr;
+	retval = ip_route_connect(&rt, nexthop, inet->saddr, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if, IPPROTO_TCP,
+				  inet->sport, htons(saved_socket->tcp->dport), sk, 1);
+
+	if(retval < 0)
+	{
+		panic("Could not get routing information\n");
+	}
+
+	if(!inet->opt || !inet->opt->srr)
+	{
+		daddr = rt->rt_dst;
+	}
+
+	if(!inet->saddr)
+	{
+		inet->saddr = rt->rt_src;
+	}
+	inet->rcv_saddr = inet->saddr;
+
+	if(tp->rx_opt.ts_recent_stamp && inet->daddr != daddr)
+	{
+		tp->rx_opt.ts_recent = 0;
+		tp->rx_opt.ts_recent_stamp = 0;
+		tp->write_seq = 0;
+	}
+
+	// some peer stuff might need to go here
+	
+	inet->dport = htons(saved_socket->tcp->dport);
+	inet->daddr = daddr;
+	inet_csk(sk)->icsk_ext_hdr_len = 0;
+
+
+	tp->rx_opt.mss_clamp = 536;
+	
+	retval = inet_hash_connect(&tcp_death_row, sk);
+	if(retval)
+	{
+		panic("inet_hash_connect failed %d\n", retval);
+	}
+	sprint("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport));
+
+	retval = ip_route_newports(&rt, IPPROTO_TCP, inet->sport, inet->dport, sk);
+	if(retval)
+	{
+		panic("ip_route_newports failed %d\n", retval);
+	}
+
+	sk->sk_gso_type = SKB_GSO_TCPV4;
+	sk_setup_caps(sk, &rt->u.dst);
+
+	//set seq number
+	// set other tcp state
+}
+
+void restore_udp_socket(struct saved_file* f){
 	struct saved_socket sock = f->socket;
 	unsigned int fd;
 	struct socket* socket;
@@ -1026,7 +1140,6 @@ void restore_socket(struct saved_file* f, struct saved_task_struct* state){
 		panic("socket create failed\n");
 		return;
 	}
-  
 	fd = alloc_fd(f->fd, 0); // need real flags
 	if(fd != f->fd)
 	{
@@ -1070,6 +1183,18 @@ void restore_socket(struct saved_file* f, struct saved_task_struct* state){
 	return;
 }
 
+void restore_socket(struct saved_file* f)
+{
+	struct saved_socket* sock = &f->socket;
+	if(sock->sock_family == PF_INET && sock->sock_type == SOCK_DGRAM)
+	{
+		restore_udp_socket(f);
+	}
+	else if(sock->sock_family == PF_INET && sock->sock_type == SOCK_STREAM)
+	{
+		restore_tcp_socket(f);
+	}
+}
 
 void restore_files(struct saved_task_struct* state, struct global_state_info* global_state)
 {
@@ -1096,7 +1221,7 @@ void restore_files(struct saved_task_struct* state, struct global_state_info* gl
 				restore_fifo(f, global_state, state, &max_fd);
 				break;
 		        case SOCKET:
-			        restore_socket(f,state);
+			        restore_socket(f);
 				break;
 			default:
 				restore_file(f);

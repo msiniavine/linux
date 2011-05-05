@@ -275,6 +275,8 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
+#include <linux/set_state.h>
+
 int sysctl_tcp_fin_timeout __read_mostly = TCP_FIN_TIMEOUT;
 
 atomic_t tcp_orphan_count = ATOMIC_INIT(0);
@@ -1281,6 +1283,8 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	int copied_early = 0;
 	struct sk_buff *skb;
 
+	csprint("tcp_recvmsg\n");
+
 	lock_sock(sk);
 
 	TCP_CHECK_TIMER(sk);
@@ -1382,6 +1386,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 
 			if (sk->sk_err) {
 				copied = sock_error(sk);
+				csprint("error %d\n", copied);
 				break;
 			}
 
@@ -1393,6 +1398,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 					/* This occurs when user tries to read
 					 * from never connected socket.
 					 */
+					csprint("Socket never connected\n");
 					copied = -ENOTCONN;
 					break;
 				}
@@ -1400,12 +1406,14 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			}
 
 			if (!timeo) {
+				csprint("timeo\n");
 				copied = -EAGAIN;
 				break;
 			}
 
 			if (signal_pending(current)) {
 				copied = sock_intr_errno(timeo);
+				csprint("Signal pending error\n");
 				break;
 			}
 		}

@@ -13,11 +13,15 @@
 
 #include <linux/list.h>
 
+#include <linux/slab.h>
+#include <linux/mempool.h>
+
 #include <linux/set_state.h>
 
 static unsigned long  page_pool[10];
 static int page_pool_index = -1;
 static int page_offset = PAGE_SIZE;
+static int map_count = 0;
 
 struct map_entry
 {
@@ -25,7 +29,6 @@ struct map_entry
 	void* first;
 	void* second;
 };
-
 
 static void* alloc_map(size_t size)
 {
@@ -52,8 +55,15 @@ static void* alloc_map(size_t size)
 
 struct map_entry* new_map(void)
 {
-//	struct map_entry* head = (struct map_entry*)kmalloc(sizeof(*head), GFP_KERNEL);
-	struct map_entry* head = (struct map_entry*)alloc_map(sizeof(*head));
+	struct map_entry* head;
+	map_count++;
+	sprint("kmalloc head %d\n", map_count);
+	head = (struct map_entry*)alloc_map(sizeof(*head));
+	sprint("got head %p\n", head);
+	if(head == NULL)
+	{
+		panic("Not enough memory\n");
+	}
 	INIT_LIST_HEAD(&head->list);
 	head->first = head->second = NULL;
 	return head;
@@ -67,9 +77,12 @@ void delete_map(struct map_entry* head)
 void insert_entry(struct map_entry* head, void* first, void* second)
 {
 	struct map_entry* new_entry = new_map();
+	sprint("Got new entry %p\n", new_entry);
 	new_entry->first = first;
 	new_entry->second = second;
+	sprint("Adding %p to %p\n", new_entry, head);
 	list_add_tail(&new_entry->list, &head->list);
+	sprint("Added\n");
 }
 
 void* find_by_first(struct map_entry* head, void* first)

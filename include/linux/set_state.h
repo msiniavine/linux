@@ -25,6 +25,15 @@ struct saved_inet_sock
 	__be16			sport;
 };
 
+struct saved_tcp_state
+{
+	int state;
+	__be32 daddr;
+	__be32 saddr;
+	__be16 sport;  // source port in host format
+	__be16 dport; // destination port in host format
+};
+
 struct saved_socket
 {
         int		        state;
@@ -35,6 +44,7 @@ struct saved_socket
 	unsigned short		sock_type;
 	unsigned short		sock_family;
         struct saved_inet_sock  inet;
+	struct saved_tcp_state* tcp;
   int userlocks;
   int binded;
 };
