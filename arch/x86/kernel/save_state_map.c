@@ -15,6 +15,10 @@
 
 #include <linux/set_state.h>
 
+static unsigned long  page_pool[10];
+static int page_pool_index = -1;
+static int page_offset = PAGE_SIZE;
+
 struct map_entry
 {
 	struct list_head list;
@@ -23,9 +27,33 @@ struct map_entry
 };
 
 
+static void* alloc_map(size_t size)
+{
+	unsigned long ret;
+	sprint("Need to allocate %u bytes\n", size);
+	if(page_offset + size > PAGE_SIZE)
+	{
+		sprint("Allocating new page\n");
+		page_pool_index++;
+		if(page_pool_index >= 10)
+		{
+			panic("no more memory\n");
+		}
+		sprint("page_pool_index %d\n", page_pool_index);
+		page_offset = 0;
+		page_pool[page_pool_index] = __get_free_page(GFP_ATOMIC);
+		sprint("got page %lxu\n", page_pool[page_pool_index]);
+	}
+	ret = page_pool[page_pool_index]+page_offset;
+	page_offset+=size;
+	sprint("ret %lxu, offset %d\n", ret, page_offset);
+	return (void*)ret;
+}
+
 struct map_entry* new_map(void)
 {
-	struct map_entry* head = (struct map_entry*)kmalloc(sizeof(*head), GFP_KERNEL);
+//	struct map_entry* head = (struct map_entry*)kmalloc(sizeof(*head), GFP_KERNEL);
+	struct map_entry* head = (struct map_entry*)alloc_map(sizeof(*head));
 	INIT_LIST_HEAD(&head->list);
 	head->first = head->second = NULL;
 	return head;
