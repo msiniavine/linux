@@ -1012,6 +1012,184 @@ void restore_file(struct saved_file* f)
 	fd_install(fd, file);
 }
 
+int __inet_check_established(struct inet_timewait_death_row *death_row,
+				    struct sock *sk, __u16 lport,
+			     struct inet_timewait_sock **twp);
+
+
+
+// rewrite of __inet_hash_connect to restore the desired port for the restored socket
+int restore_inet_hash(struct inet_timewait_death_row* death_row, struct sock* sk, unsigned short desired_port)
+{
+	struct inet_hashinfo *hinfo = death_row->hashinfo;
+	struct inet_bind_hashbucket *head;
+	struct inet_bind_bucket *tb;
+	struct net* net = sock_net(sk);
+	struct hlist_node* node;
+	struct inet_timewait_sock* tw = NULL;
+
+	sprint("hashing socket to the desired port %u\n", desired_port);
+	local_bh_disable();
+	head = &hinfo->bhash[inet_bhashfn(net, desired_port, hinfo->bhash_size)];
+	spin_lock(&head->lock);
+
+	inet_bind_bucket_for_each(tb, node, &head->chain)
+	{
+		if(tb->ib_net == net && tb->port == desired_port)
+		{
+			WARN_ON(hlist_empty(&tb->owners));
+			if(tb->fastreuse >= 0)
+			{
+				panic("Could not get desired port because of fastreuse\n");
+			}
+			if(!__inet_check_established(death_row, sk, desired_port, &tw))
+			{
+				sprint("not established\n");
+				goto ok;
+			}
+			panic("Could not get desired port\n");
+		}
+	}
+
+	sprint("creating new bhash bucket\n");
+	tb = inet_bind_bucket_create(hinfo->bind_bucket_cachep, net, head, desired_port);
+	if(!tb)
+	{
+		spin_unlock(&head->lock);
+		panic("Could not allocate a new bhash bucket\n");
+	}
+	tb->fastreuse = -1;
+
+ok:
+	sprint("binding socket to a port %u\n", desired_port);
+	inet_bind_hash(sk, tb, desired_port);
+	if(sk_unhashed(sk))
+	{
+		inet_sk(sk)->sport = htons(desired_port);
+		__inet_hash_nolisten(sk);
+	}
+	spin_unlock(&head->lock);
+	if(tw)
+	{
+		inet_twsk_deschedule(tw, death_row);
+		inet_twsk_put(tw);
+	}
+
+	local_bh_enable();
+	return 0;
+}
+
+
+void test_restore_sockets()
+{
+	int retval;
+
+	unsigned int fd;
+	struct file* file;
+	//struct saved_socket* saved_socket = &f->socket;
+//	int flags = saved_socket->flags;
+	struct socket* sock;
+
+	struct inet_sock* inet;
+	struct tcp_sock* tp;
+	struct rtable* rt;
+	__be32 daddr, nexthop;
+	struct sock* sk;
+	sprint("Restoring TCP socket\n");
+//	sprint("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
+//	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
+	
+//	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock);
+	retval = sock_create(2, 1, 6, &sock);
+	if(retval < 0)
+	{
+		panic("Socket create failed: %d", retval);
+	}
+
+	fd=alloc_fd(4, 0); // need real flags
+	if(fd != 4)
+	{
+		//sprint("Could not get original fd %u got %u\n", f->fd, fd);
+		panic("Could not get original fd");
+	}
+	
+	file = get_empty_filp();
+//	if(f->flags & O_NONBLOCK)
+//		flags |=O_NONBLOCK;
+	retval = sock_attach_fd(sock, file, 0);
+	if(retval < 0)
+	{
+		put_filp(file);
+		put_unused_fd(fd);
+		panic("socket attach failed\n");
+	}
+	fd_install(fd, file);
+
+	sk=sock->sk;
+	inet = inet_sk(sk);
+	tp = tcp_sk(sk);
+
+	sprint("Setting state %d\n", 0);
+	tcp_set_state(sk, 1);
+
+	sprint("Setting routing information\n");
+	nexthop = daddr = 24842412;
+	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport);
+	retval = ip_route_connect(&rt, nexthop, inet->saddr, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if, IPPROTO_TCP,
+				  inet->sport, htons(60449), sk, 1);
+
+	if(retval < 0)
+	{
+		panic("Could not get routing information\n");
+	}
+
+	if(!inet->opt || !inet->opt->srr)
+	{
+		daddr = rt->rt_dst;
+	}
+
+	if(!inet->saddr)
+	{
+		inet->saddr = rt->rt_src;
+	}
+	inet->rcv_saddr = inet->saddr;
+	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport);
+
+	if(tp->rx_opt.ts_recent_stamp && inet->daddr != daddr)
+	{
+		tp->rx_opt.ts_recent = 0;
+		tp->rx_opt.ts_recent_stamp = 0;
+		tp->write_seq = 0;
+	}
+
+	// some peer stuff might need to go here
+	
+	inet->dport = htons(60449);
+	inet->daddr = daddr;
+	inet_csk(sk)->icsk_ext_hdr_len = 0;
+
+
+	tp->rx_opt.mss_clamp = 536;
+	retval = restore_inet_hash(&tcp_death_row, sk, 5001);
+	if(retval)
+	{
+		panic("inet_hash_connect failed %d\n", retval);
+	}
+	sprint("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport));
+
+	retval = ip_route_newports(&rt, IPPROTO_TCP, inet->sport, inet->dport, sk);
+	if(retval)
+	{
+		panic("ip_route_newports failed %d\n", retval);
+	}
+
+	sk->sk_gso_type = SKB_GSO_TCPV4;
+	sk_setup_caps(sk, &rt->u.dst);
+
+	//set seq number
+	// set other tcp state
+
+}
 
 extern struct inet_timewait_death_row tcp_death_row;
 void restore_tcp_socket(struct saved_file* f)
@@ -1102,7 +1280,7 @@ void restore_tcp_socket(struct saved_file* f)
 
 	tp->rx_opt.mss_clamp = 536;
 	
-	retval = inet_hash_connect(&tcp_death_row, sk);
+	retval = restore_inet_hash(&tcp_death_row, sk, saved_socket->tcp->sport);
 	if(retval)
 	{
 		panic("inet_hash_connect failed %d\n", retval);

@@ -250,7 +250,7 @@ struct sock * __inet_lookup_established(struct net *net,
 	sk = NULL;
 out:
 	read_unlock(lock);
-	sprint("%s hit in ehash saddr %u, sport %u, daddr %u\n", (sk ? "got" : "no"), saddr, (__be32)sport, daddr); 
+//	sprint("%s hit in ehash saddr %u, sport %u, daddr %u\n", (sk ? "got" : "no"), saddr, (__be32)sport, daddr); 
 
 	return sk;
 hit:
@@ -260,7 +260,7 @@ hit:
 EXPORT_SYMBOL_GPL(__inet_lookup_established);
 
 /* called with local bh disabled */
-static int __inet_check_established(struct inet_timewait_death_row *death_row,
+int __inet_check_established(struct inet_timewait_death_row *death_row,
 				    struct sock *sk, __u16 lport,
 				    struct inet_timewait_sock **twp)
 {
@@ -331,6 +331,8 @@ not_unique:
 	write_unlock(lock);
 	return -EADDRNOTAVAIL;
 }
+
+EXPORT_SYMBOL_GPL(__inet_check_established);
 
 static inline u32 inet_sk_port_offset(const struct sock *sk)
 {

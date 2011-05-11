@@ -502,7 +502,7 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 {
 	struct sock* sk = sock->sk;
 	struct inet_sock* inet = inet_sk(sk);
-	struct saved_tcp_state* saved_tcp = (struct saved_tcp_state*)alloc(sizeof(saved_tcp));
+	struct saved_tcp_state* saved_tcp = (struct saved_tcp_state*)alloc(sizeof(struct saved_tcp_state));
 	file->socket.tcp = saved_tcp;
 
 	saved_tcp->state = sk->sk_state;
@@ -997,6 +997,8 @@ asmlinkage int sys_was_state_restored(struct pt_regs regs)
 	return ret;
 }
 
+
+void test_restore_sockets(void);
 asmlinkage int sys_state_present(struct pt_regs regs)
 {
 	struct saved_state* state;
