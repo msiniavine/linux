@@ -51,6 +51,7 @@ struct saved_tcp_state
 	u32 window_clamp;
 	u32 rcv_ssthresh;
 	u16 advmss;
+
 	int rcv_wscale;
 	u32 write_seq;
 };
@@ -233,6 +234,7 @@ struct global_state_info
 
 extern int set_stack_state;
 extern struct saved_vm_area* saved_stack;
+struct socket;
 
 void print_regs(struct pt_regs* regs);
 int set_state(struct pt_regs* regs, struct saved_task_struct* state);

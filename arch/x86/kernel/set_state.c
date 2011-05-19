@@ -1080,116 +1080,116 @@ ok:
 }
 
 
-void test_restore_sockets()
-{
-	int retval;
+/* void test_restore_sockets() */
+/* { */
+/* 	int retval; */
 
-	unsigned int fd;
-	struct file* file;
-	//struct saved_socket* saved_socket = &f->socket;
-//	int flags = saved_socket->flags;
-	struct socket* sock;
+/* 	unsigned int fd; */
+/* 	struct file* file; */
+/* 	//struct saved_socket* saved_socket = &f->socket; */
+/* //	int flags = saved_socket->flags; */
+/* 	struct socket* sock; */
 
-	struct inet_sock* inet;
-	struct tcp_sock* tp;
-	struct rtable* rt;
-	__be32 daddr, nexthop;
-	struct sock* sk;
-	sprint("Restoring TCP socket\n");
-//	sprint("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
-//	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
+/* 	struct inet_sock* inet; */
+/* 	struct tcp_sock* tp; */
+/* 	struct rtable* rt; */
+/* 	__be32 daddr, nexthop; */
+/* 	struct sock* sk; */
+/* 	sprint("Restoring TCP socket\n"); */
+/* //	sprint("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport, */
+/* //	       saved_socket->tcp->daddr, saved_socket->tcp->dport); */
 	
-//	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock);
-	retval = sock_create(2, 1, 6, &sock);
-	if(retval < 0)
-	{
-		panic("Socket create failed: %d", retval);
-	}
+/* //	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock); */
+/* 	retval = sock_create(2, 1, 6, &sock); */
+/* 	if(retval < 0) */
+/* 	{ */
+/* 		panic("Socket create failed: %d", retval); */
+/* 	} */
 
-	fd=alloc_fd(4, 0); // need real flags
-	if(fd != 4)
-	{
-		//sprint("Could not get original fd %u got %u\n", f->fd, fd);
-		panic("Could not get original fd");
-	}
+/* 	fd=alloc_fd(4, 0); // need real flags */
+/* 	if(fd != 4) */
+/* 	{ */
+/* 		//sprint("Could not get original fd %u got %u\n", f->fd, fd); */
+/* 		panic("Could not get original fd"); */
+/* 	} */
 	
-	file = get_empty_filp();
-//	if(f->flags & O_NONBLOCK)
-//		flags |=O_NONBLOCK;
-	retval = sock_attach_fd(sock, file, 0);
-	if(retval < 0)
-	{
-		put_filp(file);
-		put_unused_fd(fd);
-		panic("socket attach failed\n");
-	}
-	fd_install(fd, file);
+/* 	file = get_empty_filp(); */
+/* //	if(f->flags & O_NONBLOCK) */
+/* //		flags |=O_NONBLOCK; */
+/* 	retval = sock_attach_fd(sock, file, 0); */
+/* 	if(retval < 0) */
+/* 	{ */
+/* 		put_filp(file); */
+/* 		put_unused_fd(fd); */
+/* 		panic("socket attach failed\n"); */
+/* 	} */
+/* 	fd_install(fd, file); */
 
-	sk=sock->sk;
-	inet = inet_sk(sk);
-	tp = tcp_sk(sk);
+/* 	sk=sock->sk; */
+/* 	inet = inet_sk(sk); */
+/* 	tp = tcp_sk(sk); */
 
-	sprint("Setting state %d\n", 0);
-	tcp_set_state(sk, 1);
+/* 	sprint("Setting state %d\n", 0); */
+/* 	tcp_set_state(sk, 1); */
 
-	sprint("Setting routing information\n");
-	nexthop = daddr = 24842412;
-	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport);
-	retval = ip_route_connect(&rt, nexthop, inet->saddr, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if, IPPROTO_TCP,
-				  inet->sport, htons(60449), sk, 1);
+/* 	sprint("Setting routing information\n"); */
+/* 	nexthop = daddr = 24842412; */
+/* 	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport); */
+/* 	retval = ip_route_connect(&rt, nexthop, inet->saddr, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if, IPPROTO_TCP, */
+/* 				  inet->sport, htons(60449), sk, 1); */
 
-	if(retval < 0)
-	{
-		panic("Could not get routing information\n");
-	}
+/* 	if(retval < 0) */
+/* 	{ */
+/* 		panic("Could not get routing information\n"); */
+/* 	} */
 
-	if(!inet->opt || !inet->opt->srr)
-	{
-		daddr = rt->rt_dst;
-	}
+/* 	if(!inet->opt || !inet->opt->srr) */
+/* 	{ */
+/* 		daddr = rt->rt_dst; */
+/* 	} */
 
-	if(!inet->saddr)
-	{
-		inet->saddr = rt->rt_src;
-	}
-	inet->rcv_saddr = inet->saddr;
-	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport);
+/* 	if(!inet->saddr) */
+/* 	{ */
+/* 		inet->saddr = rt->rt_src; */
+/* 	} */
+/* 	inet->rcv_saddr = inet->saddr; */
+/* 	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport); */
 
-	if(tp->rx_opt.ts_recent_stamp && inet->daddr != daddr)
-	{
-		tp->rx_opt.ts_recent = 0;
-		tp->rx_opt.ts_recent_stamp = 0;
-		tp->write_seq = 0;
-	}
+/* 	if(tp->rx_opt.ts_recent_stamp && inet->daddr != daddr) */
+/* 	{ */
+/* 		tp->rx_opt.ts_recent = 0; */
+/* 		tp->rx_opt.ts_recent_stamp = 0; */
+/* 		tp->write_seq = 0; */
+/* 	} */
 
-	// some peer stuff might need to go here
+/* 	// some peer stuff might need to go here */
 	
-	inet->dport = htons(60449);
-	inet->daddr = daddr;
-	inet_csk(sk)->icsk_ext_hdr_len = 0;
+/* 	inet->dport = htons(60449); */
+/* 	inet->daddr = daddr; */
+/* 	inet_csk(sk)->icsk_ext_hdr_len = 0; */
 
 
-	tp->rx_opt.mss_clamp = 536;
-	retval = restore_inet_hash(&tcp_death_row, sk, 5001);
-	if(retval)
-	{
-		panic("inet_hash_connect failed %d\n", retval);
-	}
-	sprint("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport));
+/* 	tp->rx_opt.mss_clamp = 536; */
+/* 	retval = restore_inet_hash(&tcp_death_row, sk, 5001); */
+/* 	if(retval) */
+/* 	{ */
+/* 		panic("inet_hash_connect failed %d\n", retval); */
+/* 	} */
+/* 	sprint("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport)); */
 
-	retval = ip_route_newports(&rt, IPPROTO_TCP, inet->sport, inet->dport, sk);
-	if(retval)
-	{
-		panic("ip_route_newports failed %d\n", retval);
-	}
+/* 	retval = ip_route_newports(&rt, IPPROTO_TCP, inet->sport, inet->dport, sk); */
+/* 	if(retval) */
+/* 	{ */
+/* 		panic("ip_route_newports failed %d\n", retval); */
+/* 	} */
 
-	sk->sk_gso_type = SKB_GSO_TCPV4;
-	sk_setup_caps(sk, &rt->u.dst);
+/* 	sk->sk_gso_type = SKB_GSO_TCPV4; */
+/* 	sk_setup_caps(sk, &rt->u.dst); */
 
-	//set seq number
-	// set other tcp state
+/* 	//set seq number */
+/* 	// set other tcp state */
 
-}
+/* } */
 
 extern struct inet_timewait_death_row tcp_death_row;
 void restore_tcp_socket(struct saved_file* f)

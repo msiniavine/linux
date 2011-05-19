@@ -59,35 +59,6 @@ static int reserve(unsigned long start, unsigned long size)
 	return reserve_bootmem(start, size, BOOTMEM_EXCLUSIVE);
 }
 
-/* static void save_page_table(unsigned long address) */
-/* { */
-/* 	int i; */
-/* 	struct page* page = pfn_to_page(address >> PAGE_SHIFT); */
-/* 	pte_t* pte = (pte_t*)kmap(page); */
-/* 	if(pte == NULL) */
-/* 	{ */
-/* 		sprint( "Could not map page table at address %08lx\n", address); */
-/* 		return; */
-/* 	} */
-/* 	for(i = 0; i < 1024; i++) */
-/* 	{ */
-/* 		if(pte_present(pte[i]) && pte[i].pte != 0) */
-/* 		{ */
-/* 			unsigned long physical_address = (pte[i].pte & 0xfffff000); */
-/* 			sprint( "pte %08lx points to %08lx\n", pte[i].pte, physical_address); */
-/* 	      		if(reserve_bootmem(physical_address, PAGE_SIZE, BOOTMEM_EXCLUSIVE) < 0) */
-/* 			{ */
-/* 				sprint( "Failed to reserve page at %08lx\n", physical_address); */
-/* 			} */
-/* 			else */
-/* 			{ */
-/* 				sprint( "Reserved page at %08lx\n", physical_address); */
-/* 			} */
-
-/* 		} */
-/* 	} */
-/* 	kunmap(page); */
-/* } */
 static void reserve_process_memory(struct saved_task_struct* task)
 {
 	struct shared_resource* elem;
@@ -99,7 +70,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 		err = reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE);
 		if(err < 0)
 		{
-		  sprint("Failed to reserve pfn: %ld, err: %d\n", page->pfn, err);
+			sprint("Failed to reserve pfn: %ld, err: %d\n", page->pfn, err);
 		}
 		else
 		{
@@ -131,43 +102,6 @@ void reserve_saved_memory(void)
 }
 
 
- /*static void print_page(unsigned long address, struct mm_struct* mm)
-{
-  struct page* page;
-  pgd_t* pgd;
-  pmd_t* pmd;
-  pte_t* pte;
-
-
-  pgd = pgd_offset(mm, address);
-  if(pgd_none(*pgd) || pgd_bad(*pgd))
-    {
-      sprint( "%p has an invalid pgd\n", (void*)address);
-      return;
-    }
-
-  pmd = pmd_offset(pgd, address);
-  if(pmd_none(*pmd) || pmd_bad(*pmd))
-    {
-      sprint( "%p has an invalid pmd\n", (void*)address);
-      return;
-    }
-
-  pte = pte_offset_map(pmd, address);
-  if(!pte)
-    {
-      sprint( "%p does not have a pte\n", (void*)address);
-      return;
-    }
-
-  page = pte_page(*pte);
-  sprint( "Address %p maps to struct page at %p\n", (void*)address, page);
-  sprint( "PFN is: %p physical address is: %p\n", (void*)page_to_pfn(page), (void*)(page_to_pfn(page) << PAGE_SHIFT));
- pte_unmap(pte);
-
- }*/
-
-
 static pte_t* get_pte(struct mm_struct* mm, unsigned long virtual_address)
 {
 	pgd_t* pgd;
@@ -179,12 +113,10 @@ static pte_t* get_pte(struct mm_struct* mm, unsigned long virtual_address)
 	pgd = pgd_offset(mm, virtual_address);
 	if(pgd_none(*pgd) || pgd_bad(*pgd))
 	{
-		sprint( "%p has an invalid pgd\n", (void*)virtual_address);
 		return NULL;
 	}
 	if(!pgd_present(*pgd))
 	{
-		sprint( "%p is not present in pgd\n", (void*)virtual_address);
 		return NULL;
 	}
 	
@@ -197,7 +129,6 @@ static pte_t* get_pte(struct mm_struct* mm, unsigned long virtual_address)
 	pmd = pmd_offset(pud, virtual_address);
 	if(pmd_none(*pmd) || pmd_bad(*pmd))
 	{
-		sprint( "%p has an invalid pmd\n", (void*)virtual_address);
 		return NULL;
 	}
 
@@ -211,18 +142,13 @@ static int get_physical_address(struct mm_struct* mm, unsigned long virtual_addr
 {
 	struct page* page;
 	pte_t* pte;
-	sprint("get physical address of %p\n", (void*)virtual_address);
 	pte = get_pte(mm, virtual_address);
 	if(!pte || !pte_present(*pte))
 	{
-		sprint("Pte no valid\n");
 		return 0;
 	}
 	
 	page = pte_page(*pte);
-//	sprint( "Address %p maps to struct page at %p\n", (void*)virtual_address, page);
-//	sprint( "PFN is: %p physical address is: %p\n", (void*)page_to_pfn(page), (void*)(page_to_pfn(page) << PAGE_SHIFT));
-	sprint("va %p physical address was %p\n", (void*)virtual_address, (void*)(page_to_pfn(page) << PAGE_SHIFT));
 	*physical_address = (page_to_pfn(page) << PAGE_SHIFT);
 	pte_unmap(pte);
 	return 1;
@@ -242,35 +168,27 @@ static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, 
 
 		if(!get_physical_address(area->vm_mm, virtual_address, &physical_address))
 		{
-			sprint("-\n");
 			continue;
 		}
 
 		p = pfn_to_page(physical_address >> PAGE_SHIFT);
-//		sprint("Page count: %d\n", atomic_read(&p->_count));
 		page = (struct saved_page*)find_by_first(head, p);
 		if(page && page_mapcount(p) != 0)
 		{
-			sprint("Found page at %p\n", page);
 			page->mapcount += 1;
 		}
 		else if(page == NULL)
 		{
 			page = (struct saved_page*)alloc(sizeof(*page));
-			sprint("Allocated new page at %p\n", page);
 			page->pfn = page_to_pfn(p);
-			sprint("Got pfn\n");
 			page->mapcount = page_mapcount(p) > 0 ? 1 :0;
-			sprint("Got map count\n");
 			insert_entry(head, p, page);
-			sprint("Inserted page entry\n");
 		}
 
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		elem->data = page;
 		elem->next = mm->pages;
 		mm->pages = elem;
-		sprint("+\n");
 	}
 }
 
@@ -299,7 +217,6 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 		
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		p = pfn_to_page(pgd.pgd >> 12);
-		sprint("Count %d\n", atomic_read(&p->_count));
 
 		page = find_by_first(head, p);
 		if(page == NULL)
@@ -510,8 +427,6 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	file->socket.tcp = saved_tcp;
 
 	saved_tcp->state = sk->sk_state;
-	sprint("inet->daddr %u, inet->dport %u, inet->saddr %u, inet->sport %u\n", inet->daddr, inet->dport, inet->saddr, inet->sport);
-	sprint("dport %u, sport %u\n", ntohs(inet->dport), ntohs(inet->sport));
 	saved_tcp->daddr = inet->daddr;
 	saved_tcp->dport = ntohs(inet->dport);
 	saved_tcp->saddr = inet->saddr;
@@ -773,13 +688,10 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 
 	for(area = task->mm->mmap; area != NULL; area = area->vm_next)
 	{
-		struct saved_vm_area* prev = find_by_first(head, area);
 		struct saved_vm_area* cur_area = NULL;
 		struct shared_resource* elem = NULL;
 
 		sprint( "Saving area:%08lx-%08lx\n", area->vm_start, area->vm_end);
-//		sprint( "Current area: %p\n", cur_area);
-//		sprint( "Current_task %p\n", current_task);
 
 		cur_area = (struct saved_vm_area*)alloc(sizeof(*cur_area));
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
@@ -788,15 +700,6 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		elem->next = current_task->memory;
 		current_task->memory = elem;
 
-//		if(prev == NULL)
-//		{
-//			sprint("No previous area found\n");
-//		}
-//		else
-//		{
-//			sprint("Previous area found at %p\n", prev);
-//		}
-		
 
 		cur_area->begin = area->vm_start;
 		cur_area->end = area->vm_end;
