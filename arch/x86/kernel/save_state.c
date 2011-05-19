@@ -15,8 +15,10 @@
 #include <linux/console_struct.h>
 #include <linux/console.h>
 #include <net/inet_sock.h>
+#include <net/inet_connection_sock.h>
 #include <linux/net.h>
 #include <linux/udp.h>
+#include <linux/tcp.h>
 #include <linux/set_state.h>
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
@@ -502,6 +504,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 {
 	struct sock* sk = sock->sk;
 	struct inet_sock* inet = inet_sk(sk);
+	struct inet_connection_sock* icsk = inet_csk(sk);
+	struct tcp_sock* tp = tcp_sk(sk);
 	struct saved_tcp_state* saved_tcp = (struct saved_tcp_state*)alloc(sizeof(struct saved_tcp_state));
 	file->socket.tcp = saved_tcp;
 
@@ -512,6 +516,26 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	saved_tcp->dport = ntohs(inet->dport);
 	saved_tcp->saddr = inet->saddr;
 	saved_tcp->sport = ntohs(inet->sport);
+
+	saved_tcp->rcv_mss = icsk->icsk_ack.rcv_mss;
+
+	saved_tcp->rcv_nxt = tp->rcv_nxt;
+	saved_tcp->rcv_wnd = tp->rcv_wnd;
+	saved_tcp->rcv_wup = tp->rcv_wup;
+	saved_tcp->snd_nxt = tp->snd_nxt;
+
+	saved_tcp->snd_una = tp->snd_una;
+	saved_tcp->snd_wl1 = tp->snd_wl1;
+	saved_tcp->snd_wnd = tp->snd_wnd;
+	saved_tcp->max_window = tp->max_window;
+	saved_tcp->mss_cache = tp->mss_cache;
+
+	saved_tcp->window_clamp = tp->window_clamp;
+	saved_tcp->rcv_ssthresh = tp->rcv_ssthresh;
+	saved_tcp->advmss = tp->advmss;
+	saved_tcp->rcv_wscale = tp->rx_opt.rcv_wscale;
+
+	saved_tcp->write_seq = tp->write_seq;
 	
 }
 

@@ -1203,6 +1203,7 @@ void restore_tcp_socket(struct saved_file* f)
 	struct socket* sock;
 
 	struct inet_sock* inet;
+	struct inet_connection_sock* icsk;
 	struct tcp_sock* tp;
 	struct rtable* rt;
 	__be32 daddr, nexthop;
@@ -1238,6 +1239,7 @@ void restore_tcp_socket(struct saved_file* f)
 
 	sk=sock->sk;
 	inet = inet_sk(sk);
+	icsk = inet_csk(sk);
 	tp = tcp_sk(sk);
 
 	sprint("Setting state %d\n", saved_socket->tcp->state);
@@ -1296,8 +1298,29 @@ void restore_tcp_socket(struct saved_file* f)
 	sk->sk_gso_type = SKB_GSO_TCPV4;
 	sk_setup_caps(sk, &rt->u.dst);
 
-	//set seq number
 	// set other tcp state
+	icsk->icsk_ack.rcv_mss = saved_socket->tcp->rcv_mss;
+
+	tp->rcv_nxt = saved_socket->tcp->rcv_nxt;
+	tp->rcv_wnd = saved_socket->tcp->rcv_wnd;
+	tp->rcv_wup = saved_socket->tcp->rcv_wup;
+	tp->snd_nxt = saved_socket->tcp->snd_nxt;
+
+	tp->snd_una = saved_socket->tcp->snd_una;
+	tp->snd_wl1 = saved_socket->tcp->snd_wl1;
+	tp->snd_wnd = saved_socket->tcp->snd_wnd;
+	tp->max_window = saved_socket->tcp->max_window;
+	tp->mss_cache = saved_socket->tcp->mss_cache;
+	
+	tp->window_clamp = saved_socket->tcp->window_clamp;
+	tp->rcv_ssthresh = saved_socket->tcp->rcv_ssthresh;
+	tp->advmss = saved_socket->tcp->advmss;
+	tp->rx_opt.rcv_wscale = saved_socket->tcp->rcv_wscale;
+
+	//set seq number
+	tp->write_seq = saved_socket->tcp->write_seq;
+
+
 }
 
 void restore_udp_socket(struct saved_file* f){

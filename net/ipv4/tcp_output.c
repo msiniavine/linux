@@ -39,6 +39,8 @@
 #include <linux/compiler.h>
 #include <linux/module.h>
 
+#include <linux/set_state.h>
+
 /* People can turn this off for buggy TCP's found in printers etc. */
 int sysctl_tcp_retrans_collapse __read_mostly = 1;
 
@@ -1758,7 +1760,14 @@ u32 __tcp_select_window(struct sock *sk)
 		 * is too small.
 		 */
 		if (window <= free_space - mss || window > free_space)
+		{
+			sprint("window %d free_space %d mss %d\n", window, free_space, mss);
+			if(mss == 0)
+			{
+				panic("Inevitable divide by zero");
+			}
 			window = (free_space / mss) * mss;
+		}
 		else if (mss == full_space &&
 			 free_space > window + (full_space >> 1))
 			window = free_space;

@@ -32,6 +32,27 @@ struct saved_tcp_state
 	__be32 saddr;
 	__be16 sport;  // source port in host format
 	__be16 dport; // destination port in host format
+
+	//inet_connection_sock state
+	int rcv_mss;
+	
+	//tcp_sock state
+	u32 rcv_nxt;
+	u32 rcv_wnd;
+	u32 rcv_wup;
+	u32 snd_nxt;
+
+	u32 snd_una;
+	u32 snd_wl1;
+	u32 snd_wnd;
+	u32 max_window;
+	u32 mss_cache;
+
+	u32 window_clamp;
+	u32 rcv_ssthresh;
+	u16 advmss;
+	int rcv_wscale;
+	u32 write_seq;
 };
 
 struct saved_socket
