@@ -52,8 +52,12 @@ struct saved_tcp_state
 	u32 rcv_ssthresh;
 	u16 advmss;
 
+	u32 pred_flags;
+	u16 tcp_header_len;
+
 	int rcv_wscale;
 	u32 write_seq;
+	u32 copied_seq;
 };
 
 struct saved_socket

@@ -451,6 +451,10 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	saved_tcp->rcv_wscale = tp->rx_opt.rcv_wscale;
 
 	saved_tcp->write_seq = tp->write_seq;
+	saved_tcp->copied_seq = tp->copied_seq;
+
+	saved_tcp->pred_flags = tp->pred_flags;
+	saved_tcp->tcp_header_len = tp->tcp_header_len;
 	
 }
 
