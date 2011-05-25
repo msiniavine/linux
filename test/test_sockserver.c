@@ -18,7 +18,7 @@ int main()
 	int n;
 
 	enable_save_state();
-	sockfd=my_socket(MY_AF_INET, MY_SOCK_STREAM, 0);
+	sockfd=socket(AF_INET, SOCK_STREAM, 0);
 	if(sockfd < 0)
 	{
 		perror("Error opening socket");
@@ -31,13 +31,13 @@ int main()
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	serv_addr.sin_port = htons(portno);
 
-	if(my_bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
+	if(bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
 	{
 		perror("Error binding a socket");
 		exit(1);
 	}
 
-	if(my_listen(sockfd, 1) < 0)
+	if(listen(sockfd, 1) < 0)
 	{
 		perror("Error listening on a socket");
 		exit(1);
@@ -53,7 +53,7 @@ int main()
 	while(1)
 	{
 		bzero(buffer, 256);
-		n = my_recv(newsockfd, buffer, 255, 0);
+		n = recv(newsockfd, buffer, 255, 0);
 		printf("recv returned %d\n", n);
 		if(n < 0)
 		{
@@ -67,7 +67,7 @@ int main()
 		}
 
 		printf("ECHO: %s\n", buffer);
-		n=my_send(newsockfd, buffer, n, 0);
+		n=send(newsockfd, buffer, n, 0);
 		printf("send returned %d\n", n);
 		if(n < 0)
 		{

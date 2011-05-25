@@ -73,6 +73,8 @@
 
 #include <linux/set_state.h>
 
+#define sprint(format, ...) {}
+
 int sysctl_tcp_timestamps __read_mostly = 1;
 int sysctl_tcp_window_scaling __read_mostly = 1;
 int sysctl_tcp_sack __read_mostly = 1;

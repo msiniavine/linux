@@ -1,0 +1,277 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <sys/time.h>
+
+#include "test.h"
+
+
+struct random
+{
+	unsigned int mw;
+	unsigned int mz;
+};
+
+struct random r = {865048991, 117742254};
+
+
+unsigned int get_random(struct random* r)
+{
+	r->mz = 36969 * (r->mz & 65535) + (r->mz >> 16);
+	r->mw = 18000 * (r->mw & 65535) + (r->mw >> 16);
+	return (r->mz << 16) + r->mw;
+}
+
+// get current time in microseconds
+unsigned int gettime()
+{
+	unsigned long long usecs;
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	usecs = tv.tv_sec * 1000000000 + tv.tv_usec;
+	return usecs /1000;
+}
+
+void print_usage()
+{
+	printf("High load tcp test program\n");
+	printf("Usage: test_sockload [options] -h <host> -p <port>\n");
+	printf("\t-h - Host to connect to\n");
+	printf("\t-p - Port to connect on\n");
+	printf("Options:\n");
+	printf("\t-r - Switches to receive mode and verifies that received data is correct\n");
+}
+
+int send_all(int fd, void* buffer, size_t len)
+{
+	char* b = (char*)buffer;
+	size_t sent = 0;
+	while(sent < len)
+	{
+		size_t ret = 0;
+		ret = send(fd, b+sent, len-sent, 0);
+		if(ret < 0)
+			return -1;
+		else if(ret == 0)
+			return 0;
+		else
+			sent+=ret;
+	}
+
+	return sent;
+}
+
+int read_all(int fd, void* buffer, size_t len)
+{
+	char* b = (char*)buffer;
+	size_t received = 0;
+	while(received < len)
+	{
+		size_t ret = recv(fd, b+received, len-received, 0);
+		if(ret <= 0)
+			return ret;
+		received+=ret;
+	}
+	return received;
+}
+
+int do_send(const char* hostname, int port)
+{
+	int fd;
+	struct hostent* host;
+	struct sockaddr_in serv_addr;
+	unsigned int* buffer;
+	int i;
+	host = gethostbyname(hostname);
+	if(!host)
+	{
+		herror("Resolving host");
+		return -11;		
+	}
+
+	fd = socket(AF_INET, SOCK_STREAM, 0);
+	if(fd < 0)
+	{
+		perror("Error creating socket");
+		return -1;
+	}
+	serv_addr.sin_family = AF_INET;
+	memcpy(&serv_addr.sin_addr.s_addr, host->h_addr, host->h_length);
+	serv_addr.sin_port = htons(port);
+	if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
+	{
+		perror("Connecting to host");
+		return -1;
+	}
+
+	buffer = (unsigned int*)malloc(1024);
+	memset(buffer, 0, 1024);
+	while(1)
+	{
+		int ret;
+		for(i=0; i<1024/sizeof(int); i++)
+		{
+			buffer[i] = get_random(&r);
+		}
+		ret = send_all(fd, buffer, 1024);
+		if(ret < 0)
+		{
+			perror("Error sending");
+			return -1;
+		}
+		else if(ret == 0)
+			break;
+	}
+
+	free(buffer);
+	close(fd);
+	return 0;
+}
+
+int do_receive(int port)
+{
+	int fd, clifd;
+	struct sockaddr_in serv_addr, cli_addr;
+	socklen_t clilen;
+	unsigned int* buffer;
+	int err = 0;
+	int i;
+	int receive_count, receive_total;
+	unsigned int start_time;
+
+	fd = socket(AF_INET, SOCK_STREAM, 0);
+	if(fd < 0)
+	{
+		perror("Error creating socket");
+		return -1;
+	}
+
+	memset(&serv_addr, 0, sizeof(serv_addr));
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_addr.s_addr = INADDR_ANY;
+	serv_addr.sin_port = htons(port);
+	
+	if(bind(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
+	{
+		perror("Error binding socket");
+		err = -1;
+		goto close_fd;
+	}
+
+	if(listen(fd, 1) < 0)
+	{
+		perror("Error listening");
+		err = -1;
+		goto close_fd;
+	}
+	
+	if((clifd = accept(fd, (struct sockaddr*)&cli_addr, &clilen)) < 0)
+	{
+		perror("Error accepting");
+		err = -1;
+		goto close_fd;
+	}
+
+	buffer = (unsigned int*)malloc(1024);
+	receive_count = 0;
+	receive_total = 0;
+	start_time = gettime();
+	while(1)
+	{
+		int ret;
+		int cur_time;
+		ret = read_all(clifd, buffer, 1024);
+		if(ret == 0)
+		{
+			printf("Disconnected\n");
+			err = 0;
+			break;
+		}
+		if(ret < 0)
+		{
+			perror("Error during read");
+			err = -1;
+			break;
+		}
+		receive_count++;
+		receive_total++;
+		for(i=0; i<1024/sizeof(unsigned int); i++)
+		{
+			if(buffer[i] != get_random(&r))
+			{
+				printf("Error on byte %d in buffer %d\n", 4*i, receive_count);
+				err = 0;
+				goto done;
+			}
+		}
+		cur_time = gettime();
+		if(cur_time - start_time > 1000000)
+		{
+			printf("%u KB/s\n", receive_count);
+			receive_count = 0;
+			start_time = cur_time;
+		}
+		
+	}
+
+done:
+	printf("Total received %u KBytes\n", receive_total);
+	free(buffer);
+	close(clifd);
+close_fd:
+	close(fd);
+	return err;
+}
+
+int main(int argc, char** argv)
+{
+	int c;
+	char* hostname= NULL;
+	int port=0;
+	int receive = 0;
+	opterr = 0;
+	enable_save_state();
+	while((c=getopt(argc, argv, "rh:p:")) != -1)
+	{
+		switch(c)
+		{
+		case 'h':
+			hostname=optarg;
+			break;
+		case 'p':
+			port = atoi(optarg);
+			break;
+		case 'r':
+			receive = 1;
+			break;
+		default:
+			print_usage();
+			return 1;
+		}
+	}
+
+	if(receive)
+	{
+		if(port == 0)
+		{
+			print_usage();
+			return 1;
+		}
+
+		return do_receive(port);
+	}
+
+	if(hostname == NULL || port == 0)
+	{
+		print_usage();
+		return 1;
+	}
+
+	return do_send(hostname, port);
+	
+}
