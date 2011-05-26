@@ -417,6 +417,27 @@ static bool file_is_socket(struct file* file)
 		return false;
 }
 
+static bool should_be_saved(struct file* file)
+{
+	struct socket* sock;
+	struct sock* sk;
+	if(!file_is_socket(file))
+		return true;
+
+	sock = (struct socket*)file->private_data;
+	sk = sock->sk;
+
+	if(sk->sk_state != TCP_LISTEN)
+	{
+		return true;
+	}
+	else
+	{
+		sprint("Skipping listen socket\n");
+		return false;
+	}
+}
+
 static void save_tcp_state(struct saved_file* file, struct socket* sock)
 {
 	struct sock* sk = sock->sk;
@@ -511,7 +532,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 
 		if(f == NULL)
 			continue;
-		if(fd == 3)
+
+		if(!should_be_saved(f))
 			continue;
 
 		file = (struct saved_file*)alloc(sizeof(*file));
