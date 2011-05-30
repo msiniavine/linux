@@ -45,6 +45,7 @@ void print_usage()
 	printf("\t-p - Port to connect on\n");
 	printf("Options:\n");
 	printf("\t-r - Switches to receive mode and verifies that received data is correct\n");
+	printf("\t-l - Limit the number of packets sent every second\n");
 }
 
 int send_all(int fd, void* buffer, size_t len)
@@ -80,13 +81,15 @@ int read_all(int fd, void* buffer, size_t len)
 	return received;
 }
 
-int do_send(const char* hostname, int port)
+int do_send(const char* hostname, int port, int limit)
 {
 	int fd;
 	struct hostent* host;
 	struct sockaddr_in serv_addr;
 	unsigned int* buffer;
 	int i;
+	int packets_sent = 0;
+	unsigned int start;
 	host = gethostbyname(hostname);
 	if(!host)
 	{
@@ -111,9 +114,19 @@ int do_send(const char* hostname, int port)
 
 	buffer = (unsigned int*)malloc(1024);
 	memset(buffer, 0, 1024);
+	start = gettime();
 	while(1)
 	{
 		int ret;
+		if(limit > 0 && packets_sent > limit)
+		{
+			int sleep_time = (1000 - (gettime()-start))*1000;
+			if(sleep_time > 0)
+				usleep(sleep_time);
+			start = gettime();
+			packets_sent = 0;
+		}
+
 		for(i=0; i<1024/sizeof(int); i++)
 		{
 			buffer[i] = get_random(&r);
@@ -126,6 +139,8 @@ int do_send(const char* hostname, int port)
 		}
 		else if(ret == 0)
 			break;
+
+		packets_sent++;
 	}
 
 	free(buffer);
@@ -234,9 +249,10 @@ int main(int argc, char** argv)
 	char* hostname= NULL;
 	int port=0;
 	int receive = 0;
+	int limit = -1;
 	opterr = 0;
 	enable_save_state();
-	while((c=getopt(argc, argv, "rh:p:")) != -1)
+	while((c=getopt(argc, argv, "rh:p:l:")) != -1)
 	{
 		switch(c)
 		{
@@ -248,6 +264,9 @@ int main(int argc, char** argv)
 			break;
 		case 'r':
 			receive = 1;
+			break;
+		case 'l':
+			limit=atoi(optarg);
 			break;
 		default:
 			print_usage();
@@ -272,6 +291,6 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	return do_send(hostname, port);
+	return do_send(hostname, port, limit);
 	
 }

@@ -7,7 +7,7 @@ cd test
     kexec -e
 } &
 
-./test_sockserver
+./test_sockload -h 142.150.234.240 -p 5000 -l 3200
 
 #cd test
 #./test_loop < Makefile &> trace &
