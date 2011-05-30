@@ -55,6 +55,7 @@ struct files_struct {
 	struct file * fd_array[NR_OPEN_DEFAULT];
 };
 
+
 #define files_fdtable(files) (rcu_dereference((files)->fdt))
 
 extern struct kmem_cache *filp_cachep;
@@ -77,9 +78,11 @@ static inline struct file * fcheck_files(struct files_struct *files, unsigned in
 	struct file * file = NULL;
 	struct fdtable *fdt = files_fdtable(files);
 
+	// Obtain file descriptor with index fd.
 	if (fd < fdt->max_fds)
 		file = rcu_dereference(fdt->fd[fd]);
 	return file;
+	//
 }
 
 /*

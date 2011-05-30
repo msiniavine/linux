@@ -339,6 +339,8 @@ struct used_file
 	struct file* filep;
 };
 
+// This function allocates memory for a new used_file object, initializes its
+// list_head object, and then returns a pointer to the new used_file object.
 static struct used_file* init_used_files(void)
 {
 	struct used_file* ret = (struct used_file*)kmalloc(sizeof(struct used_file), GFP_KERNEL);
@@ -349,6 +351,7 @@ static struct used_file* init_used_files(void)
 	INIT_LIST_HEAD(&ret->list);
 	return ret;
 }
+//
 
 struct file* find_file(struct used_file* head, char* filename)
 {
@@ -463,6 +466,21 @@ static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* stat
 static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* state, struct used_file* files,
 	struct map_entry* head)
 {
+  	// The code below first checks to see if the "saved" memory descriptor has been
+  	// encountered before.  If it has been encountered, then increment the mm_users
+  	// field of the associated "real" memory descriptor by 1 and then set the mm field
+  	// of bprm to point to that mm_struct; otherwise, allocate
+  	// memory and initialize that memory for a new mm_struct, and then "insert" it
+  	// and the associated saved_mm_struct into the map_entry objects list...
+  	//
+  	// If memory could not be allocated for a new mm_struct, then -ENOMEM is returned.
+  	// -ENOMEM is the out of memory error number.
+  	//
+  	// nr_ptes is...?
+  	//
+  	// clone_pgd_range(mm->pgd, state->mm->pgd, SAVED_PGD_SIZE) appears to
+  	// copy SAVED_PGD_SIZE amount of PGDs starting from state->mm->pgd to
+  	// mm->pgd...
 	int err;
 	struct mm_struct *mm = NULL;
 	struct mm_struct* old_mm = NULL;
@@ -488,10 +506,14 @@ static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* s
 	sprint( "Setting nr_ptes to: %lu\n", mm->nr_ptes);
 	sprint("mm->pgd: %p, state->pgd: %p\n", mm->pgd, state->mm->pgd);
 	clone_pgd_range(mm->pgd, state->mm->pgd, SAVED_PGD_SIZE);
+	//
 
+	// Copy over the heap start and end addresses.
 	mm->start_brk = state->mm->start_brk;
 	mm->brk = state->mm->brk;
+	//
 
+	// ???
 	err = init_new_context(current, mm);
 	if (err)
 		goto err;
@@ -501,7 +523,9 @@ static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* s
 		goto err;
 	sprint("Created vmas\n");
 	return 0;
+	//
 
+	// ???
 err:
 	if (mm) {
 		bprm->mm = NULL;
@@ -509,6 +533,7 @@ err:
 	}
 
 	return err;
+	//
 }
 
 // Finds the other pipe end from the global table
@@ -1406,12 +1431,16 @@ void restore_files(struct saved_task_struct* state, struct global_state_info* gl
 	struct saved_file* f;
 	unsigned int max_fd = 0;
 
+	// Finds the largest file descriptor index...
 	for(f=state->open_files; f!=NULL; f=f->next)
 	{
 		if (f->fd > max_fd)
 			max_fd = f->fd;
 	}
+	//
 
+	// Finds out what kind file the file is/was and then calls then appropraite function
+	// to "restore" the file...
 	for(f=state->open_files; f!=NULL; f=f->next)
 	{
 		sprint("Restoring fd %u with path %s of file type %u\n", f->fd, f->name, f->type);
@@ -1433,6 +1462,7 @@ void restore_files(struct saved_task_struct* state, struct global_state_info* gl
 				break;
 		}
 	}
+	//
 }
 
 void close_unused_pipes(struct saved_task_struct* state, struct global_state_info* global_state)
@@ -1548,12 +1578,16 @@ static struct pid *alloc_orig_pid(pid_t original_pid, struct pid_namespace *ns)
 	struct pid_namespace *tmp;
 	struct upid *upid;
 
+	// Appears to be allocating memory from some kind of cache for a single
+	// struct pid object.
 	sprint("Changing pid from %d to %d/n", task_pid_nr(current), original_pid);
 	pid = kmem_cache_alloc(ns->pid_cachep, GFP_KERNEL);
 	if (!pid)
 		goto out;
 	sprint("Allocated pid structure\n");
+	//
 
+	// ???
 	sprint("pid_namespace has %d levels\n", ns->level);
 	tmp = ns;
 	for (i = ns->level; i >= 0; i--) {
@@ -1565,13 +1599,23 @@ static struct pid *alloc_orig_pid(pid_t original_pid, struct pid_namespace *ns)
 		pid->numbers[i].ns = tmp;
 		tmp = tmp->parent;
 	}
+	//
 
+	// level is...?
+	//
+	// atomic_set(&pid->count, 1) sets the number of tasks using this pid to 1...
+	//
+	// INIT_HLIST_HEAD() sets the first field of the object pointed to by the 
+	// passed in pointer to NULL...
+	//
 	//get_pid_ns(ns);
 	pid->level = ns->level;
 	atomic_set(&pid->count, 1);
 	for (type = 0; type < PIDTYPE_MAX; ++type)
 		INIT_HLIST_HEAD(&pid->tasks[type]);
+	//
 
+	// ???
 	spin_lock_irq(&pidmap_lock);
 	for (i = ns->level; i >= 0; i--) {
 		upid = &pid->numbers[i];
@@ -1579,6 +1623,7 @@ static struct pid *alloc_orig_pid(pid_t original_pid, struct pid_namespace *ns)
 				&pid_hash[pid_hashfn(upid->nr, upid->ns)]);
 	}
 	spin_unlock_irq(&pidmap_lock);
+	//
 
 out:
 	return pid;
@@ -1681,6 +1726,15 @@ void restore_registers(struct saved_task_struct* state)
 	print_regs(task_pt_regs(current));
 }
 
+// head is the head pointer to the doubly-linked list of map_entry objects.
+// The list of map_entry objects used or refered to in this file appear
+// to have nothing to do with the ones created in saved_state.c...?
+//
+// state is the pointer to the "saved process" of interest.
+//
+// parent is the pointer to the process descriptor of the parent of "*state".
+//
+// global_state is...?
 struct state_info
 {
 	struct map_entry* head;
@@ -1688,6 +1742,7 @@ struct state_info
 	struct task_struct* parent;
 	struct global_state_info *global_state;
 };
+//
 
 static struct global_state_info global_state;
 static struct pipe_restore_temp pipe_restore_head;
@@ -1705,6 +1760,7 @@ void resume_saved_state(void)
 	asm_resume_saved_state(task_pt_regs(current));
 }
 
+// Why is this function required if it pretty much just calls another function?
 int do_restore(void* data)
 {
 	struct state_info* info = (struct state_info*)data;
@@ -1714,6 +1770,7 @@ int do_restore(void* data)
 	sprint("state restored need to return to user space\n");
 	return 0;
 }
+//
 
 static void restore_children(struct saved_task_struct* state, struct state_info* p_info)
 {
@@ -1750,7 +1807,7 @@ int count_processes(struct saved_task_struct* state)
 	return count;
 }
 
-
+// What calls this function?  Where is this function called?
 int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
 	struct task_struct* thread;
@@ -1761,9 +1818,18 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 //	DECLARE_COMPLETION_ONSTACK(all_done);
 //	wait_queue_head_t wq;
 
+	// init_waitqueue_head() sets the variable pointed to by the argument to NULL.
+	//
+	// atomic_set() sets (v)->counter to equal to its second argument, where v is
+	// the function's first argument.
+	//
+	// init_completion() sets x->done to equal to 0 and passes in &x->wait as an
+	// argument into init_wait_queue_head(), where x is the function's first and
+	// and only argument.
 	init_waitqueue_head(&global_state.wq);
 	atomic_set(&global_state.processes_left, count_processes(state));
 	init_completion(&global_state.all_done);
+	//
 
 //int restore_count;
 //DEFINE_MUTEX(lock);
@@ -1776,6 +1842,9 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	sprint("Restoring pid parent: %d\n", state->pid);
 	sprint("Need to restore %d processes\n", atomic_read(&global_state.processes_left));
 
+	// Some setting up of the state_info object...
+	//
+	// What is the stuff after info->parent = NULL;?
 	info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
 	info->head = new_map();
 	info->state = state;
@@ -1787,52 +1856,96 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	info->global_state->pipe_restore_head->processlist = NULL;
 	info->global_state->pipe_close_head = &pipe_close_head;
 	info->global_state->pipe_close_head->next = NULL;
+	//
 
+	// Creates a thread that begins executing do_restore().  The variable
+	// info is the argument into do_restore().
 	thread = kthread_create(do_restore, info, "test_thread");
 	if(IS_ERR(thread))
 	{
 		sprint("Failed to create a thread\n");
 		return 0;
 	}
+	//
 
+	// wake_up_process() is required to start the thread created by kthread_create().
+	//
+	// ???
  	wake_up_process(thread);
 	sprint("parent waiting for children\n");
 	wait_event(global_state.wq, atomic_read(&global_state.processes_left) == 0);
 	sprint("parent finishes waiting for children\n");
 	complete_all(&global_state.all_done);
 	return 0;
+	//
 }
+//
 
 int do_set_state(struct state_info* info)
 {
+  	// ???
 	struct linux_binprm* bprm;
 	struct files_struct* displaced;
 	int retval;
 	struct file* file;
 	struct used_file* used_files;
 	struct saved_task_struct* state = info->state;
+	//
 
+	// current is the task_struct of the current process, which is
+	// the process that is executing this code.
+	//
+	// Besides setting displaced to point to the "current" task's files
+	// descriptor, what else does unshare_files() do?
 	sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 	retval = unshare_files(&displaced); // this seems to copy the open files of the current task (displaced is released later)
 	if(retval)
 		goto out_ret;
 	sprint( "Unsared files\n");
+	//
 
+	// Allocating memory for a single struct linux_binprm object.
+	//
+	// -ENOMEM is the out of memory error number.
 	retval = -ENOMEM;
 	bprm = kzalloc(sizeof(*bprm), GFP_KERNEL);
 	if(!bprm)
 		goto out_files;
 	sprint( "Allocated bprm\n");
+	//
 
 
 	retval = -ENOMEM;
 
 
+	// open_exec() "opens" the file specified by the given path and returns a 
+	// pointer to a struct file object?  Which process descriptor is the open file
+	// "associated" with?  The kernel process?
+	//
+	// PTR_ERR() appears to just type-cast the passed in pointer into a long type and then
+	// returns that value.
 	file = open_exec(state->exe_file);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 	  goto out_kfree;
+	//
 
+	// file is a pointer to a struct file object representing the executable file.
+	//
+	// filename is the full path and name of the executable...
+	//
+	// interp is the full path and name of the file being executed...
+	//
+	//
+	// init_used_files() creates a new used_file object, does some initializing, and then
+	// returns a pointer to it.
+	//
+	// filename appears to be the full path and name of the same executable.
+	//
+	// filep is the pointer to the struct file object representing the executable file.
+	//
+	//
+	// What does get_file() do?
 	bprm->file = file;
 	bprm->filename = state->exe_file;
 	bprm->interp = state->exe_file;
@@ -1841,22 +1954,27 @@ int do_set_state(struct state_info* info)
 	used_files->filep = file;
 	get_file(file);
 	sprint( "Opened executable file\n");
+	//
 
+	// ???
 	retval = bprm_mm_create(bprm, state, used_files, info->head);
 	if(retval)
 		goto out_file;
 	sprint( "Allocated new mm_struct\n");
 	print_mm(bprm->mm);
+	//
 
 	sprint( "Allocated security\n");
 
 	//here original exec was changing the value of bprm->p which has something to do with the stack
 	//but i am skipping that for now, since I dont know what it does
 
+	// ???
 	retval = prepare_binprm(bprm);
 	if(retval < 0)
 		goto out;
 	sprint( "bprm prepared\n");
+	//
 
 	//here execve used to call load_elf_binary
 	retval = load_saved_binary(bprm, state);
@@ -1866,38 +1984,65 @@ int do_set_state(struct state_info* info)
 		struct pid* pid;
 		struct pid* current_pid;
 
+		// Turn off the "current" process'PF_KTHREAD flag.
+		// The PF_KTHREAD flag is an indication that that process is
+		// a kernel process.
 		become_user_process();
+		//
 
+		// ???
 		current_pid = task_pid(current);
 		sprint("Current pid count:%d\n", atomic_read(&current_pid->count));
+		//
 		
+		// First line gets the processor that is currently executing this code?
+		//
+		// Is gs a register?  What is this one for?
+		//
+		// The third line is copying over the contents of Thread-Local Storage of the
+		// saved process into the current process?
+		//
+		// What is load_TLS()?
+		// What does put_cpu() do?
+		// What does loadsegment do?
 		cpu = get_cpu();
 		current->thread.gs = state->gs;
 		memcpy(current->thread.tls_array, state->tls_array, GDT_ENTRY_TLS_ENTRIES*sizeof(struct desc_struct));
 		load_TLS(&current->thread, cpu);
 		put_cpu();
 		loadsegment(gs, state->gs);
+		//
 	       
-	
+
+		// This at least changes this process' pid to, perhaps, the one that
+		// the saved process that this process will become used to have...
+		//
+		// ???
 		pid = alloc_orig_pid(state->pid, current->nsproxy->pid_ns);
 		change_pid(current, PIDTYPE_PID, pid);
 		current->pid = pid_nr(pid);
 		current->tgid = current->pid;
+		//
 
 
+		// ???
 		tracehook_report_exec(NULL, bprm, &state->registers);
+		//
 
+		// ???
 		acct_update_integrals(current);
 		free_files(used_files);
 		free_bprm(bprm);
 		if (displaced)
 			put_files_struct(displaced);
+		//
 
-		
+		// ???
 		restore_files(state, info->global_state);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
 		restore_creds(state);
+		//
 
 		restore_registers(state);
 
