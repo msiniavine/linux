@@ -1693,7 +1693,6 @@ asmlinkage long sys_recvfrom(int fd, void __user *ubuf, size_t size,
 	int fput_needed;
 
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
-	csprint("lookup socket for fd %p\n", sock);
 	if (!sock)
 		goto out;
 

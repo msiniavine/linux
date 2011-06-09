@@ -1208,8 +1208,8 @@ void restore_tcp_socket(struct saved_file* f)
 	struct rtable* rt;
 	__be32 daddr, nexthop;
 	struct sock* sk;
-	sprint("Restoring TCP socket\n");
-	sprint("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
+	tlprintf("Restoring TCP socket\n");
+	tlprintf("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
 	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
 	
 	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock);
@@ -1221,7 +1221,7 @@ void restore_tcp_socket(struct saved_file* f)
 	fd=alloc_fd(f->fd, 0); // need real flags
 	if(fd != f->fd)
 	{
-		sprint("Could not get original fd %u got %u\n", f->fd, fd);
+		tlprintf("Could not get original fd %u got %u\n", f->fd, fd);
 		panic("Could not get original fd");
 	}
 	
@@ -1242,10 +1242,10 @@ void restore_tcp_socket(struct saved_file* f)
 	icsk = inet_csk(sk);
 	tp = tcp_sk(sk);
 
-	sprint("Setting state %d\n", saved_socket->tcp->state);
+	tlprintf("Setting state %d\n", saved_socket->tcp->state);
 	tcp_set_state(sk, saved_socket->tcp->state);
 
-	sprint("Setting routing information\n");
+	tlprintf("Setting routing information\n");
 	nexthop = daddr = saved_socket->tcp->daddr;
 	retval = ip_route_connect(&rt, nexthop, inet->saddr, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if, IPPROTO_TCP,
 				  inet->sport, htons(saved_socket->tcp->dport), sk, 1);
@@ -1287,7 +1287,7 @@ void restore_tcp_socket(struct saved_file* f)
 	{
 		panic("inet_hash_connect failed %d\n", retval);
 	}
-	sprint("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport));
+	tlprintf("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport));
 
 	retval = ip_route_newports(&rt, IPPROTO_TCP, inet->sport, inet->dport, sk);
 	if(retval)
@@ -1310,7 +1310,6 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->snd_wl1 = saved_socket->tcp->snd_wl1;
 	tp->snd_wnd = saved_socket->tcp->snd_wnd;
 	tp->max_window = saved_socket->tcp->max_window;
-	tp->mss_cache = saved_socket->tcp->mss_cache;
 	
 	tp->window_clamp = saved_socket->tcp->window_clamp;
 	tp->rcv_ssthresh = saved_socket->tcp->rcv_ssthresh;
@@ -1324,7 +1323,24 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->write_seq = saved_socket->tcp->write_seq;
 	tp->copied_seq = saved_socket->tcp->copied_seq;
 
+	// Set correct mtu and mss
+	tp->mss_cache = saved_socket->tcp->mss_cache;
+	tp->xmit_size_goal = saved_socket->tcp->xmit_size_goal;
+	tp->rx_opt.mss_clamp = saved_socket->tcp->rx_opt_mss_clamp;
+	tlprintf("restore mss %d size_goal %d dst %d mss_clamp %d\n", 
+		 tp->mss_cache, tp->xmit_size_goal, saved_socket->tcp->dst_mtu, tp->rx_opt.mss_clamp);
+	if(saved_socket->tcp->dst_mtu)
+	{
+		struct dst_entry* dst = __sk_dst_get(sk);
+		dst->metrics[RTAX_MTU-1] = saved_socket->tcp->dst_mtu;
+		if (saved_socket->tcp->dst_mtu != inet_csk(sk)->icsk_pmtu_cookie)
+		{
+			tlprintf("tcp_sync_mss\n");
+			tcp_sync_mss(sk, saved_socket->tcp->dst_mtu);
+		}
 
+	}
+	
 }
 
 void restore_udp_socket(struct saved_file* f){

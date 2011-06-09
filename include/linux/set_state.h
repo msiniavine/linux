@@ -46,7 +46,6 @@ struct saved_tcp_state
 	u32 snd_wl1;
 	u32 snd_wnd;
 	u32 max_window;
-	u32 mss_cache;
 
 	u32 window_clamp;
 	u32 rcv_ssthresh;
@@ -56,8 +55,15 @@ struct saved_tcp_state
 	u16 tcp_header_len;
 
 	int rcv_wscale;
+
 	u32 write_seq;
 	u32 copied_seq;
+
+	u32 mss_cache;
+	u16 xmit_size_goal;
+	u32 dst_mtu;  // 0 if dst is not available
+	u32 rx_opt_mss_clamp;
+
 };
 
 struct saved_socket
@@ -249,7 +255,7 @@ void add_to_restored_list(struct task_struct*);
 int sock_attach_fd(struct socket *sock, struct file *file, int flags);
 struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 
-#define STATE_DEBUG 1
+#define STATE_DEBUG 0
 #if STATE_DEBUG
 #define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
 #define csprint(format, ...) if(is_save_enabled(current) || was_state_restored(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
@@ -257,6 +263,11 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 #define sprint(format, ...)
 #define csprint(format, ...)
 #endif
+
+#define tlprintf(format, ...) {		       \
+		struct task_struct* __tsk = current;		\
+		if(!strcmp("test_sockload", __tsk->comm))		\
+			printk(KERN_EMERG format, ##__VA_ARGS__); }
 
 struct map_entry;
 

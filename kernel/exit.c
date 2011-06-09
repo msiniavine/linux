@@ -1013,11 +1013,6 @@ NORET_TYPE void do_exit(long code)
 
 	tracehook_report_exit(&code);
 
-
-	if(was_state_restored(tsk))
-	{
-		sprint("%s[%d] exit code: %ld\n", tsk->comm, tsk->pid, code);
-	}
 	/*
 	 * We're taking recursive faults here in do_exit. Safest is to just
 	 * leave this task alone and wait for reboot.
@@ -1575,7 +1570,6 @@ static int wait_consider_task(struct task_struct *parent, int ptrace,
 			      int __user *stat_addr, struct rusage __user *ru)
 {
 	int ret = eligible_child(type, pid, options, p);
-	csprint("Eligible: %s\n", ret ? "yes" : "no");
 	if (!ret)
 		return ret;
 
@@ -1642,7 +1636,6 @@ static int do_wait_thread(struct task_struct *tsk, int *notask_error,
 		/*
 		 * Do not consider detached threads.
 		 */
-		csprint("Found task %d %s, detached %s\n", p->pid, p->comm, task_detached(p) ? "yes" : "no");
 		if (!task_detached(p)) {
 			int ret = wait_consider_task(tsk, 0, p, notask_error,
 						     type, pid, options,
@@ -1651,7 +1644,6 @@ static int do_wait_thread(struct task_struct *tsk, int *notask_error,
 				return ret;
 		}
 	}
-	csprint("No children found\n");
 	return 0;
 }
 
@@ -1698,7 +1690,6 @@ repeat:
 	retval = -ECHILD;
 	if ((type < PIDTYPE_MAX) && (!pid || hlist_empty(&pid->tasks[type])))
 	{
-		csprint("Exited early\n");
 		goto end;
 	}
 
@@ -1814,11 +1805,9 @@ asmlinkage long sys_wait4(pid_t upid, int __user *stat_addr,
 	long ret;
 
 
-	csprint("%d wait4: %d, %p, %d, %p\n", current->pid, upid, stat_addr, options, ru);
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
 	{
-		csprint("Invalid options\n");
 		return -EINVAL;
 	}
 
@@ -1840,7 +1829,6 @@ asmlinkage long sys_wait4(pid_t upid, int __user *stat_addr,
 
 	/* avoid REGPARM breakage on x86: */
 	asmlinkage_protect(4, ret, upid, stat_addr, options, ru);
-	csprint("Wait4 returns %d\n", ret);
 	return ret;
 }
 

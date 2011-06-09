@@ -19,6 +19,8 @@
 #include <linux/net.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <net/tcp.h>
+
 #include <linux/set_state.h>
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
@@ -445,14 +447,19 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	struct inet_connection_sock* icsk = inet_csk(sk);
 	struct tcp_sock* tp = tcp_sk(sk);
 	struct saved_tcp_state* saved_tcp = (struct saved_tcp_state*)alloc(sizeof(struct saved_tcp_state));
+	struct dst_entry* dst = __sk_dst_get(sk);
+
 	file->socket.tcp = saved_tcp;
 
+	// Save addresses and port numbers
 	saved_tcp->state = sk->sk_state;
 	saved_tcp->daddr = inet->daddr;
 	saved_tcp->dport = ntohs(inet->dport);
 	saved_tcp->saddr = inet->saddr;
 	saved_tcp->sport = ntohs(inet->sport);
 
+	
+	// Save protocol state
 	saved_tcp->rcv_mss = icsk->icsk_ack.rcv_mss;
 
 	saved_tcp->rcv_nxt = tp->rcv_nxt;
@@ -464,19 +471,29 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	saved_tcp->snd_wl1 = tp->snd_wl1;
 	saved_tcp->snd_wnd = tp->snd_wnd;
 	saved_tcp->max_window = tp->max_window;
-	saved_tcp->mss_cache = tp->mss_cache;
 
 	saved_tcp->window_clamp = tp->window_clamp;
 	saved_tcp->rcv_ssthresh = tp->rcv_ssthresh;
 	saved_tcp->advmss = tp->advmss;
 	saved_tcp->rcv_wscale = tp->rx_opt.rcv_wscale;
 
-	saved_tcp->write_seq = tp->write_seq;
-	saved_tcp->copied_seq = tp->copied_seq;
-
 	saved_tcp->pred_flags = tp->pred_flags;
 	saved_tcp->tcp_header_len = tp->tcp_header_len;
+
+	saved_tcp->write_seq = tp->write_seq;
+	saved_tcp->copied_seq = tp->copied_seq;
+	saved_tcp->mss_cache = tp->mss_cache;
+	saved_tcp->xmit_size_goal = tp->xmit_size_goal;		
+	saved_tcp->rx_opt_mss_clamp = tp->rx_opt.mss_clamp;
 	
+	if(dst)
+	{
+		saved_tcp->dst_mtu = dst_mtu(dst);
+	}
+	else
+	{
+		saved_tcp->dst_mtu = 0;
+	}
 }
 
 static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)
@@ -740,13 +757,9 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		
 		if(need_to_save_pages)
 		{
-			sprint("Saving pages\n");
 			save_pages(current_task->mm, area, head);
 		}
-		else
-		{
-			sprint("Pages saved previously\n");
-		}
+
 		if(area->vm_start <= task->mm->start_stack && area->vm_end >= task->mm->start_stack)
 		{
 			current_task->stack = cur_area;
@@ -917,13 +930,14 @@ void add_to_restored_list(struct task_struct* task)
 	p->pid = pid_vnr(task_pid(task));
 	p->next = state_restored;
 	state_restored = p;
-	sprint("State was restored for proccess %d, current->pid: %d\n", p->pid, task->pid);
+//	sprint("State was restored for proccess %d, current->pid: %d\n", p->pid, task->pid);
 }
 
 
 int was_state_restored(struct task_struct* task)
 {
 	struct save_state_permission* cur = state_restored;
+//	sprint("Checking restore state for %d\n", task_pid_nr(task));
 	for(;cur!=NULL;cur=cur->next)
 	{
 		if(cur->pid == pid_vnr(task_pid(task))) 
