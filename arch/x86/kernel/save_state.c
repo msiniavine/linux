@@ -449,6 +449,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	struct saved_tcp_state* saved_tcp = (struct saved_tcp_state*)alloc(sizeof(struct saved_tcp_state));
 	struct dst_entry* dst = __sk_dst_get(sk);
 
+	lock_sock(sk);
+
 	file->socket.tcp = saved_tcp;
 
 	// Save addresses and port numbers
@@ -494,6 +496,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	{
 		saved_tcp->dst_mtu = 0;
 	}
+
+	release_sock(sk);
 }
 
 static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)

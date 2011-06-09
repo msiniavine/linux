@@ -863,9 +863,6 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 
 			skb = tcp_write_queue_tail(sk);
 
-			tlprintf("seglen %d size_goal %d\n", seglen, size_goal);
-
-
 			if (!tcp_send_head(sk) ||
 			    (copy = size_goal - skb->len) <= 0) {
 
