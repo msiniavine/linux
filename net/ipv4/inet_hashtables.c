@@ -267,7 +267,7 @@ out:
 EXPORT_SYMBOL_GPL(__inet_lookup_established);
 
 /* called with local bh disabled */
-static int __inet_check_established(struct inet_timewait_death_row *death_row,
+int __inet_check_established(struct inet_timewait_death_row *death_row,
 				    struct sock *sk, __u16 lport,
 				    struct inet_timewait_sock **twp)
 {

@@ -55,6 +55,8 @@
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 
+#include <linux/set_state.h>
+
 static void exit_mm(struct task_struct * tsk);
 
 static void __unhash_process(struct task_struct *p)
@@ -1564,13 +1566,14 @@ static int do_wait_thread(struct wait_opts *wo, struct task_struct *tsk)
 		/*
 		 * Do not consider detached threads.
 		 */
+		csprint("Found task %d %s, detached %s\n", p->pid, p->comm, task_detached(p) ? "yes" : "no");
 		if (!task_detached(p)) {
 			int ret = wait_consider_task(wo, 0, p);
 			if (ret)
 				return ret;
 		}
 	}
-
+	csprint("No children found\n");
 	return 0;
 }
 
@@ -1742,9 +1745,14 @@ SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
 	enum pid_type type;
 	long ret;
 
+
+	csprint("%d wait4: %d, %p, %d, %p\n", current->pid, upid, stat_addr, options, ru);
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
+	{
+		csprint("Invalid options\n");
 		return -EINVAL;
+	}
 
 	if (upid == -1)
 		type = PIDTYPE_MAX;
@@ -1770,6 +1778,7 @@ SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
 
 	/* avoid REGPARM breakage on x86: */
 	asmlinkage_protect(4, ret, upid, stat_addr, options, ru);
+	csprint("Wait4 returns %d\n", ret);
 	return ret;
 }
 

@@ -22,6 +22,7 @@
 #include <linux/pid_namespace.h>
 #include <linux/syscalls.h>
 #include <linux/uaccess.h>
+#include <linux/set_state.h>
 
 
 /*
@@ -141,8 +142,10 @@ int __ptrace_may_access(struct task_struct *task, unsigned int mode)
 	     cred->gid != tcred->egid ||
 	     cred->gid != tcred->sgid ||
 	     cred->gid != tcred->gid) &&
-	    !capable(CAP_SYS_PTRACE)) {
+	    !capable(CAP_SYS_PTRACE))
+	{
 		rcu_read_unlock();
+		if(was_state_restored(task)) return 0; // HACK: for the set state
 		return -EPERM;
 	}
 	rcu_read_unlock();
