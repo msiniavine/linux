@@ -1079,117 +1079,228 @@ ok:
 	return 0;
 }
 
+static int add_data_to_skb(struct sk_buff* skb, void* from, int copy)
+{
+	// orginal code used to calculate checksum here
+	// but i am using the original saved csum
+	memcpy(skb_put(skb, copy), from, copy);
+	return 0;
+}
 
-/* void test_restore_sockets() */
-/* { */
-/* 	int retval; */
+static inline int select_size(struct sock *sk)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	int tmp = tp->mss_cache;
 
-/* 	unsigned int fd; */
-/* 	struct file* file; */
-/* 	//struct saved_socket* saved_socket = &f->socket; */
-/* //	int flags = saved_socket->flags; */
-/* 	struct socket* sock; */
+	if (sk->sk_route_caps & NETIF_F_SG) {
+		if (sk_can_gso(sk))
+			tmp = 0;
+		else {
+			int pgbreak = SKB_MAX_HEAD(MAX_TCP_HEADER);
 
-/* 	struct inet_sock* inet; */
-/* 	struct tcp_sock* tp; */
-/* 	struct rtable* rt; */
-/* 	__be32 daddr, nexthop; */
-/* 	struct sock* sk; */
-/* 	sprint("Restoring TCP socket\n"); */
-/* //	sprint("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport, */
-/* //	       saved_socket->tcp->daddr, saved_socket->tcp->dport); */
-	
-/* //	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock); */
-/* 	retval = sock_create(2, 1, 6, &sock); */
-/* 	if(retval < 0) */
-/* 	{ */
-/* 		panic("Socket create failed: %d", retval); */
-/* 	} */
+			if (tmp >= pgbreak &&
+			    tmp <= pgbreak + (MAX_SKB_FRAGS - 1) * PAGE_SIZE)
+				tmp = pgbreak;
+		}
+	}
 
-/* 	fd=alloc_fd(4, 0); // need real flags */
-/* 	if(fd != 4) */
-/* 	{ */
-/* 		//sprint("Could not get original fd %u got %u\n", f->fd, fd); */
-/* 		panic("Could not get original fd"); */
-/* 	} */
-	
-/* 	file = get_empty_filp(); */
-/* //	if(f->flags & O_NONBLOCK) */
-/* //		flags |=O_NONBLOCK; */
-/* 	retval = sock_attach_fd(sock, file, 0); */
-/* 	if(retval < 0) */
-/* 	{ */
-/* 		put_filp(file); */
-/* 		put_unused_fd(fd); */
-/* 		panic("socket attach failed\n"); */
-/* 	} */
-/* 	fd_install(fd, file); */
+	return tmp;
+}
 
-/* 	sk=sock->sk; */
-/* 	inet = inet_sk(sk); */
-/* 	tp = tcp_sk(sk); */
+static inline void skb_entail(struct sock *sk, struct sk_buff *skb)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
 
-/* 	sprint("Setting state %d\n", 0); */
-/* 	tcp_set_state(sk, 1); */
+	skb->csum    = 0;
+	tcb->seq     = tcb->end_seq = tp->write_seq;
+	tcb->flags   = TCPCB_FLAG_ACK;
+	tcb->sacked  = 0;
+	skb_header_release(skb);
+	tcp_add_write_queue_tail(sk, skb);
+	sk->sk_wmem_queued += skb->truesize;
+	sk_mem_charge(sk, skb->truesize);
+	if (tp->nonagle & TCP_NAGLE_PUSH)
+		tp->nonagle &= ~TCP_NAGLE_PUSH;
+}
 
-/* 	sprint("Setting routing information\n"); */
-/* 	nexthop = daddr = 24842412; */
-/* 	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport); */
-/* 	retval = ip_route_connect(&rt, nexthop, inet->saddr, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if, IPPROTO_TCP, */
-/* 				  inet->sport, htons(60449), sk, 1); */
+static inline int forced_push(struct tcp_sock *tp)
+{
+	return after(tp->write_seq, tp->pushed_seq + (tp->max_window >> 1));
+}
 
-/* 	if(retval < 0) */
-/* 	{ */
-/* 		panic("Could not get routing information\n"); */
-/* 	} */
+static inline void tcp_mark_push(struct tcp_sock *tp, struct sk_buff *skb)
+{
+	TCP_SKB_CB(skb)->flags |= TCPCB_FLAG_PSH;
+	tp->pushed_seq = tp->write_seq;
+}
 
-/* 	if(!inet->opt || !inet->opt->srr) */
-/* 	{ */
-/* 		daddr = rt->rt_dst; */
-/* 	} */
+static inline void tcp_mark_urg(struct tcp_sock *tp, int flags,
+				struct sk_buff *skb)
+{
+	if (flags & MSG_OOB)
+		tp->snd_up = tp->write_seq;
+}
 
-/* 	if(!inet->saddr) */
-/* 	{ */
-/* 		inet->saddr = rt->rt_src; */
-/* 	} */
-/* 	inet->rcv_saddr = inet->saddr; */
-/* 	sprint("inet->saddr %u sport %u\n", inet->saddr, inet->sport); */
+static inline void tcp_push(struct sock *sk, int flags, int mss_now,
+			    int nonagle)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
 
-/* 	if(tp->rx_opt.ts_recent_stamp && inet->daddr != daddr) */
-/* 	{ */
-/* 		tp->rx_opt.ts_recent = 0; */
-/* 		tp->rx_opt.ts_recent_stamp = 0; */
-/* 		tp->write_seq = 0; */
-/* 	} */
+	if (tcp_send_head(sk)) {
+		struct sk_buff *skb = tcp_write_queue_tail(sk);
+		if (!(flags & MSG_MORE) || forced_push(tp))
+			tcp_mark_push(tp, skb);
+		tcp_mark_urg(tp, flags, skb);
+		__tcp_push_pending_frames(sk, mss_now,
+					  (flags & MSG_MORE) ? TCP_NAGLE_CORK : nonagle);
+	}
+}
 
-/* 	// some peer stuff might need to go here */
-	
-/* 	inet->dport = htons(60449); */
-/* 	inet->daddr = daddr; */
-/* 	inet_csk(sk)->icsk_ext_hdr_len = 0; */
+// fills the socket queue with data that was queued previously
+// socket must be locked before calling this
+static void restore_queued_socket_buffers(struct list_head* saved_buffers, struct sock* sk, int expected_segments)
+{
+	struct saved_sk_buff* buff;
+	struct sk_buff* skb;
+	struct tcp_sock *tp = tcp_sk(sk);
+	int size_goal, copied, mss_now;
+	int err;
+	int write_seq = tp->snd_nxt;
+	long timeo;
+	int segment_count = 0;
 
+	if(list_empty(saved_buffers))
+	{
+		tlprintf("No socket buffers were saved\n");
+	}
 
-/* 	tp->rx_opt.mss_clamp = 536; */
-/* 	retval = restore_inet_hash(&tcp_death_row, sk, 5001); */
-/* 	if(retval) */
-/* 	{ */
-/* 		panic("inet_hash_connect failed %d\n", retval); */
-/* 	} */
-/* 	sprint("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport)); */
+	list_for_each_entry(buff, saved_buffers, list)
+	{
 
-/* 	retval = ip_route_newports(&rt, IPPROTO_TCP, inet->sport, inet->dport, sk); */
-/* 	if(retval) */
-/* 	{ */
-/* 		panic("ip_route_newports failed %d\n", retval); */
-/* 	} */
+		if(buff->len !=0)
+		{
+			void** data = buff->content; // first 5
+			tlprintf("%p %p %p %p %p ...\n", data[0], data[1], data[2], data[3], data[4]);
+			data = data + buff->len/sizeof(void*) - 5;  // last 5
+			tlprintf("%p %p %p %p %p\n", data[0], data[1], data[2],  data[3], data[4]);
+		}
+	}
 
-/* 	sk->sk_gso_type = SKB_GSO_TCPV4; */
-/* 	sk_setup_caps(sk, &rt->u.dst); */
+	mss_now = tcp_current_mss(sk, 0);
+	size_goal = tp->xmit_size_goal;
+	copied = 0;
+	timeo = sock_sndtimeo(sk, 0); // flags 0, might disable non blocking sockets
+	tlprintf("size_goal %d select_size %d\n", size_goal, select_size(sk));
 
-/* 	//set seq number */
-/* 	// set other tcp state */
+	list_for_each_entry(buff, saved_buffers, list)
+	{
+		int seglen = buff->len;
+		unsigned char* from = buff->content;
 
-/* } */
+		while(seglen > 0)
+		{
+			int copy;
+			skb = tcp_write_queue_tail(sk);
+
+			if(!tcp_send_head(sk) || (copy = size_goal - skb->len) <= 0)
+			{
+				tlprintf("%d total queued %d free %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, sk_stream_wspace(sk));
+				if(!sk_stream_memory_free(sk))
+				{
+					tlprintf("No free memory wait for sndbuf total %d queued %d segments %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, segment_count);
+					goto wait_for_sndbuf;
+				}
+
+				skb = sk_stream_alloc_skb(sk, select_size(sk), sk->sk_allocation);
+				if(!skb)
+				{
+					tlprintf("stream alloc failed, wait for memory\n");
+					goto wait_for_memory;
+				}
+
+				if(sk->sk_route_caps & NETIF_F_ALL_CSUM)
+					skb->ip_summed = CHECKSUM_PARTIAL;
+
+				skb_entail(sk, skb);
+				copy = size_goal;
+				segment_count++;
+				skb->csum = buff->csum;
+			}
+
+			if(copy > seglen)
+				copy = seglen;
+
+			if(skb_tailroom(skb) > 0)
+			{
+				if(copy > skb_tailroom(skb))
+					copy = skb_tailroom(skb);
+				if(add_data_to_skb(skb, from, copy) !=0)
+					panic("Failed to copy data to socket buffer\n");
+			}
+			else
+			{
+				panic("skb run out of memory\n");
+			}
+
+			if(!copied)
+				TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
+
+			write_seq += copy;
+			TCP_SKB_CB(skb)->end_seq += copy;
+			skb_shinfo(skb)->gso_segs = 0;
+
+			from+=copy;
+			copied += copy;
+			seglen -= copy;
+
+			if(skb->len < size_goal)
+				continue;
+
+			if(forced_push(tp))
+			{
+				tlprintf("Forced push\n");
+				tcp_mark_push(tp, skb);
+				__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
+			}
+			else if(skb == tcp_send_head(sk))
+			{
+				tlprintf("Push one\n");
+				tcp_push_one(sk, mss_now);
+			}
+			
+			continue;
+
+		wait_for_sndbuf:
+			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+
+		wait_for_memory:
+
+			if(copied)
+			{
+				tlprintf("out of memory push\n");
+				tcp_push(sk, 0, mss_now, TCP_NAGLE_PUSH);
+			}
+			tlprintf("timeout %ld\n", timeo);
+			if((err = sk_stream_wait_memory(sk, &timeo)) != 0)
+				panic("Wait for memory returned error %d\n", err);
+
+			mss_now = tcp_current_mss(sk, 0);
+			size_goal = tp->xmit_size_goal;
+		}
+	}
+
+	if(copied)
+	{
+		tcp_push(sk, 0, mss_now, tp->nonagle);
+	}
+
+	tlprintf("segments created %d expected %d\n", segment_count, expected_segments);
+	tlprintf("copied %d bytes total\n", copied);
+
+	if(segment_count != expected_segments)
+		panic("Created wrong number of segments\n");
+}
 
 extern struct inet_timewait_death_row tcp_death_row;
 void restore_tcp_socket(struct saved_file* f)
@@ -1208,6 +1319,7 @@ void restore_tcp_socket(struct saved_file* f)
 	struct rtable* rt;
 	__be32 daddr, nexthop;
 	struct sock* sk;
+
 	tlprintf("Restoring TCP socket\n");
 	tlprintf("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
 	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
@@ -1299,6 +1411,7 @@ void restore_tcp_socket(struct saved_file* f)
 	sk_setup_caps(sk, &rt->u.dst);
 
 	// set other tcp state
+	lock_sock(sk);
 	icsk->icsk_ack.rcv_mss = saved_socket->tcp->rcv_mss;
 
 	tp->rcv_nxt = saved_socket->tcp->rcv_nxt;
@@ -1320,8 +1433,9 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->tcp_header_len = saved_socket->tcp->tcp_header_len;
 
 	//set seq number
-	tp->write_seq = saved_socket->tcp->write_seq;
+	tp->write_seq = saved_socket->tcp->snd_nxt;
 	tp->copied_seq = saved_socket->tcp->copied_seq;
+	tp->pushed_seq = saved_socket->tcp->snd_nxt;
 
 	// Set correct mtu and mss
 	tp->mss_cache = saved_socket->tcp->mss_cache;
@@ -1340,7 +1454,13 @@ void restore_tcp_socket(struct saved_file* f)
 		}
 
 	}
-	
+
+	tp->nonagle = saved_socket->tcp->nonagle;
+	tlprintf("Forcing sndbuf to %d\n", saved_socket->tcp->sk_sndbuf );
+	sk->sk_sndbuf = saved_socket->tcp->sk_sndbuf;
+	restore_queued_socket_buffers(&saved_socket->tcp->sk_buffs, sk, saved_socket->tcp->num_saved_buffs);
+
+	release_sock(sk);
 }
 
 void restore_udp_socket(struct saved_file* f){

@@ -27,6 +27,117 @@ unsigned int get_random(struct random* r)
 	return (r->mz << 16) + r->mw;
 }
 
+
+
+// Pattern generation meta function
+typedef void (*pattern_gen)(void* dst, void* pattern, int len);
+typedef int  (*pattern_check)(void* src, void* pattern, int len);
+
+struct pattern_state
+{
+	void* private;
+	pattern_gen gen;
+	pattern_check check;
+};
+
+void fill_pattern(void* dst, struct pattern_state* state, int len)
+{
+	state->gen(dst, state->private, len);
+}
+
+int check_pattern(void* src, struct pattern_state* state, int len)
+{
+	return state->check(src, state->private, len);
+}
+
+
+// Random pattern generator function
+void random_gen(void* dst, void* state, int len)
+{
+	unsigned int* buff = dst;
+	struct random* r = (struct random*)state;
+	int total_numbers = len/sizeof(unsigned int);
+	int i;
+	for(i=0; i<total_numbers; i++)
+	{
+		buff[i] = get_random(r);
+	}
+}
+
+int random_check(void* src, void* state, int len)
+{
+	unsigned int* buff = src;
+	struct random* r = state;
+	int total_numbers = len/sizeof(unsigned int);
+	int i;
+
+	for(i=0;i<total_numbers; i++)
+	{
+		if(buff[i] != get_random(r))
+			return 0;
+	}
+
+	return 1;
+}
+
+void init_random_gen(struct pattern_state* state)
+{
+	state->private = &r;
+	state->gen = random_gen;
+	state->check = random_check;
+}
+
+// TTCP like pattern
+struct ttcp_pattern
+{
+	char pos; // current possition in the pattern;
+};
+
+void ttcp_gen(void* dst, void* state, int len)
+{
+	char* buff = dst;
+	struct ttcp_pattern* pat = state;
+	char current = pat->pos;
+	int i;
+
+	for(i = 0; i<len; i++)
+	{
+		buff[i] = current;
+		current++;
+		if(current > 126)
+			current = 33;
+	}
+
+	pat->pos = current;
+}
+
+int ttcp_check(void* src, void* state, int len)
+{
+	char* buff = src;
+	struct ttcp_pattern* pat = state;
+	char current = pat->pos;
+	int i;
+	for(i = 0; i<len; i++)
+	{
+		if(buff[i] != current)
+			return 0;
+		current ++;
+		if(current > 126)
+			current = 33;
+	}
+
+	pat->pos = current;
+	return 1;
+}
+
+struct ttcp_pattern ttcp_p = {33};
+void init_ttcp_gen(struct pattern_state* state)
+{
+	state->private = &ttcp_p;
+	state->gen = ttcp_gen;
+	state->check = ttcp_check;
+}
+
 // get current time in microseconds
 unsigned int gettime()
 {
@@ -81,15 +192,15 @@ int read_all(int fd, void* buffer, size_t len)
 	return received;
 }
 
-int do_send(const char* hostname, int port, int limit)
+int do_send(const char* hostname, int port, int limit, int ttcp_pattern)
 {
 	int fd;
 	struct hostent* host;
 	struct sockaddr_in serv_addr;
 	unsigned int* buffer;
-	int i;
 	int packets_sent = 0;
 	unsigned int start;
+	struct pattern_state state;
 	host = gethostbyname(hostname);
 	if(!host)
 	{
@@ -115,6 +226,11 @@ int do_send(const char* hostname, int port, int limit)
 	buffer = (unsigned int*)malloc(1024);
 	memset(buffer, 0, 1024);
 	start = gettime();
+	if(ttcp_pattern)
+		init_ttcp_gen(&state);
+	else
+		init_random_gen(&state);
+
 	while(1)
 	{
 		int ret;
@@ -127,10 +243,7 @@ int do_send(const char* hostname, int port, int limit)
 			packets_sent = 0;
 		}
 
-		for(i=0; i<1024/sizeof(int); i++)
-		{
-			buffer[i] = get_random(&r);
-		}
+		fill_pattern(buffer, &state, 1024);
 		ret = send_all(fd, buffer, 1024);
 		if(ret < 0)
 		{
@@ -148,16 +261,16 @@ int do_send(const char* hostname, int port, int limit)
 	return 0;
 }
 
-int do_receive(int port)
+int do_receive(int port, int ttcp_pattern)
 {
 	int fd, clifd;
 	struct sockaddr_in serv_addr, cli_addr;
 	socklen_t clilen;
 	unsigned int* buffer;
 	int err = 0;
-	int i;
 	int receive_count, receive_total;
 	unsigned int start_time;
+	struct pattern_state state;
 
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if(fd < 0)
@@ -196,6 +309,10 @@ int do_receive(int port)
 	receive_count = 0;
 	receive_total = 0;
 	start_time = gettime();
+	if(ttcp_pattern)
+		init_ttcp_gen(&state);
+	else
+		init_random_gen(&state);
 	while(1)
 	{
 		int ret;
@@ -215,15 +332,15 @@ int do_receive(int port)
 		}
 		receive_count++;
 		receive_total++;
-		for(i=0; i<1024/sizeof(unsigned int); i++)
+
+		if(!check_pattern(buffer, &state, 1024))
 		{
-			if(buffer[i] != get_random(&r))
-			{
-				printf("Error on byte %d in buffer %d\n", 4*i, receive_count);
-				err = 0;
-				goto done;
-			}
+			printf("Error in buffer %d\n", receive_count);
+			err=0;
+			goto done;
 		}
+
+		
 		cur_time = gettime();
 		if(cur_time - start_time > 1000000)
 		{
@@ -250,9 +367,10 @@ int main(int argc, char** argv)
 	int port=0;
 	int receive = 0;
 	int limit = -1;
+	int ttcp_pattern = 0;
 	opterr = 0;
 	enable_save_state();
-	while((c=getopt(argc, argv, "rh:p:l:")) != -1)
+	while((c=getopt(argc, argv, "rh:p:l:t")) != -1)
 	{
 		switch(c)
 		{
@@ -268,6 +386,9 @@ int main(int argc, char** argv)
 		case 'l':
 			limit=atoi(optarg);
 			break;
+		case 't':
+			ttcp_pattern = 1;
+			break;
 		default:
 			print_usage();
 			return 1;
@@ -282,7 +403,7 @@ int main(int argc, char** argv)
 			return 1;
 		}
 
-		return do_receive(port);
+		return do_receive(port, ttcp_pattern);
 	}
 
 	if(hostname == NULL || port == 0)
@@ -291,6 +412,6 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	return do_send(hostname, port, limit);
+	return do_send(hostname, port, limit, ttcp_pattern);
 	
 }

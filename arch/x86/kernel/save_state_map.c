@@ -15,6 +15,7 @@
 
 #include <linux/slab.h>
 #include <linux/mempool.h>
+#include <linux/skbuff.h>
 
 #include <linux/set_state.h>
 

@@ -1,7 +1,51 @@
 
 #define FASTREBOOT_REGION_SIZE 64 * 1024 * 1024
 #define FASTREBOOT_REGION_START (0x1000000 + FASTREBOOT_REGION_SIZE)
+void reserve_saved_memory(void);
 
+
+extern int set_stack_state;
+extern struct saved_vm_area* saved_stack;
+struct saved_task_struct;
+struct socket;
+
+void print_regs(struct pt_regs* regs);
+int set_state(struct pt_regs* regs, struct saved_task_struct* state);
+int is_save_enabled(struct task_struct*);
+int was_state_restored(struct task_struct*);
+void add_to_restored_list(struct task_struct*);
+int sock_attach_fd(struct socket *sock, struct file *file, int flags);
+struct page* alloc_specific_page(unsigned long pfn, int mapcount);
+
+#define STATE_DEBUG 0
+#if STATE_DEBUG
+#define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
+#define csprint(format, ...) if(is_save_enabled(current) || was_state_restored(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
+#else
+#define sprint(format, ...)
+#define csprint(format, ...)
+#endif
+
+#define tlprintf(format, ...) {		       \
+		struct task_struct* __tsk = current;		\
+		if(!strcmp("test_sockload", __tsk->comm))		\
+			printk(KERN_EMERG format, ##__VA_ARGS__); }
+
+static void inline busy_wait(unsigned long timeout)
+{
+	unsigned long j = jiffies+timeout*HZ;
+	while(time_before(jiffies, j))
+		cpu_relax();
+}
+
+struct map_entry;
+
+struct map_entry* new_map(void);
+void delete_map(struct map_entry*);
+void insert_entry(struct map_entry* head, void* first, void* second);
+void* find_by_first(struct map_entry* head,  void* first);
+
+#ifndef SET_STATE_ONLY_FUNCTIONS
 #define PATH_LENGTH 256
 #define PIPE_BUFFERS (16)
 
@@ -23,6 +67,14 @@ struct saved_inet_sock
 	__u16			num;
 	__be32			saddr;
 	__be16			sport;
+};
+
+struct saved_sk_buff
+{
+	unsigned int len;
+	__wsum csum;
+	void* content;
+	struct list_head list;
 };
 
 struct saved_tcp_state
@@ -63,6 +115,12 @@ struct saved_tcp_state
 	u16 xmit_size_goal;
 	u32 dst_mtu;  // 0 if dst is not available
 	u32 rx_opt_mss_clamp;
+
+	u32 sk_sndbuf;
+
+	u32 nonagle;
+	struct list_head sk_buffs;
+	int num_saved_buffs; // number of saved socket buffers
 
 };
 
@@ -242,37 +300,4 @@ struct global_state_info
 	struct pipes_to_close *pipe_close_head;
 };
 
-extern int set_stack_state;
-extern struct saved_vm_area* saved_stack;
-struct socket;
-
-void print_regs(struct pt_regs* regs);
-int set_state(struct pt_regs* regs, struct saved_task_struct* state);
-void reserve_saved_memory(void);
-int is_save_enabled(struct task_struct*);
-int was_state_restored(struct task_struct*);
-void add_to_restored_list(struct task_struct*);
-int sock_attach_fd(struct socket *sock, struct file *file, int flags);
-struct page* alloc_specific_page(unsigned long pfn, int mapcount);
-
-#define STATE_DEBUG 0
-#if STATE_DEBUG
-#define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
-#define csprint(format, ...) if(is_save_enabled(current) || was_state_restored(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
-#else
-#define sprint(format, ...)
-#define csprint(format, ...)
 #endif
-
-#define tlprintf(format, ...) {		       \
-		struct task_struct* __tsk = current;		\
-		if(!strcmp("test_sockload", __tsk->comm))		\
-			printk(KERN_EMERG format, ##__VA_ARGS__); }
-
-struct map_entry;
-
-struct map_entry* new_map(void);
-void delete_map(struct map_entry*);
-void insert_entry(struct map_entry* head, void* first, void* second);
-void* find_by_first(struct map_entry* head,  void* first);
-

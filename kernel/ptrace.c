@@ -21,6 +21,8 @@
 #include <linux/audit.h>
 #include <linux/pid_namespace.h>
 #include <linux/syscalls.h>
+
+#define SET_STATE_ONLY_FUNCTIONS
 #include <linux/set_state.h>
 
 #include <asm/pgtable.h>

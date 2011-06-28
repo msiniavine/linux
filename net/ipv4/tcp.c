@@ -829,6 +829,10 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	lock_sock(sk);
 	TCP_CHECK_TIMER(sk);
 
+	sk->write_in_progress = 1;
+	sk->write_progress = 0;
+	sk->write_size = msg->msg_iov->iov_len;
+
 	flags = msg->msg_flags;
 	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
 
@@ -867,17 +871,23 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 			    (copy = size_goal - skb->len) <= 0) {
 
 new_segment:
+				//			tlprintf("New segment\n");
 				/* Allocate new segment. If the interface is SG,
 				 * allocate skb fitting to single page.
 				 */
 				if (!sk_stream_memory_free(sk))
+				{
+//					tlprintf("No free memory wait for sndbuf total %d queued %d\n", sk->sk_sndbuf, sk->sk_wmem_queued);
 					goto wait_for_sndbuf;
+				}
 
 				skb = sk_stream_alloc_skb(sk, select_size(sk),
 						sk->sk_allocation);
 				if (!skb)
+				{
+					tlprintf("stream alloc failed, wait for memory\n");
 					goto wait_for_memory;
-
+				}
 				/*
 				 * Check whether we can use HW checksum.
 				 */
@@ -899,6 +909,8 @@ new_segment:
 					copy = skb_tailroom(skb);
 				if ((err = skb_add_data(skb, from, copy)) != 0)
 					goto do_fault;
+
+//				tlprintf("%d bytes added to tail\n", copy);
 			} else {
 				int merge = 0;
 				int i = skb_shinfo(skb)->nr_frags;
@@ -910,6 +922,7 @@ new_segment:
 					/* We can extend the last page
 					 * fragment. */
 					merge = 1;
+					tlprintf("Can extend last page fragment\n");
 				} else if (i == MAX_SKB_FRAGS ||
 					   (!i &&
 					   !(sk->sk_route_caps & NETIF_F_SG))) {
@@ -917,6 +930,7 @@ new_segment:
 					 * do this because interface is non-SG,
 					 * or because all the page slots are
 					 * busy. */
+					tlprintf("Can't add a new fragment, creating new segment\n");
 					tcp_mark_push(tp, skb);
 					goto new_segment;
 				} else if (page) {
@@ -936,6 +950,7 @@ new_segment:
 
 				if (!page) {
 					/* Allocate new cache page. */
+					tlprintf("Allocate new cache page\n");
 					if (!(page = sk_stream_alloc_page(sk)))
 						goto wait_for_memory;
 				}
@@ -954,12 +969,15 @@ new_segment:
 					}
 					goto do_error;
 				}
+				tlprintf("%d bytes copied to page\n", copy);
 
 				/* Update the skb. */
 				if (merge) {
 					skb_shinfo(skb)->frags[i - 1].size +=
 									copy;
+					tlprintf("Merge segment\n");
 				} else {
+					tlprintf("Create new segment descriptor\n");
 					skb_fill_page_desc(skb, i, page, off, copy);
 					if (TCP_PAGE(sk)) {
 						get_page(page);
@@ -975,6 +993,7 @@ new_segment:
 			if (!copied)
 				TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
 
+			sk->write_progress += copy;
 			tp->write_seq += copy;
 			TCP_SKB_CB(skb)->end_seq += copy;
 			skb_shinfo(skb)->gso_segs = 0;
@@ -998,7 +1017,10 @@ wait_for_sndbuf:
 			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 wait_for_memory:
 			if (copied)
+			{
 				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
+//				tlprintf("Wait for memory push\n");
+			}
 
 			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 				goto do_error;
@@ -1010,7 +1032,11 @@ wait_for_memory:
 
 out:
 	if (copied)
+	{
+//		tlprintf("Final push\n");
 		tcp_push(sk, flags, mss_now, tp->nonagle);
+	}
+	sk->write_in_progress = 0;
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
 	return copied;
@@ -1030,6 +1056,7 @@ do_error:
 		goto out;
 out_err:
 	err = sk_stream_error(sk, flags, err);
+	sk->write_in_progress = 0;
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
 	return err;

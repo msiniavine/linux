@@ -279,6 +279,10 @@ struct sock {
   	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);  
 	void                    (*sk_destruct)(struct sock *sk);
+
+	int write_in_progress;
+	int write_size;
+	int write_progress;
 };
 
 /*

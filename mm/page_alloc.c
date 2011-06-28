@@ -47,6 +47,7 @@
 #include <linux/page_cgroup.h>
 #include <linux/debugobjects.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
 #include <linux/set_state.h>
 
 #include <asm/tlbflush.h>

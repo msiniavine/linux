@@ -67,6 +67,7 @@
 #include <linux/percpu.h>
 #include <linux/crash_dump.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
 #include <linux/set_state.h>
 
 #include <video/edid.h>

@@ -440,6 +440,7 @@ static bool should_be_saved(struct file* file)
 	}
 }
 
+static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* saved_tcp);
 static void save_tcp_state(struct saved_file* file, struct socket* sock)
 {
 	struct sock* sk = sock->sk;
@@ -497,7 +498,64 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 		saved_tcp->dst_mtu = 0;
 	}
 
+	saved_tcp->sk_sndbuf = sk->sk_sndbuf;
+	saved_tcp->nonagle = tp->nonagle;
+
+	save_socket_write_queue(sk, saved_tcp);
+
 	release_sock(sk);
+}
+
+// Save the contents of the sockets write queue
+// Write queue has the data that the application wrote to the socket
+// but it has not been sent yet
+static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* saved_tcp)
+{
+	struct sk_buff* sk_head;
+	struct sk_buff* sk_tail;
+	struct sk_buff* sk_pos;
+	int sk_buff_count = 0;
+
+	INIT_LIST_HEAD(&saved_tcp->sk_buffs);
+
+	sk_head = tcp_send_head(sk);
+	sk_tail = tcp_write_queue_tail(sk);
+	sk_pos = sk_head;
+
+	if(sk_pos == NULL)
+		goto done_save;
+
+	do
+	{
+		struct saved_sk_buff* s_buff;
+	
+		sk_buff_count++;
+		s_buff = (struct saved_sk_buff*)alloc(sizeof(*s_buff));
+		INIT_LIST_HEAD(&s_buff->list);
+
+		s_buff->len = sk_pos->len;
+		s_buff->csum = sk_pos->csum;
+
+		if(sk_pos->len != 0)
+		{
+			s_buff->content = alloc(sk_pos->len);
+			memcpy(s_buff->content, sk_pos->data, sk_pos->len);
+		}
+
+		list_add_tail(&s_buff->list, &saved_tcp->sk_buffs);
+
+		if(sk_pos == sk_tail)
+			goto done_save;
+
+	 	sk_pos = sk_pos->next; 
+
+	} while(sk_pos != sk_head);
+
+done_save:
+	saved_tcp->num_saved_buffs = sk_buff_count;
+	printk(KERN_EMERG "write %d expected %d progress %d\n", sk->write_in_progress, sk->write_size, sk->write_progress);
+	printk(KERN_EMERG "Saved %d socket buffers\n", sk_buff_count);
+	busy_wait(10);
 }
 
 static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)

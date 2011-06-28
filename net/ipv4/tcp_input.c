@@ -4484,7 +4484,10 @@ static void tcp_new_space(struct sock *sk)
 				     tp->reordering + 1);
 		sndmem *= 2 * demanded;
 		if (sndmem > sk->sk_sndbuf)
+		{
+			tlprintf("Expanding sndbuf to %d\n", min(sndmem, sysctl_tcp_wmem[2]));
 			sk->sk_sndbuf = min(sndmem, sysctl_tcp_wmem[2]);
+		}
 		tp->snd_cwnd_stamp = tcp_time_stamp;
 	}
 
