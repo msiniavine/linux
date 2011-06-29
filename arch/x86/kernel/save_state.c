@@ -441,7 +441,7 @@ static bool should_be_saved(struct file* file)
 }
 
 static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* saved_tcp);
-static void save_tcp_state(struct saved_file* file, struct socket* sock)
+static void save_tcp_state(struct saved_file* file, struct socket* sock, struct saved_task_struct* tsk)
 {
 	struct sock* sk = sock->sk;
 	struct inet_sock* inet = inet_sk(sk);
@@ -503,6 +503,15 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 
 	save_socket_write_queue(sk, saved_tcp);
 
+
+	if(sk->write_in_progress)
+	{
+		struct tcp_write_progress* wp = (struct tcp_write_progress*)alloc(sizeof(*wp));
+		wp->bytes_written = sk->write_progress;
+		tsk->syscall_data = wp;
+	}
+
+
 	release_sock(sk);
 }
 
@@ -555,6 +564,7 @@ done_save:
 	saved_tcp->num_saved_buffs = sk_buff_count;
 	printk(KERN_EMERG "write %d expected %d progress %d\n", sk->write_in_progress, sk->write_size, sk->write_progress);
 	printk(KERN_EMERG "Saved %d socket buffers\n", sk_buff_count);
+
 	busy_wait(10);
 }
 
@@ -587,7 +597,7 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
 	if(file->socket.sock_family == PF_INET && file->socket.sock_type == SOCK_STREAM)
 	{
 		sprint("Saving tcp socket\n");
-		save_tcp_state(file, sock);
+		save_tcp_state(file, sock, task);
 	}
 
 }
@@ -703,12 +713,15 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 	case 179:    // sigsuspend
 		blocked  = (sigset_t*)alloc(sizeof(*blocked));
 		sprint("Saving state to restart sigsuspend upon reboot\n");
-		state->syscall_restart = task_pt_regs(task)->orig_ax;
 		*blocked = task->saved_sigmask;
 		state->syscall_data = blocked;
 		break;
-	case 4:    // write
 	case 102:  // socketcall
+		if(state->registers.bx == SYS_SEND)
+			break;
+
+		//else fall through
+	case 4:    // write
 	case 162:  // nanosleep
 	case 240:  // futex
 	case 7:    // waitpid
@@ -718,10 +731,10 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 		sprint("Saving state to restore %d syscall\n", state->syscall_restart);
 		state->syscall_data = NULL;
 		break;
-	default:
-		state->syscall_restart = task_pt_regs(task)->orig_ax;
-		break;
 	}
+
+	state->syscall_restart = task_pt_regs(task)->orig_ax;
+
 
 	spin_unlock_irq(&sighand->siglock);
 }

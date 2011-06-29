@@ -1798,8 +1798,14 @@ void restore_registers(struct saved_task_struct* state)
 
 	switch(state->syscall_restart)
 	{
-	case 4:
 	case 102:  // socketcall
+		if(state->registers.bx == SYS_SEND && state->syscall_data != NULL)
+		{
+			struct tcp_write_progress* wp = state->syscall_data;
+			state->registers.ax = wp->bytes_written;
+		}
+		break;
+	case 4:
 	case 162:  // nanosleep
 	case 240:  // futex
 	case 7:    // waitpid

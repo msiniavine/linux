@@ -157,6 +157,7 @@ void print_usage()
 	printf("Options:\n");
 	printf("\t-r - Switches to receive mode and verifies that received data is correct\n");
 	printf("\t-l - Limit the number of packets sent every second\n");
+	printf("\t-t - Send an incrementing pattern rathen the default random one\n");
 }
 
 int send_all(int fd, void* buffer, size_t len)
@@ -172,7 +173,12 @@ int send_all(int fd, void* buffer, size_t len)
 		else if(ret == 0)
 			return 0;
 		else
+		{
+			if(ret != len)
+				printf("Partial send %d\n", ret);
+
 			sent+=ret;
+		}
 	}
 
 	return sent;

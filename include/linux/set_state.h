@@ -124,6 +124,15 @@ struct saved_tcp_state
 
 };
 
+
+// for returning from the write system call with the right number of
+// bytes to maintain the correct progress
+
+struct tcp_write_progress
+{
+	int bytes_written;
+};
+
 struct saved_socket
 {
         int		        state;
