@@ -73,6 +73,8 @@ struct saved_sk_buff
 {
 	unsigned int len;
 	__wsum csum;
+	int ip_summed;
+	u32 seq;
 	void* content;
 	struct list_head list;
 };
@@ -92,9 +94,14 @@ struct saved_tcp_state
 	u32 rcv_nxt;
 	u32 rcv_wnd;
 	u32 rcv_wup;
-	u32 snd_nxt;
 
+	// Notice that snd_nxt and write_seq are missing
+	// snd_una is where tcp needs to be restarted
+	// because its the data thats been sent but unacknowledged
+	// data from this point on will have to be retransmitted
+	// and snd_nxt and write_seq need to be recalculated from this point on
 	u32 snd_una;
+
 	u32 snd_wl1;
 	u32 snd_wnd;
 	u32 max_window;
@@ -108,7 +115,6 @@ struct saved_tcp_state
 
 	int rcv_wscale;
 
-	u32 write_seq;
 	u32 copied_seq;
 
 	u32 mss_cache;

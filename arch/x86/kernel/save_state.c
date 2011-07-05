@@ -468,7 +468,6 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->rcv_nxt = tp->rcv_nxt;
 	saved_tcp->rcv_wnd = tp->rcv_wnd;
 	saved_tcp->rcv_wup = tp->rcv_wup;
-	saved_tcp->snd_nxt = tp->snd_nxt;
 
 	saved_tcp->snd_una = tp->snd_una;
 	saved_tcp->snd_wl1 = tp->snd_wl1;
@@ -483,7 +482,6 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->pred_flags = tp->pred_flags;
 	saved_tcp->tcp_header_len = tp->tcp_header_len;
 
-	saved_tcp->write_seq = tp->write_seq;
 	saved_tcp->copied_seq = tp->copied_seq;
 	saved_tcp->mss_cache = tp->mss_cache;
 	saved_tcp->xmit_size_goal = tp->xmit_size_goal;		
@@ -514,58 +512,59 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 
 	release_sock(sk);
 }
-
 // Save the contents of the sockets write queue
 // Write queue has the data that the application wrote to the socket
 // but it has not been sent yet
 static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* saved_tcp)
 {
-	struct sk_buff* sk_head;
 	struct sk_buff* sk_tail;
 	struct sk_buff* sk_pos;
+	struct tcp_sock* tp = tcp_sk(sk);
 	int sk_buff_count = 0;
+	int segs_buffered = 0;
+	int byte_count = 0;
 
 	INIT_LIST_HEAD(&saved_tcp->sk_buffs);
 
-	sk_head = tcp_send_head(sk);
 	sk_tail = tcp_write_queue_tail(sk);
-	sk_pos = sk_head;
 
-	if(sk_pos == NULL)
-		goto done_save;
-
-	do
+	tcp_for_write_queue(sk_pos, sk)
 	{
-		struct saved_sk_buff* s_buff;
-	
-		sk_buff_count++;
-		s_buff = (struct saved_sk_buff*)alloc(sizeof(*s_buff));
-		INIT_LIST_HEAD(&s_buff->list);
+		struct tcp_skb_cb* tcb = TCP_SKB_CB(sk_pos);
 
-		s_buff->len = sk_pos->len;
-		s_buff->csum = sk_pos->csum;
-
-		if(sk_pos->len != 0)
+		if(tcb->seq >= tp->snd_una)
 		{
-			s_buff->content = alloc(sk_pos->len);
-			memcpy(s_buff->content, sk_pos->data, sk_pos->len);
+			struct saved_sk_buff* s_buff;
+			sk_buff_count++;
+			byte_count += sk_pos->len;
+
+			s_buff = (struct saved_sk_buff*)alloc(sizeof(*s_buff));
+			INIT_LIST_HEAD(&s_buff->list);
+
+			s_buff->len = sk_pos->len;
+			s_buff->csum = sk_pos->csum;
+			s_buff->seq = tcb->seq;
+			s_buff->ip_summed = sk_pos->ip_summed;
+
+			if(sk_pos->len > 0)
+			{
+				s_buff->content = alloc(sk_pos->len);
+				memcpy(s_buff->content, sk_pos->data, sk_pos->len);
+			}
+
+			list_add_tail(&s_buff->list, &saved_tcp->sk_buffs);
 		}
 
-		list_add_tail(&s_buff->list, &saved_tcp->sk_buffs);
+		if(tcb->seq >= tp->snd_nxt)
+		{
+			segs_buffered ++;
+		}
 
 		if(sk_pos == sk_tail)
-			goto done_save;
+			break;
+	}
 
-	 	sk_pos = sk_pos->next; 
-
-	} while(sk_pos != sk_head);
-
-done_save:
 	saved_tcp->num_saved_buffs = sk_buff_count;
-	printk(KERN_EMERG "write %d expected %d progress %d\n", sk->write_in_progress, sk->write_size, sk->write_progress);
-	printk(KERN_EMERG "Saved %d socket buffers\n", sk_buff_count);
-
-	busy_wait(10);
 }
 
 static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)

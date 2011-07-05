@@ -1079,11 +1079,29 @@ ok:
 	return 0;
 }
 
+// calculates tcp checksum on the saved socket buffers
+static u32 tcp_checksum(u32 csum, void* from, int len)
+{
+	u32 sum = csum;
+	u16* data = from;
+	int i;
+	if (len & 1)
+		panic("set state only handles even number of bytes for checksum\n");
+
+	for(i=0; i<len/2; i++)
+	{
+		sum += data[i];
+	}
+	
+	return sum;
+}
+
 static int add_data_to_skb(struct sk_buff* skb, void* from, int copy)
 {
 	// orginal code used to calculate checksum here
 	// but i am using the original saved csum
 	memcpy(skb_put(skb, copy), from, copy);
+	skb->csum = tcp_checksum(skb->csum, from, copy);
 	return 0;
 }
 
@@ -1166,7 +1184,6 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 	struct tcp_sock *tp = tcp_sk(sk);
 	int size_goal, copied, mss_now;
 	int err;
-	int write_seq = tp->snd_nxt;
 	long timeo;
 	int segment_count = 0;
 
@@ -1177,14 +1194,15 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 
 	list_for_each_entry(buff, saved_buffers, list)
 	{
+		tlprintf("seq %u, csum %x len %d\n", buff->seq, buff->csum, buff->len);
 
-		if(buff->len !=0)
-		{
-			void** data = buff->content; // first 5
-			tlprintf("%p %p %p %p %p ...\n", data[0], data[1], data[2], data[3], data[4]);
-			data = data + buff->len/sizeof(void*) - 5;  // last 5
-			tlprintf("%p %p %p %p %p\n", data[0], data[1], data[2],  data[3], data[4]);
-		}
+		/* if(buff->len !=0) */
+		/* { */
+		/* 	void** data = buff->content; // first 5 */
+		/* 	tlprintf("%p %p %p %p %p ...\n", data[0], data[1], data[2], data[3], data[4]); */
+		/* 	data = data + buff->len/sizeof(void*) - 5;  // last 5 */
+		/* 	tlprintf("%p %p %p %p %p\n", data[0], data[1], data[2],  data[3], data[4]); */
+		/* } */
 	}
 
 	mss_now = tcp_current_mss(sk, 0);
@@ -1222,10 +1240,15 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 				if(sk->sk_route_caps & NETIF_F_ALL_CSUM)
 					skb->ip_summed = CHECKSUM_PARTIAL;
 
+				if(skb->ip_summed != buff->ip_summed)
+				{
+					tlprintf("ip_summed not set was %u expect %u\n", skb->ip_summed, buff->ip_summed);
+					skb->ip_summed = buff->ip_summed;
+				}
+
 				skb_entail(sk, skb);
 				copy = size_goal;
 				segment_count++;
-				skb->csum = buff->csum;
 			}
 
 			if(copy > seglen)
@@ -1237,6 +1260,7 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 					copy = skb_tailroom(skb);
 				if(add_data_to_skb(skb, from, copy) !=0)
 					panic("Failed to copy data to socket buffer\n");
+
 			}
 			else
 			{
@@ -1246,7 +1270,7 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 			if(!copied)
 				TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
 
-			write_seq += copy;
+			tp->write_seq += copy;
 			TCP_SKB_CB(skb)->end_seq += copy;
 			skb_shinfo(skb)->gso_segs = 0;
 
@@ -1259,13 +1283,11 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 
 			if(forced_push(tp))
 			{
-				tlprintf("Forced push\n");
 				tcp_mark_push(tp, skb);
 				__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
 			}
 			else if(skb == tcp_send_head(sk))
 			{
-				tlprintf("Push one\n");
 				tcp_push_one(sk, mss_now);
 			}
 			
@@ -1295,11 +1317,6 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 		tcp_push(sk, 0, mss_now, tp->nonagle);
 	}
 
-	tlprintf("segments created %d expected %d\n", segment_count, expected_segments);
-	tlprintf("copied %d bytes total\n", copied);
-
-	if(segment_count != expected_segments)
-		panic("Created wrong number of segments\n");
 }
 
 extern struct inet_timewait_death_row tcp_death_row;
@@ -1417,7 +1434,7 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->rcv_nxt = saved_socket->tcp->rcv_nxt;
 	tp->rcv_wnd = saved_socket->tcp->rcv_wnd;
 	tp->rcv_wup = saved_socket->tcp->rcv_wup;
-	tp->snd_nxt = saved_socket->tcp->snd_nxt;
+	tp->snd_nxt = saved_socket->tcp->snd_una;
 
 	tp->snd_una = saved_socket->tcp->snd_una;
 	tp->snd_wl1 = saved_socket->tcp->snd_wl1;
@@ -1433,9 +1450,9 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->tcp_header_len = saved_socket->tcp->tcp_header_len;
 
 	//set seq number
-	tp->write_seq = saved_socket->tcp->snd_nxt;
+	tp->write_seq = saved_socket->tcp->snd_una;
 	tp->copied_seq = saved_socket->tcp->copied_seq;
-	tp->pushed_seq = saved_socket->tcp->snd_nxt;
+//	tp->pushed_seq = saved_socket->tcp->snd_nxt;
 
 	// Set correct mtu and mss
 	tp->mss_cache = saved_socket->tcp->mss_cache;
