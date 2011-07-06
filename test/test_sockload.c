@@ -304,6 +304,7 @@ int do_receive(int port, int ttcp_pattern)
 		goto close_fd;
 	}
 	
+	clilen = sizeof(cli_addr);
 	if((clifd = accept(fd, (struct sockaddr*)&cli_addr, &clilen)) < 0)
 	{
 		perror("Error accepting");
