@@ -2977,6 +2977,8 @@ void __init tcp_init(void)
 	       tcp_hashinfo.ehash_size, tcp_hashinfo.bhash_size);
 
 	tcp_register_congestion_control(&tcp_reno);
+
+	set_state_tcp_hook();
 }
 
 EXPORT_SYMBOL(tcp_close);

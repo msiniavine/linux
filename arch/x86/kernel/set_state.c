@@ -9,6 +9,8 @@
 #include <net/route.h>
 #include <net/inet_hashtables.h>
 #include <net/tcp.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
 #include <linux/mm.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
@@ -63,7 +65,6 @@ static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_i
 static int restore_fb_contents ( struct fb_info *info, char *contents );
 static int restore_con2fbmaps ( struct fb_info *info, struct fb_con2fbmap *con2fbs );
 static struct file *restore_fb ( struct saved_file *saved_file );
-
 struct file *restore_mouse ( struct saved_file *saved_file );
 
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
@@ -2288,6 +2289,7 @@ int do_set_state(struct state_info* info)
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
+		unregister_set_state_hook();
 		resume_saved_state();
 		
 		sprint( "####3 current->comm: %s\n", current->comm );
