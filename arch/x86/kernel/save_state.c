@@ -30,7 +30,7 @@ static struct notifier_block fr_notifier = {
     .priority=INT_MAX
     };
 
-static unsigned long get_reserved_region(void)
+unsigned long get_reserved_region(void)
 {
 	void* region;
 	struct page* page = pfn_to_page(FASTREBOOT_REGION_START >> PAGE_SHIFT);
@@ -450,8 +450,9 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	struct saved_tcp_state* saved_tcp = (struct saved_tcp_state*)alloc(sizeof(struct saved_tcp_state));
 	struct dst_entry* dst = __sk_dst_get(sk);
 
+	sprint("Getting lock\n");
 	lock_sock(sk);
-
+	sprint("Got lock\n");
 	file->socket.tcp = saved_tcp;
 
 	// Save addresses and port numbers

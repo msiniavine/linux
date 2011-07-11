@@ -9,6 +9,8 @@
 #include <net/route.h>
 #include <net/inet_hashtables.h>
 #include <net/tcp.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
 #include <linux/mm.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
@@ -51,8 +53,6 @@
 #include <linux/ramfs.h>
 #include <linux/set_state.h>
 #include <linux/string.h>
-
-
 
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
 {
@@ -2084,6 +2084,7 @@ int do_set_state(struct state_info* info)
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
+		unregister_set_state_hook();
 		resume_saved_state();
 		return 0;
 	}
