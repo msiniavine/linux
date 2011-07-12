@@ -1,13 +1,22 @@
-#define NO_LIBC
+#define USE_LIBC
 #include "test.h"
+#include <stdio.h>
 
-int _start()
+int main ( void )
 {
-//	enable_save_state();
-        while(!was_state_restored())
+	enable_save_state();
+	
+	int index = 0;
+	
+        while(1)
 	{
-//		was_state_restored();
+		sleep( 1 );
+		
+		index++;
+		
+		printf( "%d\n", index );
 	}
-        exit(0);
+	
+	return 0;
 }
 

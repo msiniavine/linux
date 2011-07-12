@@ -1,11 +1,11 @@
 #ifndef TEST_H
 #define TEST_H
 
-#define __NR_set_state 333
-#define __NR_enable_save_state 334
-#define __NR_was_state_restored 335
-#define __NR_save_state 336
-#define __NR_state_present 337
+#define __NR_set_state 337
+#define __NR_enable_save_state 338
+#define __NR_was_state_restored 339
+#define __NR_save_state 340
+#define __NR_state_present 341
 
 void enable_save_state_pid(int pid);
 void enable_save_state(void);

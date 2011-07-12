@@ -97,7 +97,7 @@ pipe:
 was_state_restored:	
 	pushl %ebp
 	movl  %esp, %ebp
-	movl  $335, %eax
+	movl  $339, %eax
 	int $0x80
 	popl %ebp
 	ret
@@ -119,7 +119,7 @@ enable_save_state_pid:
 	pushl %ebp
 	movl  %esp, %ebp
 	push %ebx
-	movl $334, %eax
+	movl $338, %eax
 	movl 8(%ebp), %ebx
 	int $0x80
 	popl %ebx

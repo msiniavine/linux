@@ -14,7 +14,7 @@
 #include <linux/fcntl.h>
 #include <linux/smp_lock.h>
 #include <linux/swap.h>
-#include <linux/string.h>
+#include <linux/string.h>r
 #include <linux/init.h>
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
@@ -43,6 +43,7 @@
 #include <linux/tty.h>
 #include <linux/kd.h>
 #include <linux/console_struct.h>
+#include <linux/console.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -52,7 +53,12 @@
 #include <linux/set_state.h>
 #include <linux/string.h>
 
+void restore_socket_listen ( struct saved_file *saved_file );
 
+static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_info );
+static int restore_fb_contents ( struct fb_info *info, char *contents );
+static int restore_con2fbmaps ( struct fb_info *info, struct fb_con2fbmap *con2fbs );
+static struct file *restore_fb ( struct saved_file *saved_file );
 
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
 {
@@ -920,9 +926,10 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd = f->vcd;
 	char full_name[PATH_LENGTH];
-	memset(full_name, 0, sizeof(full_name));
-	strcat(full_name, "/dev");
-	strcat(full_name, f->name);
+	//memset(full_name, 0, sizeof(full_name));
+	//strcat(full_name, "/dev");
+	//strcat(full_name, f->name);
+	strcpy( full_name, f->name );
 	file = do_filp_open(-100, full_name, f->flags, -1074763960, 0);
 	if(IS_ERR(file))
 	{
@@ -966,6 +973,9 @@ void restore_file(struct saved_file* f)
 	{
 	        case VC_TTY:
 			file = restore_vc_terminal(f);
+			break;
+		case FRAMEBUFFER:
+			file = restore_fb( f );
 			break;
 		default:
 			file = do_filp_open(-100, f->name, f->flags, -1074763960, 0); 
@@ -1018,7 +1028,8 @@ int restore_inet_hash(struct inet_timewait_death_row* death_row, struct sock* sk
 			WARN_ON(hlist_empty(&tb->owners));
 			if(tb->fastreuse >= 0)
 			{
-				panic("Could not get desired port because of fastreuse\n");
+				//panic("Could not get desired port because of fastreuse\n");
+				sprint("Ignoring fast reuse\n");
 			}
 			if(!__inet_check_established(death_row, sk, desired_port, &tw))
 			{
@@ -1055,6 +1066,13 @@ ok:
 
 	local_bh_enable();
 	return 0;
+	
+
+	
+/*	inet_sk(sk)->sport = htons(desired_port);
+	__inet_hash_nolisten(sk);
+	return 0;
+	*/
 }
 
 
@@ -1375,8 +1393,130 @@ void restore_socket(struct saved_file* f)
 	}
 	else if(sock->sock_family == PF_INET && sock->sock_type == SOCK_STREAM)
 	{
-		restore_tcp_socket(f);
+		if ( sock->tcp->state == TCP_LISTEN )
+		{
+			restore_socket_listen( f );
+		}
+		
+		else
+		{
+			restore_tcp_socket(f);
+		}
 	}
+}
+
+void restore_socket_listen ( struct saved_file *saved_file )
+{
+	//
+	int retval;
+	struct socket *socket;
+	struct saved_socket saved_socket = saved_file->socket;
+	int flags;
+	unsigned int fd;
+	struct file *file;
+	
+	struct sockaddr_in address;
+	int err;
+	
+	int somaxconn;
+	int backlog = saved_socket.tcp->backlog;
+	//
+
+	//
+	/* Check the SOCK_* constants for consistency.  */
+	BUILD_BUG_ON(SOCK_CLOEXEC != O_CLOEXEC);
+	BUILD_BUG_ON((SOCK_MAX | SOCK_TYPE_MASK) != SOCK_TYPE_MASK);
+	BUILD_BUG_ON(SOCK_CLOEXEC & SOCK_TYPE_MASK);
+	BUILD_BUG_ON(SOCK_NONBLOCK & SOCK_TYPE_MASK);
+
+	flags = saved_socket.type & ~SOCK_TYPE_MASK;
+	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
+	{
+		panic( "Invalid socket flags detected.\n" );
+	}
+	saved_socket.type &= SOCK_TYPE_MASK;
+
+	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
+		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
+
+	retval = sock_create(	saved_socket.sock_family, 
+				saved_socket.type, 
+				saved_socket.sock_protocol, 
+				&socket );
+	if ( retval < 0 )
+	{
+		panic( "Unable to create socket.\n" );
+	}
+
+	/*retval = sock_map_fd(socket, flags & (O_CLOEXEC | O_NONBLOCK));
+	if (retval < 0)
+	{
+		panic( "Function sock_map_fd() failed.\n" );
+	}*/
+	
+	fd = alloc_fd( saved_file->fd, 0 );
+	if ( fd != saved_file->fd )
+	{
+		panic( "Unable obtain original socket file descriptor, %d\n", saved_file->fd );
+	}
+	
+	file = get_empty_filp();
+	if ( saved_file->flags == O_NONBLOCK )
+	{
+		flags |= O_NONBLOCK;
+	}
+	
+	err = sock_attach_fd( socket, file, flags );
+	if ( err < 0 )
+	{
+		panic( "Unable to attach socket to file.\n" );
+	}
+	
+	fd_install( fd, file );
+	//
+	
+	//
+	memset( &address, 0, sizeof( address ) );
+	address.sin_family = AF_INET;
+	address.sin_port = htons( saved_socket.inet.num );
+	address.sin_addr.s_addr = htonl( INADDR_ANY );
+	if ( saved_socket.inet.rcv_saddr )
+	{
+		address.sin_addr.s_addr = htonl( saved_socket.inet.rcv_saddr );
+	}
+	
+	sprint( "##### IP Address N: %d\tPort N: %d\n", address.sin_addr.s_addr, address.sin_port );
+	
+	err = security_socket_bind ( socket, ( struct sockaddr * ) &address, sizeof( address ) );
+	if ( !err )
+	{
+		err = socket->ops->bind( socket, ( struct sockaddr * ) &address, sizeof( address ) );
+	}
+	
+	if ( err < 0 )
+	{
+		panic( "Unable to bind to socket. Error: %d\n", err );
+	}
+	//
+	
+	//
+	somaxconn = sock_net( socket->sk )->core.sysctl_somaxconn;
+	if ( ( unsigned ) backlog > somaxconn )
+	{
+		backlog = somaxconn;
+	}
+
+	err = security_socket_listen( socket, backlog );
+	if ( !err )
+	{
+		err = socket->ops->listen( socket, backlog );
+	}
+	
+	if ( err < 0 )
+	{
+		panic( "Unable to put socket into listening state.\n" );
+	}
+	//
 }
 
 void restore_files(struct saved_task_struct* state, struct global_state_info* global_state)
@@ -1436,7 +1576,7 @@ void close_unused_pipes(struct saved_task_struct* state, struct global_state_inf
 
 int orig_gs, cur_gs;
 
-void check_unsafe_exec(struct linux_binprm *);
+int check_unsafe_exec(struct linux_binprm *);
 
 extern int pid_max;
 #define BITS_PER_PAGE		(PAGE_SIZE*8)
@@ -1879,13 +2019,17 @@ int do_set_state(struct state_info* info)
 	bprm = kzalloc(sizeof(*bprm), GFP_KERNEL);
 	if(!bprm)
 		goto out_files;
+
+	retval=prepare_bprm_creds(bprm);
+	if(retval)
+	  	goto out_kfree;	
+
+	retval = check_unsafe_exec(bprm);
+	if(retval < 0)
+	  	goto out_kfree;
 	sprint( "Allocated bprm\n");
-	//
-
-
-	retval = -ENOMEM;
-
-
+	
+	
 	// open_exec() "opens" the file specified by the given path and returns a 
 	// pointer to a struct file object?  Which process descriptor is the open file
 	// "associated" with?  The kernel process?
@@ -1895,7 +2039,7 @@ int do_set_state(struct state_info* info)
 	file = open_exec(state->exe_file);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
-	  goto out_kfree;
+		goto out_kfree;
 	//
 
 	// file is a pointer to a struct file object representing the executable file.
@@ -1943,6 +2087,9 @@ int do_set_state(struct state_info* info)
 		goto out;
 	sprint( "bprm prepared\n");
 	//
+	
+	sprint( "##### state->name: %s\n", state->name );
+	sprint( "####1 current->comm: %s\n", current->comm );
 
 	//here execve used to call load_elf_binary
 	retval = load_saved_binary(bprm, state);
@@ -2013,6 +2160,12 @@ int do_set_state(struct state_info* info)
 		//
 
 		restore_registers(state);
+		
+		//
+		strcpy( current->comm, state->name );
+		sprint( "##### state->name: %s\n", state->name );
+		sprint( "####2 current->comm: %s\n", current->comm );
+		//
 
 		add_to_restored_list(current);
 
@@ -2039,8 +2192,13 @@ int do_set_state(struct state_info* info)
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
 		resume_saved_state();
+		
+		sprint( "####3 current->comm: %s\n", current->comm );
+		
 		return 0;
 	}
+	
+	sprint( "####4 current->comm: %s\n", current->comm );
 
 out:
 	if(bprm->mm)
@@ -2061,6 +2219,261 @@ out_ret:
 	return retval;
 }
 
+static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_info )
+{
+	//
+	int ret = 0;
+	//
 
+	if ( !info || !saved_info )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		ret = -ENODEV;
+		
+		goto done;
+	}
+	
+	// Restore struct fb_var_screeninfo.
+	sprint( "####1 info: 0x%.8X\t&saved_info->var: 0x%.8X\n", info, &saved_info->var );
+	
+	acquire_console_sem();
+	
+	info->flags |= FBINFO_MISC_USEREVENT;
+	fb_set_var( info, &saved_info->var );
+	info->flags &= ~FBINFO_MISC_USEREVENT;
+	
+	release_console_sem();
+	
+	sprint( "####2 info: 0x%.8X\t&saved_info->var: 0x%.8X\n", info, &saved_info->var );
+	//
+	
+	// Restore the struct fb_cmap object.
+	sprint( "####3 &saved_info->cmap: 0x%.8X\tinfo: 0x%.8X\n", &saved_info->cmap, info );
+	
+	fb_set_cmap( &saved_info->cmap, info );
+	
+	sprint( "####4 &saved_info->cmap: 0x%.8X\tinfo: 0x%.8X\n", &saved_info->cmap, info );
+	//
+	
+	//
+unlock:
+	unlock_fb_info( info );
+	//
+	
+	//
+done:
+	return ret;
+	//
+}
 
+// This function is an altered version of fb_write() in the file drivers/video/fbmem.c.
+static int restore_fb_contents ( struct fb_info *info, char *contents )
+{
+	u32 *src;
+	u32 __iomem *dst;
+	int c, i, cnt = 0;
+	int count = 0;
+	int ret = 0;
+	
+	if ( !info || !contents )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		ret = -ENODEV;
+		
+		goto done;
+	}
+		
+	if ( !info->screen_base )
+	{
+		ret = -ENODEV;
+		
+		goto unlock;
+	}
+
+	if ( info->state != FBINFO_STATE_RUNNING )
+	{
+		ret = -EPERM;
+		
+		goto unlock;
+	}
+	
+	//
+	count = info->screen_size;
+
+	if ( count == 0 )
+		count = info->fix.smem_len;
+	//
+
+	dst = ( u32 __iomem  *) ( info->screen_base );
+
+	if (info->fbops->fb_sync)
+		info->fbops->fb_sync(info);
+		
+	src = ( u32 * ) contents;
+
+	while ( count > 0 )
+	{
+		c = ( count > PAGE_SIZE ) ? PAGE_SIZE : count;
+
+		for ( i = c >> 2; i > 0; i-- )
+		{
+			fb_writel( *src, dst );
+			
+			src++;
+			dst++;
+		}
+
+		if ( c & 3 )
+		{
+			u8 *src8 = ( u8 * ) src;
+			u8 __iomem *dst8 = ( u8 __iomem * ) dst;
+
+			for ( i = c & 3; i > 0; i-- )
+			{
+				fb_writeb( *src8, dst8 );
+				
+				src8++;
+				dst8++;
+			}
+
+			src = ( u32 __iomem * ) src8;
+			dst = ( u32 __iomem * ) dst8;
+		}
+
+		cnt += c;
+		count -= c;
+	}
+
+	//ret = cnt;
+	ret = 0;
+	
+unlock:
+	unlock_fb_info( info );
+	
+done:
+	return ret;
+}
+//
+
+static int restore_con2fbmaps ( struct fb_info *info, struct fb_con2fbmap *con2fbs )
+{
+	//
+	int ret = 0;
+	
+	struct fb_event event;
+	
+	int index = 0;
+	//
+	
+	if ( !info || !con2fbs )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		ret = -ENODEV;
+		
+		goto done;
+	}
+
+	//
+	for ( index = 0; index < MAX_NR_CONSOLES; index++ )
+	{
+		request_module( "fb%d", con2fbs[index].framebuffer );
+		
+		event.data = &con2fbs[index];
+		event.info = info;
+		fb_notifier_call_chain( FB_EVENT_SET_CONSOLE_MAP, &event );
+	}
+	//
+	
+unlock:
+	unlock_fb_info( info );
+
+done:
+	return ret;
+}
+
+static struct file *restore_fb ( struct saved_file *saved_file )
+{
+	//
+	//struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	struct file *file = NULL;
+	char filename[MAX_PATH] = "";
+	
+	int status = 0;
+	//
+	
+	//sprintf( filename, "/dev/fb%d", saved_file->fb.minor );
+	strcpy( filename, saved_file->name );
+	
+	// The function filp_open() does not return NULL on error?
+	file = filp_open( filename, saved_file->flags, 0 );
+	if ( IS_ERR( file ) )
+	{
+		panic( "Unable to open framebuffer file \'%s\'.\n", filename );
+	}
+	//
+	
+	sprint( "##### Restoring framebuffer %d.\n", saved_file->fb.minor );
+	
+	//
+	if ( saved_file->fb.info )
+	{
+		sprint( "##### Restoring the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		status = restore_fb_info( file->private_data, saved_file->fb.info );
+		if ( status )
+		{
+			panic( "Unable to restore the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		}
+	}
+	
+	if ( saved_file->fb.contents )
+	{
+		sprint( "##### Restoring the contents of framebuffer %d.\n", saved_file->fb.minor );
+		status = restore_fb_contents( file->private_data, saved_file->fb.contents );
+		if ( status )
+		{
+			panic( "Unable to restore the contents of framebuffer %d.\n", saved_file->fb.minor );
+		}
+		
+		//state->saved_fb_contents = 0;
+	}
+	
+	if ( saved_file->fb.con2fbs )
+	{
+		sprint( "##### Restoring the con2fbmaps.\n" );
+		status = restore_con2fbmaps( file->private_data, saved_file->fb.con2fbs );
+		if ( status )
+		{
+			panic( "Unable to restore the con2fbmaps.\n" );
+		}
+		
+		//state->saved_con2fbmaps = 0;
+	}
+	
+	/*if ( status1 || status2 || status3 )
+	{
+		panic( "Unable to restore framebuffer %d.\n", saved_file->fb.minor );
+	}*/
+	//
+	
+	return file;
+}
 

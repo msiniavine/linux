@@ -19,7 +19,28 @@
 #include <linux/net.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/fb.h>
+#include <linux/vt.h>
 #include <linux/set_state.h>
+#include <linux/major.h>
+
+#include <linux/fs.h>
+#include <linux/dcache.h>
+#include <linux/mount.h>
+#include <linux/limits.h>
+#include <linux/vmalloc.h>
+
+static void get_path_absolute ( struct file *file, char *path );
+
+static struct saved_fb_info *save_fb_info ( struct fb_info *info );
+static char *save_fb_contents ( struct fb_info *info );
+static struct fb_con2fbmap *save_con2fbmaps ( struct fb_info *info );
+static int file_is_fb ( struct file *file );
+static void save_fb ( struct file *file, struct saved_file *saved_file, struct map_entry *head );
+/*static void save_fbs ( void );
+static void restore_fbs ( void );
+static void save_con2fbmaps ( void );
+static void restore_con2fbmaps ( void );*/
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
@@ -286,7 +307,7 @@ static void reverse_string(char* begin, char* end)
 	}
 }
 
-static void get_file_path(struct file* f, char* filename)
+/*static void get_file_path(struct file* f, char* filename)
 {
 	struct dentry* cur;
 	char* begin, *end;
@@ -314,6 +335,57 @@ static void get_file_path(struct file* f, char* filename)
 	}
 	end = filename + strlen(filename);
 	reverse_string(begin, end);
+}*/
+
+static void get_path_absolute ( struct file *file, char *path )
+{
+	//
+	struct dentry *dentry = file->f_dentry;
+	struct vfsmount *vfsmount = file->f_vfsmnt;
+	
+	struct dentry **elements = ( struct dentry ** ) vmalloc( PATH_MAX * sizeof( struct dentry * ) );
+	int index = 0;
+	//
+	
+	//
+	index = 0;
+	
+	do
+	{
+		elements[index] = dentry;
+		index++;
+	
+		dentry = dentry->d_parent;
+		if ( IS_ROOT( dentry ) )
+		{
+			dentry = vfsmount->mnt_mountpoint;
+			vfsmount = vfsmount->mnt_parent;
+		}
+	}
+	while ( !IS_ROOT( dentry ) );
+	
+	//elements[index] = dentry;
+	index--;
+	//
+	
+	//
+	strcpy( path, "" );
+	
+	while ( index >= 0 )
+	{
+		strcat( path, "/" );
+		
+		spin_lock( &elements[index]->d_lock );
+		strcat( path, elements[index]->d_name.name );
+		spin_unlock( &elements[index]->d_lock );
+		
+		index--;
+	}
+	//
+	
+	vfree( elements );
+	
+	return;
 }
 
 static bool file_is_pipe(struct file* f)
@@ -323,9 +395,15 @@ static bool file_is_pipe(struct file* f)
 	if (inode != NULL && pipe != NULL)
 	{
 		if (S_ISFIFO(inode->i_mode))
+		{
+			//sprint( "##### File is a pipe.\n" );
+		
 			return true;
+		}
 		else
+		{
 			return false;
+		}
 	}
 
 	return false;
@@ -389,19 +467,28 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 	}
 }
 
-static int file_is_vc_terminal(char* name)
+// This does not return true for all "consoles"...
+static int file_is_vc_terminal ( struct file *file )
 {
-//TODO
-//I am cheating for now and assuming /tty1 or /console are the terminals I want
-	if(!strcmp("/tty1", name) || !strcmp("/console", name))
+	//I am cheating for now and assuming /tty1 or /console are the terminals I want
+	/*if(!strcmp("/tty1", name) || !strcmp("/console", name))
 	{
+		//sprint( "##### File is a terminal.\n" );
+	
 		return 1;
 	}
 	else
 	{
 		return 0;
-	}
+	}*/
+	
+	struct inode *inode = file->f_dentry->d_inode;
+	int major = MAJOR( inode->i_rdev );
+	int minor = MINOR( inode->i_rdev );
+	
+	return ( major == TTY_MAJOR && ( 1 <= minor && minor <= MAX_NR_CONSOLES ) || major == TTYAUX_MAJOR && minor == 1 );
 }
+//
 
 static void save_vc_term_info(struct file* f, struct saved_file* file)
 {
@@ -410,8 +497,9 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd;
 	unsigned char* screen_buffer;
-
+	
 	tty = (struct tty_struct*)f->private_data;
+	//sprint("tty private data %p\n", tty);
 	if(tty->magic != TTY_MAGIC)
 	{
 		panic("tty magic does not match expected: %x, got: %x\n", TTY_MAGIC, tty->magic);
@@ -423,6 +511,7 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	}
 
 	vcd = (struct vc_data*)tty->driver_data;
+	//sprint("driver data %p\n", vcd);
 	svcd = (struct saved_vc_data*)alloc(sizeof(*svcd));
 	svcd->index = vcd->vc_num;
 	svcd->rows = vcd->vc_rows;
@@ -431,12 +520,15 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	svcd->y = vcd->vc_y;
 	svcd->screen_buffer_size = vcd->vc_screenbuf_size;
 	screen_buffer = (unsigned char*)alloc(svcd->screen_buffer_size);
-
-	vcd->vc_sw->con_save_screen(vcd);  
+	
+	//sprint("Copy screen state\n");
+	//vcd->vc_sw->con_save_screen(vcd);	// vcd->vc_sw->con_save_screen is NULL...
 	memcpy(screen_buffer, vcd->vc_screenbuf, svcd->screen_buffer_size);
 	svcd->screen_buffer = screen_buffer;
 	file->type = VC_TTY;
 	file->vcd = svcd;
+
+	sprint("Saved terminal state\n");
 	
 }
 
@@ -445,7 +537,11 @@ static bool file_is_socket(struct file* file)
 {
 	sprint("f_op is %p, expecting %p\n", file->f_op, &socket_file_ops);
 	if (file->f_op == &socket_file_ops)
+	{
+		//sprint( "##### File is a socket.\n" );
+	
 		return true;
+	}
 	else
 		return false;
 }
@@ -481,6 +577,7 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock)
 	file->socket.tcp = saved_tcp;
 
 	saved_tcp->state = sk->sk_state;
+	saved_tcp->backlog = sk->sk_max_ack_backlog;
 	saved_tcp->daddr = inet->daddr;
 	saved_tcp->dport = ntohs(inet->dport);
 	saved_tcp->saddr = inet->saddr;
@@ -552,6 +649,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	// fdtable is the file descriptor table.
 	struct fdtable* fdt;
 	unsigned int fd;
+	
+	struct saved_file *saved_last = NULL;
 	//
 
 	// spin_lock() is used to lock the files?
@@ -562,7 +661,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	
 	// Back up some information in the file descriptors into the saved_task_struct
 	// object.
-	sprint("max_fds: %d\n", fdt->max_fds);
+	//sprint("max_fds: %d\n", fdt->max_fds);
 	for(fd=0; fd<fdt->max_fds; fd++)
 	{
 	  	// fcheck_files() obtains the file descriptor with index fd.
@@ -577,11 +676,11 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		if(f == NULL)
 			continue;
 
-		if(!should_be_saved(f))
-			continue;
+		//if(!should_be_saved(f))
+		//	continue;
 
 		file = (struct saved_file*)alloc(sizeof(*file));
-		get_file_path(f, file->name);
+		get_path_absolute(f, file->name);
 		sprint("fd %d points to %s\n", fd, file->name);
 		file->fd = fd;
 		file->count = file_count(f);
@@ -609,21 +708,45 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		//
 		// The last two lines inserts the saved_file object into the
 		// singly-linked list pointed to by task->open_files.
-		if(file_is_vc_terminal(file->name))
+		if(file_is_vc_terminal(f))
 		{
+			sprint( "fd %d is a terminal.\n", fd );
+			
 			save_vc_term_info(f, file);
 		}
 		else if (file_is_pipe(f))
 		{
+			sprint( "fd %d is a pipe.\n", fd );
+			
 			save_pipe_info(task, f, file, head);
 		}
 		else if (file_is_socket(f))
 		{
-			sprint("fd %d is a socket\n", fd);
+			sprint( "fd %d is a socket.\n", fd );
+			
 		  	save_socket_info(task, f, file, head);
 		}
-		file->next = task->open_files;
-		task->open_files = file;
+		else if ( file_is_fb( f ) )
+		{
+			sprint( "fd %d is a framebuffer.\n", fd );
+			
+			save_fb( f, file, head );
+		}
+		//file->next = task->open_files;
+		//task->open_files = file;
+		
+		if ( !saved_last )
+		{
+			task->open_files = file;
+		}
+		
+		else
+		{
+			saved_last->next = file;
+		}
+		
+		file->next = NULL;
+		saved_last = file;
 		//
 	}
 	spin_unlock(&files->file_lock);
@@ -689,13 +812,13 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 	list_for_each_entry(tmp, &task->pending.list, list)
 	{
 		sigorsets(&pending, &pending, &tmp->signal);
-		sprint("Checking current->pending\n");
+		//sprint("Checking current->pending\n");
 	}  
 
 	list_for_each_entry(tmp, &task->signal->shared_pending.list, list)
 	{
 		sigorsets(&pending, &pending, &tmp->signal);
- 		sprint("Checking current->signal->shared_pending\n");
+ 		//sprint("Checking current->signal->shared_pending\n");
 	}
 	//
 
@@ -776,6 +899,10 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	struct task_struct* child = NULL;
 	struct saved_mm_struct* mm;
 	int need_to_save_pages = 1;
+	
+	int major = 0;
+	int minor = 0;
+	int mapped_to_file = 0;
 	//
 	
 	// INIT_LIST_HEAD() is used in the initializing of struct list_head objects, 
@@ -801,14 +928,14 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	mm = find_by_first(head, task->mm);
 	if(mm == NULL)
 	{
-		sprint("mm %p not seen previously\n", task->mm);
+		//sprint("mm %p not seen previously\n", task->mm);
 		mm = (struct saved_mm_struct*)alloc(sizeof(*mm));
 		insert_entry(head, task->mm, mm);
 		save_pgd(task->mm, mm, head);
 	}
 	else
 	{
-		sprint("mm %p was seen before and was saved to %p\n", task->mm, mm);
+		//sprint("mm %p was seen before and was saved to %p\n", task->mm, mm);
 		need_to_save_pages = 0;
 	}
 	//
@@ -827,7 +954,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	//
 	
 	// Back up current executable path and do some file descriptor saving.
-	get_file_path(task->mm->exe_file, current_task->exe_file); 
+	get_path_absolute(task->mm->exe_file, current_task->exe_file); 
 	save_files(task->files, current_task, head);
 	//
 	
@@ -840,7 +967,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	//
 
 
-	sprint("mm address %p\n", task->mm);
+	//sprint("mm address %p\n", task->mm);
 	
 
 	for(area = task->mm->mmap; area != NULL; area = area->vm_next)
@@ -860,7 +987,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		struct shared_resource* elem = NULL;
 		//
 
-		sprint( "Saving area:%08lx-%08lx\n", area->vm_start, area->vm_end);
+		//sprint( "Saving area:%08lx-%08lx\n", area->vm_start, area->vm_end);
 
 		// Some memory allocation and "giving" the shared_resource object its
 		// "associated" saved_vm_area.
@@ -891,11 +1018,20 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		if(area->vm_file)
 		{
 			cur_area->filename = (char*)alloc(256);
-			get_file_path(area->vm_file, cur_area->filename);
+			get_path_absolute(area->vm_file, cur_area->filename);
 		}
 		cur_area->protection_flags = area->vm_page_prot;
 		cur_area->vm_flags = area->vm_flags;
 		cur_area->vm_pgoff = area->vm_pgoff;
+		//
+		
+		// !!!!!
+		//sprint( "##### Before finding major and minor.\n" );
+		//sprint( "##### Name: %s\n", area->vm_file->f_dentry->d_name.name );
+		//major = MAJOR( area->vm_file->f_dentry->d_inode->i_rdev );
+		//minor = MINOR( area->vm_file->f_dentry->d_inode->i_rdev );
+		//sprint( "##### After finding major and minor.\n" );
+		//sprint( "##### Major: %d Minor: %d\n", major, minor );
 		//
 
 		// Pages need to be saved if the encountered memory descriptor has not
@@ -907,20 +1043,49 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		//
 		// What are the stack members of the saved_task_struct and task_struct
 		// used for?  What are current_task->stack and task->stack used for?
+		//
+		// The condition is that if both the major and minor numbers of the file
+		// are zero, as in the file is a normal file, then save the pages; otherwise,
+		// do not save the pages, since the file is a device file and saving pages
+		// would result in "invalid pages" being saved; however, is this
+		// assumption correct?
 		
-		if(need_to_save_pages)
+		mapped_to_file = 0;
+		major = -1;
+		minor = -1;
+		if ( area->vm_file )
 		{
-			sprint("Saving pages\n");
+			major = MAJOR( area->vm_file->f_dentry->d_inode->i_rdev );
+			minor = MINOR( area->vm_file->f_dentry->d_inode->i_rdev );
+			
+			mapped_to_file = 1;
+			
+			sprint( "##### Name: %s\n", area->vm_file->f_dentry->d_name.name );
+			sprint( "##### Major:\t%d Minor: %d\n", major, minor );
+		}
+		
+		/*if ( major == FB_MAJOR && minor == 0 )
+		{
+			struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+			state->counter++;
+		}*/
+		
+		if( need_to_save_pages && ( !mapped_to_file || !major && !minor ) )
+		{
+			sprint("Saving pages...\n");
 			save_pages(current_task->mm, area, head);
 		}
 		else
 		{
-			sprint("Pages saved previously\n");
+			struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+			state->counter++;
+			
+			sprint("Pages not saved.\n");
 		}
 		if(area->vm_start <= task->mm->start_stack && area->vm_end >= task->mm->start_stack)
 		{
 			current_task->stack = cur_area;
-			sprint("stack: %08lx-%08lx\n", cur_area->begin, cur_area->end);
+			//sprint("stack: %08lx-%08lx\n", cur_area->begin, cur_area->end);
 		}
 		//
 
@@ -934,7 +1099,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	{
 		struct saved_task_struct* saved_child = save_process(child, head);
 		list_add_tail(&saved_child->sibling, &current_task->children);
-		sprint("Parent %d child %d\n", task->pid, child->pid);
+		//sprint("Parent %d child %d\n", task->pid, child->pid);
 	}
 	//
 
@@ -946,6 +1111,9 @@ static void save_running_processes(void)
 	struct saved_state* state;
 	struct task_struct* task;
 	struct map_entry* head;
+	
+	struct saved_task_struct *saved_task;
+	struct saved_task_struct *saved_last;
 	
 	// ???
 	read_lock(&tasklist_lock);
@@ -959,14 +1127,24 @@ static void save_running_processes(void)
 	}
 	//
 	
+	//sprint( "##### Before allocating \'struct saved_state\'.\n" );
+	
 	// new_map() just creates a new map_entry object, initializes it and then
 	// returns a pointer to it.
 	//
 	// state->processes is the head pointer to a singly-linked list of saved_task_struct.
 	head = new_map();
 	state = (struct saved_state*)alloc(sizeof(*state));
+	
 	state->processes = NULL;
+	
+	//memset( state->saved_fb_ic, 0, FB_MAX * sizeof( int ) );
+	//state->saved_con2fbmaps = 0;
+	
+	state->counter = 0;
 	//
+	
+	//printksprint( "##### After allocating \'struct saved_state\'.\n" );
 
 	//sprint( "State is at: %p\n", state);
 	//sprint( "Processes are at: %p\n", state->processes);
@@ -976,15 +1154,34 @@ static void save_running_processes(void)
 	// using save_process() and then appears to insert the saved_task_struct 
 	// into a singly-linked list
 	// that has a head pointer that is state->processes.
+	saved_task = NULL;
+	saved_last = NULL;
 	for_each_process(task)
 	{
-		struct saved_task_struct* current_task = NULL;
+		//struct saved_task_struct* current_task = NULL;
 	     
 		if(!is_save_enabled(task)) continue;
 		
-		current_task = save_process(task, head);
+		/*current_task = save_process(task, head);
 		current_task->next = state->processes;
-		state->processes = current_task;
+		state->processes = current_task;*/
+		
+		saved_task = save_process(task, head);
+		
+		if ( !saved_last )
+		{
+			state->processes = saved_task;
+			saved_task->next = NULL;
+			
+			saved_last = saved_task;
+		}
+		
+		else
+		{
+			saved_last->next = saved_task;
+			saved_task->next = NULL;
+			saved_last = saved_task;
+		}
 	}
 	//
 	
@@ -1028,7 +1225,7 @@ static void print_saved_processes(void)
 	struct saved_state* state;
 	struct saved_task_struct* task;
 	state = (struct saved_state*)get_reserved_region();
-	sprint( "State is at: %p\n", state);
+	//sprint( "State is at: %p\n", state);
 	for(task=state->processes; task!=NULL; task = task->next)
 	{
 		print_saved_process(task);
@@ -1039,6 +1236,10 @@ static int load_state = 0;
 static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x)
 {
 	save_running_processes();
+	
+	//save_fbs();
+	//save_con2fbmaps();
+	
 	sprint( "State saved\n");
 	return 0;
 }
@@ -1046,6 +1247,9 @@ static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, v
 asmlinkage void sys_save_state(void)
 {
 	save_running_processes();
+	
+	//save_fbs();
+	//save_con2fbmaps();
 }
 
 static int set_load_state(char* arg)
@@ -1147,41 +1351,504 @@ asmlinkage int sys_state_present(struct pt_regs regs)
 extern struct resource crashk_res;
 asmlinkage int sys_load_saved_state(struct pt_regs regs)
 {
-  int ret;
+	//
+	int ret;
 
-  struct saved_state* state;
-/*   unsigned long i; */
-/*   unsigned long start = FASTREBOOT_REGION_START; */
-/*   unsigned long end = FASTREBOOT_REGION_START + FASTREBOOT_REGION_SIZE; */
-/*   sprint("Begin: %lu End:%lu\n",  start >> PAGE_SHIFT,  */
-/* 	 end >> PAGE_SHIFT); */
-/*   for(i = start; i<=end; i+=PAGE_SIZE) */
-/*   { */
-/* 	  unsigned long pfn = i>>PAGE_SHIFT; */
-/* 	  struct page* page = pfn_to_page(pfn); */
-/* 	  if(atomic_read(&page->_count) != 1 || page->flags != 1073742848 || !PageReserved(page)) */
-/* 	  { */
-/* 		  sprint("Bad page %lu: count: %d, flags: %08lx, reserved: %s\n", pfn, atomic_read(&page->_count),  */
-/* 			 page->flags, PageReserved(page) ? "yes" : "no"); */
-/* 		  return 0; */
-/* 	  } */
-/*   } */
+	struct saved_state* state;
+	//
+	
+	sprint( "##### sys_load_saved_state() start #####\n" );
+	
+	/*   unsigned long i; */
+	/*   unsigned long start = FASTREBOOT_REGION_START; */
+	/*   unsigned long end = FASTREBOOT_REGION_START + FASTREBOOT_REGION_SIZE; */
+	/*   sprint("Begin: %lu End:%lu\n",  start >> PAGE_SHIFT,  */
+	/* 	 end >> PAGE_SHIFT); */
+	/*   for(i = start; i<=end; i+=PAGE_SIZE) */
+	/*   { */
+	/* 	  unsigned long pfn = i>>PAGE_SHIFT; */
+	/* 	  struct page* page = pfn_to_page(pfn); */
+	/* 	  if(atomic_read(&page->_count) != 1 || page->flags != 1073742848 || !PageReserved(page)) */
+	/* 	  { */
+	/* 		  sprint("Bad page %lu: count: %d, flags: %08lx, reserved: %s\n", pfn, atomic_read(&page->_count),  */
+	/* 			 page->flags, PageReserved(page) ? "yes" : "no"); */
+	/* 		  return 0; */
+	/* 	  } */
+	/*   } */
 
-  state = (struct saved_state*)get_reserved_region();
+	// The below will be placed temporarily here...
+	//restore_fbs();
+	//restore_con2fbmaps();
+	//
 
-  if(state->processes == NULL)
-  {
-	  sprint( "No more saved state\n");
-	  return -1;
-  }
- 
-  print_saved_processes();
-  ret = set_state(&regs, state->processes);
-  sprint( "set_state returned %d\n", ret);
-/*   if(ret == 0) */
-/*   { */
-/* 	  state->processes = state->processes->next; */
-/* 	  add_to_restored_list(current); */
-/*   } */
-  return regs.ax;
+	state = (struct saved_state*)get_reserved_region();
+	
+	if(state->processes == NULL)
+	{
+		sprint( "No more saved state\n");
+		sprint( "##### sys_load_saved_state() end #####\n" );
+		return -1;
+	}
+
+	//while ( state->processes )
+	//{
+		print_saved_processes();
+		ret = set_state(&regs, state->processes);
+		sprint( "set_state returned %d\n", ret);
+		if(ret == 0)
+		{
+			state->processes = state->processes->next;
+			add_to_restored_list(current);
+		}
+	
+		sprint( "##### state->counter: %d\n", state->counter );
+	//}
+	
+	/*if( !state->processes )
+	{
+		sprint( "No more saved state.\n" );
+		sprint( "##### sys_load_saved_state() end #####\n" );
+		return -1;
+	}*/
+	
+	sprint( "##### sys_load_saved_state() end #####\n" );
+
+	return regs.ax;
 }
+
+static struct saved_fb_info *save_fb_info ( struct fb_info *info )
+{
+	//
+	int status = 0;
+	
+	struct saved_fb_info *saved_info = NULL;
+	
+	int total_size = 0;
+	//
+	
+	//
+	if ( !info || !lock_fb_info( info ) )
+	{
+		saved_info = NULL;
+		
+		goto done;
+	}
+	//
+	
+	//
+	saved_info = alloc( sizeof( struct saved_fb_info ) );
+	if ( !saved_info )
+	{
+		saved_info = NULL;
+		
+		goto unlock;
+	}
+	//
+	
+	// Save the struct fb_var_screeninfo object.
+	saved_info->var = info->var;
+	//
+	
+	// Save the struct fb_cmap object.
+	saved_info->cmap.start = info->cmap.start;
+	saved_info->cmap.len = info->cmap.len;
+	
+	total_size = saved_info->cmap.len * sizeof( __u16 );
+	
+	saved_info->cmap.red = alloc( total_size );
+	saved_info->cmap.green = alloc( total_size );
+	saved_info->cmap.blue = alloc( total_size );
+	saved_info->cmap.transp = info->cmap.transp;
+	if ( info->cmap.transp )
+	{
+		saved_info->cmap.transp = alloc( total_size );
+	}
+	
+	if (	!saved_info->cmap.red || 
+		!saved_info->cmap.green || 
+		!saved_info->cmap.blue || 
+		!saved_info->cmap.transp && info->cmap.transp )
+	{
+		saved_info = NULL;
+		
+		goto unlock;
+	}
+	
+	status = fb_copy_cmap( &info->cmap, &saved_info->cmap );
+	if ( status )
+	{
+		saved_info = NULL;
+		
+		goto unlock;
+	}
+	//
+	
+unlock:
+	unlock_fb_info( info );
+	
+done:
+	return saved_info;
+}
+
+// This function is an altered version of fb_read() in the file drivers/video/fbmem.c.
+static char *save_fb_contents ( struct fb_info *info )
+{
+	u32 *dst;
+	u32 __iomem *src;
+	int c, i;
+	size_t count = 0;
+	//int ret = 0;
+	char *contents = NULL;
+
+	if ( !info )
+	{
+		//ret = -EINVAL;
+		contents = NULL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		//ret = -ENODEV;
+		contents = NULL;
+		
+		goto done;
+	}
+	
+	if ( !info->screen_base )
+	{
+		//ret = -ENODEV;
+		contents = NULL;
+		
+		goto unlock;
+	}
+
+	if ( info->state != FBINFO_STATE_RUNNING )
+	{
+		//ret = -EPERM;
+		contents = NULL;
+		
+		goto unlock;
+	}
+
+	count = info->screen_size;
+
+	if ( count == 0 )
+	{
+		count = info->fix.smem_len;
+	}
+	
+	contents = ( char * ) alloc( count );
+	if ( !contents )
+	{
+		//ret = -ENOMEM;
+		contents = NULL;
+		
+		goto unlock;
+	}
+
+	src = ( u32 __iomem * ) ( info->screen_base );
+
+	if (info->fbops->fb_sync)
+		info->fbops->fb_sync(info);
+		
+	dst = ( u32 __iomem * ) contents;
+
+	while ( count > 0 )
+	{
+		c  = ( count > PAGE_SIZE ) ? PAGE_SIZE : count;
+		for ( i = c >> 2; i > 0; i-- )
+		{
+			*dst = fb_readl( src );
+			
+			dst++;
+			src++;
+		}
+		if ( c & 3 )
+		{
+			u8 *dst8 = ( u8 * ) dst;
+			u8 __iomem *src8 = ( u8 __iomem * ) src;
+
+			for ( i = c & 3; i > 0; i-- )
+			{
+				*dst8 = fb_readb( src8 );
+				
+				dst8++;
+				src8++;
+			}
+
+			dst = ( u32 __iomem * ) dst8;
+			src = ( u32 __iomem * ) src8;
+		}
+
+		count -= c;
+	}
+	
+unlock:
+	unlock_fb_info( info );
+
+done:
+	//return ret;
+	return contents;
+}
+//
+
+static struct fb_con2fbmap *save_con2fbmaps ( struct fb_info *info )
+{
+	//
+	struct fb_con2fbmap *con2fbs = NULL;
+	struct fb_event event;
+	
+	int index = 0;
+	//
+	
+	if ( !info || !lock_fb_info( info ) )
+	{
+		goto done;
+	}
+	
+	con2fbs = alloc( MAX_NR_CONSOLES * sizeof( struct fb_con2fbmap ) );
+	if ( !con2fbs )
+	{
+		goto unlock;
+	}
+
+	//
+	for ( index = 0; index < MAX_NR_CONSOLES; index++ )
+	{
+		con2fbs[index].console = index + 1;
+		con2fbs[index].framebuffer = -1;
+		
+		event.data = &con2fbs[index];
+		event.info = info;
+		fb_notifier_call_chain( FB_EVENT_GET_CONSOLE_MAP, &event );
+	}
+	//
+
+unlock:
+	unlock_fb_info( info );
+	
+done:
+	return con2fbs;
+}
+
+static int file_is_fb ( struct file *file )
+{
+	struct inode *inode = file->f_dentry->d_inode;
+	int major = MAJOR( inode->i_rdev );
+	
+	//
+	/*if ( major == FB_MAJOR )
+	{
+		sprint( "##### File is a framebuffer.\n" );
+	}*/
+	//
+	
+	return major == FB_MAJOR;
+}
+
+static void save_fb ( struct file *file, struct saved_file *saved_file, struct map_entry *head )
+{
+	//
+	//struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	struct fb_info *info = file->private_data;
+	//
+	
+	//
+	saved_file->type = FRAMEBUFFER;
+	saved_file->fb.minor = MINOR( file->f_dentry->d_inode->i_rdev );
+	if ( !( 0 <= saved_file->fb.minor && saved_file->fb.minor < FB_MAX ) )
+	{
+		panic( "Invalid framebuffer minor, %d.\n", saved_file->fb.minor );
+	}
+	//
+	
+	//
+	saved_file->fb.info = NULL;
+	saved_file->fb.contents = NULL;
+	saved_file->fb.con2fbs = NULL;
+	
+	sprint( "##### Saving framebuffer %d.\n", saved_file->fb.minor );
+	
+	if ( !find_by_first( head, info ) )
+	{
+		sprint( "##### Saving the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		saved_file->fb.info = save_fb_info( info );
+		if ( !saved_file->fb.info )
+		{
+			panic( "Unable to save the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		}
+		
+		sprint( "##### Saving the contents of framebuffer %d.\n", saved_file->fb.minor );
+		saved_file->fb.contents = save_fb_contents( info );
+		if ( !saved_file->fb.contents )
+		{
+			panic( "Unable to save the contents of framebuffer %d.\n", saved_file->fb.minor );
+		}
+		
+		//state->saved_fb_ic[saved_file->fb.minor] = 1;
+		insert_entry( head, info, saved_file );
+	}
+	
+	if ( !find_by_first( head, registered_fb ) )
+	{
+		sprint( "##### Saving the con2fbmaps.\n" );
+		saved_file->fb.con2fbs = save_con2fbmaps( info );
+		if ( !saved_file->fb.con2fbs )
+		{
+			panic( "Unable to save the con2fbmaps.\n" );
+		}
+		
+		//state->saved_con2fbmaps = 1;
+		insert_entry( head, registered_fb, saved_file->fb.con2fbs );
+	}
+	
+	/*if ( !saved_file->fb.info || !saved_file->fb.contents || !saved_file->fb.con2fbs )
+	{
+		panic( "Unable to save framebuffer %d.\n", saved_file->fb.minor );
+	}*/
+	//
+	
+	return;
+}
+
+/*static void save_fbs ( void )
+{
+	//
+	struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	int index = 0;
+	struct fb_info *info = NULL;
+	//
+	
+	//
+	for ( index = 0; index < FB_MAX; index++ )
+	{
+		info = registered_fb[index];
+	
+		state->fbs[index].info = save_fb_info( info );
+		state->fbs[index].contents = save_fb_contents( info );
+		
+		// I am not sure about this...
+		if (	( info && info->fbops ) && 
+			( !state->fbs[index].info || !state->fbs[index].contents ) )
+		{
+			panic( "Unable to save framebuffer %d.\n", index );
+		}
+		//
+	}
+	//
+	
+	return;
+}
+
+static void restore_fbs ( void )
+{
+	//
+	struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	int index = 0;
+	struct fb_info *info = NULL;
+	
+	int status1 = 0;
+	int status2 = 0;
+	//
+	
+	//
+	for ( index = 0; index < FB_MAX; index++ )
+	{
+		info = registered_fb[index];
+	
+		status1 = restore_fb_info( info, state->fbs[index].info );
+		status2 = restore_fb_contents( info, state->fbs[index].contents );
+		
+		// I am not sure about this...
+		if (	( info && info->fbops ) && 
+			( status1 || status2 ) )
+		{
+			panic( "Unable to restore framebuffer %d.\n", index );
+		}
+		//
+	}
+	//
+	
+	return;
+}
+
+static void save_con2fbmaps ( void )
+{
+	//
+	struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	struct fb_info *info = registered_fb[0];
+	
+	int index = 0;
+	struct fb_event event;
+	//
+	
+	//
+	if ( !info || !lock_fb_info( info ) )
+	{
+		return;
+	}
+	//
+	
+	//
+	
+	//
+	//state->con2fbs = alloc( MAX_NR_CONSOLES * sizeof( struct fb_con2fbmap ) );
+
+	for ( index = 0; index < MAX_NR_CONSOLES; index++ )
+	{
+		state->con2fbs[index].console = index + 1;
+		state->con2fbs[index].framebuffer = -1;
+		
+		event.data = &state->con2fbs[index];
+		event.info = info;
+		fb_notifier_call_chain( FB_EVENT_GET_CONSOLE_MAP, &event );
+	}
+	//
+	
+	//
+	unlock_fb_info( info );
+	//
+	
+	return;
+}
+
+static void restore_con2fbmaps ( void )
+{
+	//
+	struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	struct fb_info *info = registered_fb[0];
+	
+	int index = 0;
+	struct fb_event event;
+	//
+	
+	if ( !info || !lock_fb_info( info ) )
+	{
+		return;
+	}
+	
+	//
+	for ( index = 0; index < MAX_NR_CONSOLES; index++ )
+	{
+		request_module( "fb%d", state->con2fbs[index].framebuffer );
+		
+		event.data = &state->con2fbs[index];
+		event.info = info;
+		fb_notifier_call_chain( FB_EVENT_SET_CONSOLE_MAP, &event );
+	}
+	//
+	
+	//
+	unlock_fb_info( info );
+	//
+	
+	return;
+}*/
+

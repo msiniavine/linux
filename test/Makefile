@@ -2,7 +2,7 @@ CFLAGS = -g -Wall -fno-stack-protector
 #LDFLAGS = -lpthread
 
 
-all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait test_my_mutex test_condvar test_pipe1 test_pipe2 test_terminal launcher test_runner test_cli_full test_cli test_serv state_present test_sockserver test_sockload
+all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait test_my_mutex test_condvar test_pipe1 test_pipe2 test_terminal launcher test_runner test_cli_full test_cli test_serv state_present test_sockserver test_sockload test_fb test_pseudo test_select
 
 syscalls.o: syscalls.S
 	as syscalls.S -o syscalls.o
@@ -58,8 +58,8 @@ test_pending_signals: test_pending_signals.o test.o
 test_restore_signal: test_restore_signal.o test.o
 test_altstack: test_altstack.o test.o
 test_sigsuspend: test_sigsuspend.o test.o
-test_loop: test_loop.o syscalls.o
-	gcc -nostdlib -g test_loop.o syscalls.o -o test_loop
+test_loop: test_loop.o test.o
+#gcc -nostdlib -g test_loop.o syscalls.o -o test_loop
 run_test: run_test.o
 set_state: set_state.o
 	gcc -nostdlib -g -o set_state set_state.o
@@ -79,6 +79,9 @@ test_cli: test_cli.o syscalls.o
 	gcc -nostdlib -g test_cli.o syscalls.o -o test_cli
 test_sockserver: test_sockserver.o test.o
 test_sockload: test_sockload.o test.o
+test_fb: test_fb.o test.o
+test_pseudo: test_pseudo.o test.o
+test_select: test_select.o test.o
 
 #file_test.o: file_test.c
 #gcc -c -nostdlibc file_test.c -o file_test.o

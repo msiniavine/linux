@@ -1,9 +1,14 @@
+#include <linux/fb.h>
+#include <linux/vt.h>
 
 #define FASTREBOOT_REGION_SIZE 64 * 1024 * 1024
 #define FASTREBOOT_REGION_START (0x1000000 + FASTREBOOT_REGION_SIZE)
 
+// Warning: Is the maximum path length 256 or 4096?  It says 4096 in linux/limits.h.
 #define PATH_LENGTH 256
+#define MAX_PATH PATH_LENGTH
 #define PIPE_BUFFERS (16)
+//
 
 // File types
 #define REGULAR_FILE 0
@@ -14,6 +19,7 @@
 // Terminal that outputs to a virtual console
 #define VC_TTY  5
 #define SOCKET 6
+#define FRAMEBUFFER 7
 
 struct saved_inet_sock
 {     
@@ -28,6 +34,7 @@ struct saved_inet_sock
 struct saved_tcp_state
 {
 	int state;
+	int backlog;
 	__be32 daddr;
 	__be32 saddr;
 	__be16 sport;  // source port in host format
@@ -128,6 +135,22 @@ struct saved_vc_data
 	unsigned int x, y;
 };
 
+struct saved_fb_info
+{
+	struct fb_var_screeninfo var;
+	struct fb_cmap cmap;
+	//struct fb_con2fbmap con2fbs[MAX_NR_CONSOLES];
+};
+
+struct saved_fb
+{
+	int minor;
+	struct saved_fb_info *info;
+	char *contents;
+	
+	struct fb_con2fbmap *con2fbs;
+};
+
 struct saved_file
 {
 	unsigned int type;
@@ -139,6 +162,7 @@ struct saved_file
 	struct saved_vc_data* vcd;
 	struct saved_file* next;
 	struct saved_socket socket;
+	struct saved_fb fb;
 };
 
 struct saved_page
@@ -220,10 +244,17 @@ struct saved_task_struct
 
 };
 
-
 struct saved_state
 {
-  struct saved_task_struct* processes;
+	struct saved_task_struct *processes;
+	
+	//struct saved_fb fbs[FB_MAX];
+	//struct fb_con2fbmap con2fbs[MAX_NR_CONSOLES];
+	
+	//int saved_fb_ic[FB_MAX];
+	//int saved_con2fbmaps;
+	
+	int counter;
 };
 
 struct global_state_info
