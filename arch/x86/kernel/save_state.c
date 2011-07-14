@@ -450,9 +450,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	struct saved_tcp_state* saved_tcp = (struct saved_tcp_state*)alloc(sizeof(struct saved_tcp_state));
 	struct dst_entry* dst = __sk_dst_get(sk);
 
-	sprint("Getting lock\n");
-	lock_sock(sk);
-	sprint("Got lock\n");
+//	lock_sock(sk);
+	bh_lock_sock_nested(sk);
 	file->socket.tcp = saved_tcp;
 
 	// Save addresses and port numbers
@@ -511,7 +510,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	}
 
 
-	release_sock(sk);
+//	release_sock(sk);
+	bh_unlock_sock(sk);
 }
 // Save the contents of the sockets write queue
 // Write queue has the data that the application wrote to the socket

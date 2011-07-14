@@ -120,7 +120,10 @@ int ttcp_check(void* src, void* state, int len)
 	for(i = 0; i<len; i++)
 	{
 		if(buff[i] != current)
+		{
+			printf("content error at %d expected %x got %x\n", i, current, buff[i]);
 			return 0;
+		}
 		current ++;
 		if(current > 126)
 			current = 33;

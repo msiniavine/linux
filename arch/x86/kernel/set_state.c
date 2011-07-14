@@ -1820,8 +1820,9 @@ void restore_registers(struct saved_task_struct* state)
 		{
 			struct tcp_write_progress* wp = state->syscall_data;
 			state->registers.ax = wp->bytes_written;
+			break;
 		}
-		break;
+		// else fall through
 	case 4:
 	case 162:  // nanosleep
 	case 240:  // futex
