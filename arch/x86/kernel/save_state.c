@@ -502,11 +502,11 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	save_socket_write_queue(sk, saved_tcp);
 
 
-	if(sk->write_in_progress)
+	if(sk->io_in_progress)
 	{
-		struct tcp_write_progress* wp = (struct tcp_write_progress*)alloc(sizeof(*wp));
-		wp->bytes_written = sk->write_progress;
-		tsk->syscall_data = wp;
+		struct tcp_io_progress* iop = (struct tcp_io_progress*)alloc(sizeof(*iop));
+		iop->progress = sk->io_progress;
+		tsk->syscall_data = iop;
 	}
 
 

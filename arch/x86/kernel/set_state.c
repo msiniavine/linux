@@ -1816,12 +1816,19 @@ void restore_registers(struct saved_task_struct* state)
 	switch(state->syscall_restart)
 	{
 	case 102:  // socketcall
-		if(state->registers.bx == SYS_SEND && state->syscall_data != NULL)
+		if((state->registers.bx == SYS_SEND || state->registers.bx == SYS_RECV) && state->syscall_data != NULL)
 		{
-			struct tcp_write_progress* wp = state->syscall_data;
-			state->registers.ax = wp->bytes_written;
+			struct tcp_io_progress* iop = state->syscall_data;
+			if(iop->progress == 0)
+			{
+				sprint("Restarting socket call with no progress\n");
+				goto restart;   // can't return 0 from read/write, need to restart it
+			}
+			sprint("Returning from socket call with %d progress\n", iop->progress);
+			state->registers.ax = iop->progress;
 			break;
 		}
+		sprint("No data for socket call, restarting\n");
 		// else fall through
 	case 4:
 	case 162:  // nanosleep
@@ -1829,6 +1836,7 @@ void restore_registers(struct saved_task_struct* state)
 	case 7:    // waitpid
 	case 114:  // wait4
 	case 142:  // select
+	restart:
 		sprint("Restarting system call %d\n", state->syscall_restart);
 		state->registers.ax = state->registers.orig_ax;
 		state->registers.ip -= 2;

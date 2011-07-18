@@ -829,9 +829,9 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	lock_sock(sk);
 	TCP_CHECK_TIMER(sk);
 
-	sk->write_in_progress = 1;
-	sk->write_progress = 0;
-	sk->write_size = msg->msg_iov->iov_len;
+	sk->io_in_progress = 1;
+	sk->io_progress = 0;
+	sk->expected_size = msg->msg_iov->iov_len;
 
 	flags = msg->msg_flags;
 	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
@@ -993,7 +993,7 @@ new_segment:
 			if (!copied)
 				TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
 
-			sk->write_progress += copy;
+			sk->io_progress += copy;
 			tp->write_seq += copy;
 			TCP_SKB_CB(skb)->end_seq += copy;
 			skb_shinfo(skb)->gso_segs = 0;
@@ -1036,7 +1036,7 @@ out:
 //		tlprintf("Final push\n");
 		tcp_push(sk, flags, mss_now, tp->nonagle);
 	}
-	sk->write_in_progress = 0;
+	sk->io_in_progress = 0;
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
 	return copied;
@@ -1056,7 +1056,7 @@ do_error:
 		goto out;
 out_err:
 	err = sk_stream_error(sk, flags, err);
-	sk->write_in_progress = 0;
+	sk->io_in_progress = 0;
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
 	return err;
@@ -1310,8 +1310,6 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	int copied_early = 0;
 	struct sk_buff *skb;
 
-	csprint("tcp_recvmsg\n");
-
 	lock_sock(sk);
 
 	TCP_CHECK_TIMER(sk);
@@ -1355,7 +1353,8 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		}
 	}
 #endif
-
+	sk->io_in_progress = 1;
+	sk->io_progress = 0;
 	do {
 		u32 offset;
 
@@ -1512,6 +1511,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				NET_ADD_STATS_USER(sock_net(sk), LINUX_MIB_TCPDIRECTCOPYFROMBACKLOG, chunk);
 				len -= chunk;
 				copied += chunk;
+				sk->io_progress += chunk;
 			}
 
 			if (tp->rcv_nxt == tp->copied_seq &&
@@ -1523,6 +1523,7 @@ do_prequeue:
 					NET_ADD_STATS_USER(sock_net(sk), LINUX_MIB_TCPDIRECTCOPYFROMPREQUEUE, chunk);
 					len -= chunk;
 					copied += chunk;
+					sk->io_progress += chunk;
 				}
 			}
 		}
@@ -1596,6 +1597,7 @@ do_prequeue:
 
 		*seq += used;
 		copied += used;
+		sk->io_progress += used;
 		len -= used;
 
 		tcp_rcv_space_adjust(sk);
@@ -1638,6 +1640,7 @@ skip_copy:
 				NET_ADD_STATS_USER(sock_net(sk), LINUX_MIB_TCPDIRECTCOPYFROMPREQUEUE, chunk);
 				len -= chunk;
 				copied += chunk;
+				sk->io_progress += chunk;
 			}
 		}
 
@@ -1682,11 +1685,19 @@ skip_copy:
 	tcp_cleanup_rbuf(sk, copied);
 
 	TCP_CHECK_TIMER(sk);
+	sk->io_in_progress = 0;
+	if(sk->io_progress != copied)
+	{
+		sprint("WARNING wrong progress expected %d got %d\n", copied, sk->io_progress);
+	}
+	sk->io_progress = 0;
 	release_sock(sk);
 	return copied;
 
 out:
 	TCP_CHECK_TIMER(sk);
+	sk->io_in_progress = 0;
+	sk->io_progress = 0;
 	release_sock(sk);
 	return err;
 
