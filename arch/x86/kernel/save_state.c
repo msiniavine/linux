@@ -20,6 +20,10 @@
 #include <linux/udp.h>
 #include <linux/tcp.h>
 #include <net/tcp.h>
+#include <linux/fs.h>
+#include <linux/dcache.h>
+#include <linux/mount.h>
+#include <linux/vmalloc.h>
 
 #include <linux/set_state.h>
 
@@ -245,44 +249,57 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 }
 
 
-static void reverse_string(char* begin, char* end)
+static struct dentry* elements[PATH_MAX];
+static void get_path_absolute ( struct file *file, char *path )
 {
-	end -= 1;
-	while(begin < end)
+	//
+	sprint("Get absolute path\n");
+	struct dentry *dentry = file->f_dentry;
+	struct vfsmount *vfsmount = file->f_vfsmnt;
+	
+//	struct dentry **elements = ( struct dentry ** ) kmalloc( PATH_MAX * sizeof( struct dentry * ) , GFP_KERNEL);
+	int index = 0;
+	//
+	sprint("elements %p\n", elements);
+	//
+	index = 0;
+	
+	do
 	{
-		char t = *begin;
-		*begin = *end;
-		*end = t;
-		begin++;
-		end--;
+		elements[index] = dentry;
+		index++;
+	
+		dentry = dentry->d_parent;
+		if ( IS_ROOT( dentry ) )
+		{
+			dentry = vfsmount->mnt_mountpoint;
+			vfsmount = vfsmount->mnt_parent;
+		}
 	}
-}
-
-static void get_file_path(struct file* f, char* filename)
-{
-	struct dentry* cur;
-	char* begin, *end;
-
-	cur = f->f_path.dentry;
-	while(1)
+	while ( !IS_ROOT( dentry ) );
+	
+	//elements[index] = dentry;
+	index--;
+//
+	
+	//
+	strcpy( path, "" );
+	
+	while ( index >= 0 )
 	{
-		if(!cur->d_name.name) panic("dentry did not have a name");
-		if(cur == cur->d_parent) break;
-		strcat(filename, cur->d_name.name);
-		strcat(filename, "/");
-		cur = cur->d_parent;
+		strcat( path, "/" );
+		
+		spin_lock( &elements[index]->d_lock );
+		strcat( path, elements[index]->d_name.name );
+		spin_unlock( &elements[index]->d_lock );
+		
+		index--;
 	}
-	reverse_string(filename, filename+strlen(filename));
-	begin = strchr(filename, '/')+1;
-	end = strchr(begin+1, '/');
-	while(end != NULL)
-	{
-		reverse_string(begin, end);
-		begin = end+1;
-		end=strchr(begin+1, '/');
-	}
-	end = filename + strlen(filename);
-	reverse_string(begin, end);
+	//
+	
+//	kfree( elements );
+	
+	return;
 }
 
 static bool file_is_pipe(struct file* f)
@@ -358,18 +375,13 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 	}
 }
 
-static int file_is_vc_terminal(char* name)
+static int file_is_vc_terminal(struct file* file)
 {
-//TODO
-//I am cheating for now and assuming /tty1 or /console are the terminals I want
-	if(!strcmp("/tty1", name) || !strcmp("/console", name))
-	{
-		return 1;
-	}
-	else
-	{
-		return 0;
-	}
+	struct inode *inode = file->f_dentry->d_inode;
+	int major = MAJOR( inode->i_rdev );
+	int minor = MINOR( inode->i_rdev );
+	
+	return ( (major == TTY_MAJOR && ( 1 <= minor && minor <= MAX_NR_CONSOLES )) || (major == TTYAUX_MAJOR && minor == 1) );
 }
 
 static void save_vc_term_info(struct file* f, struct saved_file* file)
@@ -626,7 +638,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 			continue;
 
 		file = (struct saved_file*)alloc(sizeof(*file));
-		get_file_path(f, file->name);
+		get_path_absolute(f, file->name);
 		sprint("fd %d points to %s\n", fd, file->name);
 		file->fd = fd;
 		file->count = file_count(f);
@@ -645,7 +657,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 			file->flags = O_RDWR;
 		}
 
-		if(file_is_vc_terminal(file->name))
+		if(file_is_vc_terminal(f))
 		{
 			save_vc_term_info(f, file);
 		}
@@ -794,7 +806,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	current_task->mm->brk = task->mm->brk;
 	current_task->pid = pid_vnr(task_pid(task));
 	
-	get_file_path(task->mm->exe_file, current_task->exe_file); 
+	get_path_absolute(task->mm->exe_file, current_task->exe_file); 
 	save_files(task->files, current_task, head);
 	
 	save_signals(task, current_task);
@@ -824,7 +836,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		if(area->vm_file)
 		{
 			cur_area->filename = (char*)alloc(256);
-			get_file_path(area->vm_file, cur_area->filename);
+			get_path_absolute(area->vm_file, cur_area->filename);
 		}
 		cur_area->protection_flags = area->vm_page_prot;
 		cur_area->vm_flags = area->vm_flags;

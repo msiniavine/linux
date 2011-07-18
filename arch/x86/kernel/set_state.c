@@ -942,9 +942,8 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd = f->vcd;
 	char full_name[PATH_LENGTH];
-	memset(full_name, 0, sizeof(full_name));
-	strcat(full_name, "/dev");
-	strcat(full_name, f->name);
+	strncpy(full_name, f->name, PATH_LENGTH);
+	full_name[PATH_LENGTH-1] = '\0';
 	file = do_filp_open(-100, full_name, f->flags, -1074763960);
 	if(IS_ERR(file))
 	{
