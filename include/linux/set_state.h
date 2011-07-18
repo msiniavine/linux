@@ -93,6 +93,8 @@ struct saved_tcp_state
 	__be16 sport;  // source port in host format
 	__be16 dport; // destination port in host format
 
+	unsigned short backlog; // listen socket backlog
+
 	//inet_connection_sock state
 	int rcv_mss;
 	
@@ -221,8 +223,8 @@ struct saved_file
 	int flags;
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
-	struct saved_file* next;
 	struct saved_socket socket;
+	struct list_head next;
 };
 
 struct saved_page
@@ -288,7 +290,7 @@ struct saved_task_struct
 
 
 	char exe_file[PATH_LENGTH];         // name of the executable file
-	struct saved_file* open_files;
+	struct list_head open_files;
 
 	pid_t pid;
 

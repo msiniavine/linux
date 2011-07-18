@@ -59,7 +59,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 	struct saved_file* file;
 
 	sprint("blocking ports for task %s[%d]\n", tsk->name, tsk->pid);
-	for(file=tsk->open_files; file!=NULL; file=file->next)
+	list_for_each_entry(file, &tsk->open_files, next)
 	{
 		struct saved_socket* socket;
 		struct saved_tcp_state* tcp;

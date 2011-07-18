@@ -665,7 +665,6 @@ void restore_pipe_data(struct saved_pipe* saved_pipe, unsigned int fd)
 void restore_pipe(struct saved_file* f, struct global_state_info* global_state, struct saved_task_struct* state, unsigned int* max_fd)
 {
 	struct saved_file* sfile;
-	struct saved_file* open_files = state->open_files;
 	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
 	struct pipes_to_close* pipe_close_head = global_state->pipe_close_head;
 	struct pipe_restore_temp* other_end = find_other_pipe_end(pipe_restore_head, f->pipe.inode);
@@ -704,7 +703,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 				sprint("Did not need to change fd of read end %d\n", pipe_fd[0]);
 
 			// Scan the saved fd table for other pipe end
-			for(sfile = open_files; sfile != NULL; sfile = sfile->next)
+			list_for_each_entry(sfile, &state->open_files, next)
 			{
 				if ((sfile->type == WRITE_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
 				{
@@ -759,7 +758,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 				sprint("Did not need to change fd of write end %d\n", pipe_fd[1]);
 
 			// Scan the saved fd table for other pipe end
-			for(sfile = open_files; sfile != NULL; sfile = sfile->next)
+			list_for_each_entry(sfile, &state->open_files, next)
 			{
 				if ((sfile->type == READ_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
 				{
@@ -810,7 +809,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 		pipe_fd[0] = pipe_fd[1] = 0;
 
 		// Scan the saved fd table and restore open pipe ends
-		for(sfile = open_files; sfile != NULL; sfile = sfile->next)
+		list_for_each_entry(sfile, &state->open_files, next)
 		{
 			if ((sfile->type == READ_PIPE_FILE)  && (sfile->pipe.inode = f->pipe.inode))
 			{
@@ -1039,7 +1038,7 @@ int restore_inet_hash(struct inet_timewait_death_row* death_row, struct sock* sk
 			WARN_ON(hlist_empty(&tb->owners));
 			if(tb->fastreuse >= 0)
 			{
-				panic("Could not get desired port because of fastreuse\n");
+				sprint("Ignoring faste reuse\n");
 			}
 			if(!__inet_check_established(death_row, sk, desired_port, &tw))
 			{
@@ -1540,6 +1539,120 @@ void restore_udp_socket(struct saved_file* f){
 	return;
 }
 
+static void restore_listen_socket ( struct saved_file *saved_file )
+{
+	//
+	int retval;
+	struct socket *socket;
+	struct saved_socket saved_socket = saved_file->socket;
+	int flags;
+	unsigned int fd;
+	struct file *file;
+	
+	struct sockaddr_in address;
+	int err;
+	
+	int somaxconn;
+	int backlog = saved_socket.tcp->backlog;
+	//
+
+	//
+	/* Check the SOCK_* constants for consistency.  */
+	BUILD_BUG_ON(SOCK_CLOEXEC != O_CLOEXEC);
+	BUILD_BUG_ON((SOCK_MAX | SOCK_TYPE_MASK) != SOCK_TYPE_MASK);
+	BUILD_BUG_ON(SOCK_CLOEXEC & SOCK_TYPE_MASK);
+	BUILD_BUG_ON(SOCK_NONBLOCK & SOCK_TYPE_MASK);
+
+	flags = saved_socket.type & ~SOCK_TYPE_MASK;
+	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
+	{
+		panic( "Invalid socket flags detected.\n" );
+	}
+	saved_socket.type &= SOCK_TYPE_MASK;
+
+	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
+		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
+
+	retval = sock_create(	saved_socket.sock_family, 
+				saved_socket.type, 
+				saved_socket.sock_protocol, 
+				&socket );
+	if ( retval < 0 )
+	{
+		panic( "Unable to create socket.\n" );
+	}
+
+	/*retval = sock_map_fd(socket, flags & (O_CLOEXEC | O_NONBLOCK));
+	  if (retval < 0)
+	  {
+	  panic( "Function sock_map_fd() failed.\n" );
+	  }*/
+	
+	fd = alloc_fd( saved_file->fd, 0 );
+	if ( fd != saved_file->fd )
+	{
+		panic( "Unable obtain original socket file descriptor, %d\n", saved_file->fd );
+	}
+
+	file = get_empty_filp();
+	if ( saved_file->flags == O_NONBLOCK )
+	{
+		flags |= O_NONBLOCK;
+	}
+	
+	err = sock_attach_fd( socket, file, flags );
+	if ( err < 0 )
+	{
+		panic( "Unable to attach socket to file.\n" );
+	}
+	
+	fd_install( fd, file );
+	//
+	
+	//
+	memset( &address, 0, sizeof( address ) );
+	address.sin_family = AF_INET;
+	address.sin_port = htons( saved_socket.inet.num );
+	address.sin_addr.s_addr = htonl( INADDR_ANY );
+	if ( saved_socket.inet.rcv_saddr )
+	{
+		address.sin_addr.s_addr = htonl( saved_socket.inet.rcv_saddr );
+	}
+	
+	sprint( "##### IP Address N: %d\tPort N: %d\n", address.sin_addr.s_addr, address.sin_port );
+
+	err = security_socket_bind ( socket, ( struct sockaddr * ) &address, sizeof( address ) );
+	if ( !err )
+	{
+		err = socket->ops->bind( socket, ( struct sockaddr * ) &address, sizeof( address ) );
+	}
+	
+	if ( err < 0 )
+	{
+		panic( "Unable to bind to socket. Error: %d\n", err );
+	}
+	//
+	
+	//
+	somaxconn = sock_net( socket->sk )->core.sysctl_somaxconn;
+	if ( ( unsigned ) backlog > somaxconn )
+	{
+		backlog = somaxconn;
+	}
+
+	err = security_socket_listen( socket, backlog );
+	if ( !err )
+	{
+		err = socket->ops->listen( socket, backlog );
+	}
+	
+	if ( err < 0 )
+	{
+		panic( "Unable to put socket into listening state.\n" );
+	}
+	//
+}
+
 void restore_socket(struct saved_file* f)
 {
 	struct saved_socket* sock = &f->socket;
@@ -1549,7 +1662,14 @@ void restore_socket(struct saved_file* f)
 	}
 	else if(sock->sock_family == PF_INET && sock->sock_type == SOCK_STREAM)
 	{
-		restore_tcp_socket(f);
+		if(sock->tcp->state == TCP_LISTEN)
+		{
+			restore_listen_socket(f);
+		}
+		else
+		{
+			restore_tcp_socket(f);
+		}
 	}
 }
 
@@ -1558,13 +1678,13 @@ void restore_files(struct saved_task_struct* state, struct global_state_info* gl
 	struct saved_file* f;
 	unsigned int max_fd = 0;
 
-	for(f=state->open_files; f!=NULL; f=f->next)
+	list_for_each_entry(f, &state->open_files, next)
 	{
 		if (f->fd > max_fd)
 			max_fd = f->fd;
 	}
 
-	for(f=state->open_files; f!=NULL; f=f->next)
+	list_for_each_entry(f, &state->open_files, next)
 	{
 		sprint("Restoring fd %u with path %s of file type %u\n", f->fd, f->name, f->type);
 		switch (f->type)

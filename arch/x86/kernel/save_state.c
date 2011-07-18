@@ -252,18 +252,10 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 static struct dentry* elements[PATH_MAX];
 static void get_path_absolute ( struct file *file, char *path )
 {
-	//
-	sprint("Get absolute path\n");
 	struct dentry *dentry = file->f_dentry;
 	struct vfsmount *vfsmount = file->f_vfsmnt;
 	
-//	struct dentry **elements = ( struct dentry ** ) kmalloc( PATH_MAX * sizeof( struct dentry * ) , GFP_KERNEL);
 	int index = 0;
-	//
-	sprint("elements %p\n", elements);
-	//
-	index = 0;
-	
 	do
 	{
 		elements[index] = dentry;
@@ -278,11 +270,8 @@ static void get_path_absolute ( struct file *file, char *path )
 	}
 	while ( !IS_ROOT( dentry ) );
 	
-	//elements[index] = dentry;
 	index--;
-//
 	
-	//
 	strcpy( path, "" );
 	
 	while ( index >= 0 )
@@ -295,10 +284,6 @@ static void get_path_absolute ( struct file *file, char *path )
 		
 		index--;
 	}
-	//
-	
-//	kfree( elements );
-	
 	return;
 }
 
@@ -431,27 +416,6 @@ static bool file_is_socket(struct file* file)
 		return false;
 }
 
-static bool should_be_saved(struct file* file)
-{
-	struct socket* sock;
-	struct sock* sk;
-	if(!file_is_socket(file))
-		return true;
-
-	sock = (struct socket*)file->private_data;
-	sk = sock->sk;
-
-	if(sk->sk_state != TCP_LISTEN)
-	{
-		return true;
-	}
-	else
-	{
-		sprint("Skipping listen socket\n");
-		return false;
-	}
-}
-
 static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* saved_tcp);
 static void save_tcp_state(struct saved_file* file, struct socket* sock, struct saved_task_struct* tsk)
 {
@@ -472,6 +436,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->dport = ntohs(inet->dport);
 	saved_tcp->saddr = inet->saddr;
 	saved_tcp->sport = ntohs(inet->sport);
+
+	saved_tcp->backlog = sk->sk_ack_backlog;
 
 	
 	// Save protocol state
@@ -620,6 +586,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	struct fdtable* fdt;
 	unsigned int fd;
 
+	INIT_LIST_HEAD(&task->open_files);
+
 	spin_lock(&files->file_lock);
 	fdt = files_fdtable(files);
 	
@@ -634,10 +602,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		if(f == NULL)
 			continue;
 
-		if(!should_be_saved(f))
-			continue;
-
 		file = (struct saved_file*)alloc(sizeof(*file));
+		INIT_LIST_HEAD(&file->next);
 		get_path_absolute(f, file->name);
 		sprint("fd %d points to %s\n", fd, file->name);
 		file->fd = fd;
@@ -670,8 +636,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 			sprint("fd %d is a socket\n", fd);
 		  	save_socket_info(task, f, file, head);
 		}
-		file->next = task->open_files;
-		task->open_files = file;
+
+		list_add_tail(&file->next, &task->open_files);
 		
 	}
 	spin_unlock(&files->file_lock);
@@ -925,7 +891,7 @@ static void print_saved_process(struct saved_task_struct* task)
 		       p->flags, PageReserved(p) ? "yes" : "no");
 	}
 
-	for(file = task->open_files; file!=NULL; file = file->next)
+	list_for_each_entry(file, &task->open_files, next);
 	{
 		sprint("fd: %u - %s\n", file->fd, file->name);
 	}
