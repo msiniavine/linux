@@ -448,6 +448,7 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->rcv_wup = tp->rcv_wup;
 
 	saved_tcp->snd_una = tp->snd_una;
+	saved_tcp->snd_nxt = tp->snd_nxt;
 	saved_tcp->snd_wl1 = tp->snd_wl1;
 	saved_tcp->snd_wnd = tp->snd_wnd;
 	saved_tcp->max_window = tp->max_window;

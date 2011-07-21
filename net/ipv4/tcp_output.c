@@ -1156,7 +1156,7 @@ static inline unsigned int tcp_cwnd_test(struct tcp_sock *tp,
 /* This must be invoked the first time we consider transmitting
  * SKB onto the wire.
  */
-static int tcp_init_tso_segs(struct sock *sk, struct sk_buff *skb,
+int tcp_init_tso_segs(struct sock *sk, struct sk_buff *skb,
 			     unsigned int mss_now)
 {
 	int tso_segs = tcp_skb_pcount(skb);
@@ -1918,6 +1918,21 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	unsigned int cur_mss;
 	int err;
 
+	/* if(sk == NULL) */
+	/* { */
+	/* 	panic("Retransmit socket null\n"); */
+	/* } */
+
+	/* if(skb == NULL) */
+	/* { */
+	/* 	panic("Retransmit skb is null\n"); */
+	/* } */
+
+	/* csprint("retransmit arguments ok\n"); */
+	/* csprint("retransmitting %u\n", TCP_SKB_CB(skb)->seq); */
+	/* csprint("%d pcound\n", tcp_skb_pcount(skb)); */
+	/* busy_wait(10); */
+
 	/* Inconslusive MTU probe */
 	if (icsk->icsk_mtup.probe_size) {
 		icsk->icsk_mtup.probe_size = 0;
@@ -2648,3 +2663,4 @@ EXPORT_SYMBOL(tcp_make_synack);
 EXPORT_SYMBOL(tcp_simple_retransmit);
 EXPORT_SYMBOL(tcp_sync_mss);
 EXPORT_SYMBOL(tcp_mtup_init);
+EXPORT_SYMBOL(tcp_init_tso_segs);

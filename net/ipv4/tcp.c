@@ -885,7 +885,7 @@ new_segment:
 						sk->sk_allocation);
 				if (!skb)
 				{
-					tlprintf("stream alloc failed, wait for memory\n");
+//					tlprintf("stream alloc failed, wait for memory\n");
 					goto wait_for_memory;
 				}
 				/*
@@ -1019,11 +1019,12 @@ wait_for_memory:
 			if (copied)
 			{
 				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
-//				tlprintf("Wait for memory push\n");
 			}
-
+			
+//			csprint("%u %u %u %u\n", tp->snd_una, tp->snd_nxt, tp->pushed_seq, tp->write_seq);
 			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 				goto do_error;
+//			csprint("Done wait for memory\n");
 
 			mss_now = tcp_current_mss(sk, !(flags&MSG_OOB));
 			size_goal = tp->xmit_size_goal;

@@ -72,8 +72,7 @@
 #include <net/netdma.h>
 
 #include <linux/set_state.h>
-
-#define sprint(format, ...) {}
+#define csprint(format, ...) 
 
 int sysctl_tcp_timestamps __read_mostly = 1;
 int sysctl_tcp_window_scaling __read_mostly = 1;
@@ -3256,7 +3255,10 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 	 * then we can probably ignore it.
 	 */
 	if (after(ack, tp->snd_nxt))
+	{
+		csprint("Newer than sent ack\n");
 		goto uninteresting_ack;
+	}
 
 	if (before(ack, prior_snd_una))
 		goto old_ack;
@@ -3358,7 +3360,9 @@ old_ack:
 	}
 
 uninteresting_ack:
+	csprint("Ack %u out of %u:%u\n", ack, tp->snd_una, tp->snd_nxt);
 	SOCK_DEBUG(sk, "Ack %u out of %u:%u\n", ack, tp->snd_una, tp->snd_nxt);
+	busy_wait(20);
 	return 0;
 }
 
@@ -3988,7 +3992,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 
 	if (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq)
 	{
-		sprint("Dropping packet\n");
+		csprint("Dropping packet\n");
 		goto drop;
 	}
 
@@ -4008,7 +4012,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	if (TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {
 		if (tcp_receive_window(tp) == 0)
 		{
-			sprint("Out of window\n");
+			csprint("Out of window\n");
 			goto out_of_window;
 		}
 
@@ -4021,7 +4025,7 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 
 			__set_current_state(TASK_RUNNING);
 			
-			sprint("Copy to user copied_seq %u\n", tp->copied_seq);
+			csprint("Copy to user copied_seq %u\n", tp->copied_seq);
 			local_bh_enable();
 			if (!skb_copy_datagram_iovec(skb, 0, tp->ucopy.iov, chunk)) {
 				tp->ucopy.len -= chunk;
@@ -4037,13 +4041,13 @@ queue_and_out:
 			if (eaten < 0 &&
 			    tcp_try_rmem_schedule(sk, skb->truesize))
 			{
-				sprint("Drop because oom???\n");
+				csprint("Drop because oom???\n");
 				goto drop;
 			}
 
 			skb_set_owner_r(skb, sk);
 			__skb_queue_tail(&sk->sk_receive_queue, skb);
-			sprint("Packet queued\n");
+			csprint("Packet queued\n");
 		}
 		tp->rcv_nxt = TCP_SKB_CB(skb)->end_seq;
 		if (skb->len)
@@ -4075,7 +4079,7 @@ queue_and_out:
 
 	if (!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt)) {
 		/* A retransmit, 2nd most common case.  Force an immediate ack. */
-		sprint("Retransmit\n");
+		csprint("Retransmit\n");
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_DELAYEDACKLOST);
 		tcp_dsack_set(sk, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 
@@ -4095,7 +4099,7 @@ drop:
 
 	if (before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {
 		/* Partial packet, seq < rcv_next < end_seq */
-		sprint("Partial packet\n");
+		csprint("Partial packet\n");
 		SOCK_DEBUG(sk, "partial packet: rcv_next %X seq %X - %X\n",
 			   tp->rcv_nxt, TCP_SKB_CB(skb)->seq,
 			   TCP_SKB_CB(skb)->end_seq);
@@ -4119,7 +4123,7 @@ drop:
 	tp->pred_flags = 0;
 	inet_csk_schedule_ack(sk);
 
-	sprint("out of order segment\n");
+	csprint("out of order segment\n");
 	SOCK_DEBUG(sk, "out of order segment: rcv_next %X seq %X - %X\n",
 		   tp->rcv_nxt, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 
@@ -4852,7 +4856,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 	 *	 space for instance)
 	 *	PSH flag is ignored.
 	 */
-	sprint("tcp_rcv_established %lxu, %lu %lu\n", tp->pred_flags, tp->tcp_header_len, tp->snd_wnd);
+	csprint("tcp_rcv_established seq %lu, ack: %lu rcv_nxt %lu\n", ntohl(th->seq), ntohl(th->ack_seq), tp->rcv_nxt);
 
 	if ((tcp_flag_word(th) & TCP_HP_BITS) == tp->pred_flags &&
 	    TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {
@@ -4868,14 +4872,14 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			/* No? Slow path! */
 			if (!tcp_parse_aligned_timestamp(tp, th))
 			{
-				sprint("timestamp check failed - go to slow path\n");
+				csprint("timestamp check failed - go to slow path\n");
 				goto slow_path;
 			}
 
 			/* If PAWS failed, check it more carefully in slow path */
 			if ((s32)(tp->rx_opt.rcv_tsval - tp->rx_opt.ts_recent) < 0)
 			{
-				sprint("paws test failed - go to slow path\n");
+				csprint("paws test failed - go to slow path\n");
 				goto slow_path;
 			}
 
@@ -4888,7 +4892,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 
 		if (len <= tcp_header_len) {
 			/* Bulk data transfer: sender */
-			sprint("Bulk data transfer\n");
+			csprint("Bulk data transfer: sender\n");
 			if (len == tcp_header_len) {
 				/* Predicted packet is in window by definition.
 				 * seq == rcv_nxt and rcv_wup <= rcv_nxt.
@@ -4902,7 +4906,6 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 				/* We know that such packets are checksummed
 				 * on entry.
 				 */
-				sprint("send ack and done\n");
 				tcp_ack(sk, skb, 0);
 				__kfree_skb(skb);
 				tcp_data_snd_check(sk);
@@ -4914,13 +4917,13 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 		} else {
 			int eaten = 0;
 			int copied_early = 0;
-			sprint("copied_seq %lu\n", tp->copied_seq);
+			csprint("copied_seq %lu\n", tp->copied_seq);
 			if (tp->copied_seq == tp->rcv_nxt &&
 			    len - tcp_header_len <= tp->ucopy.len) {
 #ifdef CONFIG_NET_DMA
-				sprint("NET_DMA enabled\n");
+				csprint("NET_DMA enabled\n");
 				if (tcp_dma_try_early_copy(sk, skb, tcp_header_len)) {
-					sprint("dma early copy done\n");
+					csprint("dma early copy done\n");
 					copied_early = 1;
 					eaten = 1;
 				}
@@ -4931,7 +4934,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 
 					if (!tcp_copy_to_iovec(sk, skb, tcp_header_len))
 					{
-						sprint("copied to iovec\n");
+						csprint("copied to iovec\n");
 						eaten = 1;
 					}
 				}
@@ -4976,7 +4979,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 				NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPHPHITS);
 
 				/* Bulk data transfer: receiver */
-				sprint("Bulk data transfer receiver\n");
+				csprint("Bulk data transfer receiver\n");
 				__skb_pull(skb, tcp_header_len);
 				__skb_queue_tail(&sk->sk_receive_queue, skb);
 				skb_set_owner_r(skb, sk);
@@ -4987,7 +4990,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 
 			if (TCP_SKB_CB(skb)->ack_seq != tp->snd_una) {
 				/* Well, only one small jumplet in fast path... */
-				sprint("???\n");
+				csprint("???\n");
 				tcp_ack(sk, skb, FLAG_DATA);
 				tcp_data_snd_check(sk);
 				if (!inet_csk_ack_scheduled(sk))
@@ -5011,7 +5014,7 @@ no_ack:
 	}
 
 slow_path:
-	sprint("Slow path\n");
+	csprint("Slow path\n");
 	if (len < (th->doff << 2) || tcp_checksum_complete_user(sk, skb))
 		goto csum_error;
 
@@ -5023,7 +5026,7 @@ slow_path:
 	if (res <= 0)
 		return -res;
 
-	sprint("Validate ok\n");
+	csprint("Validate ok\n");
 
 step5:
 	if (th->ack)
@@ -5036,7 +5039,7 @@ step5:
 
 	/* step 7: process the segment text */
 	tcp_data_queue(sk, skb);
-	sprint("Data queued\n");
+	csprint("Data queued\n");
 
 	tcp_data_snd_check(sk);
 	tcp_ack_snd_check(sk);

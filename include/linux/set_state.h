@@ -25,8 +25,9 @@ void unregister_set_state_hook(void);
 
 #define STATE_DEBUG 1
 #if STATE_DEBUG
+extern int debug_was_state_restored;
 #define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
-#define csprint(format, ...) if(is_save_enabled(current) || was_state_restored(current)) printk(KERN_WARNING format, ##__VA_ARGS__)
+#define csprint(format, ...) if(debug_was_state_restored) printk(KERN_EMERG format, ##__VA_ARGS__)
 #else
 #define sprint(format, ...)
 #define csprint(format, ...)
@@ -107,7 +108,8 @@ struct saved_tcp_state
 	// snd_una is where tcp needs to be restarted
 	// because its the data thats been sent but unacknowledged
 	// data from this point on will have to be retransmitted
-	// and snd_nxt and write_seq need to be recalculated from this point on
+	// and and write_seq need to be recalculated from this point on
+	u32 snd_nxt;
 	u32 snd_una;
 
 	u32 snd_wl1;

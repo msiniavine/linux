@@ -54,6 +54,8 @@
 #include <linux/set_state.h>
 #include <linux/string.h>
 
+int debug_was_state_restored = 0;
+
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
 {
 	return len <= MAX_ARG_STRLEN;
@@ -1173,17 +1175,25 @@ static inline void tcp_push(struct sock *sk, int flags, int mss_now,
 	}
 }
 
+
+int tcp_init_tso_segs(struct sock *sk, struct sk_buff *skb,
+		      unsigned int mss_now);
+
+
 // fills the socket queue with data that was queued previously
 // socket must be locked before calling this
-static void restore_queued_socket_buffers(struct list_head* saved_buffers, struct sock* sk, int expected_segments)
+static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_state* stcp)
 {
 	struct saved_sk_buff* buff;
 	struct sk_buff* skb;
+	struct sk_buff* resume_point = NULL;
 	struct tcp_sock *tp = tcp_sk(sk);
 	int size_goal, copied, mss_now;
 	int err;
 	long timeo;
 	int segment_count = 0;
+	struct list_head* saved_buffers = &stcp->sk_buffs;
+	
 
 	if(list_empty(saved_buffers))
 	{
@@ -1219,35 +1229,33 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 			int copy;
 			skb = tcp_write_queue_tail(sk);
 
-			if(!tcp_send_head(sk) || (copy = size_goal - skb->len) <= 0)
+
+			tlprintf("%d total queued %d free %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, sk_stream_wspace(sk));
+			if(!sk_stream_memory_free(sk))
 			{
-				tlprintf("%d total queued %d free %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, sk_stream_wspace(sk));
-				if(!sk_stream_memory_free(sk))
-				{
-					tlprintf("No free memory wait for sndbuf total %d queued %d segments %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, segment_count);
-					goto wait_for_sndbuf;
-				}
-
-				skb = sk_stream_alloc_skb(sk, select_size(sk), sk->sk_allocation);
-				if(!skb)
-				{
-					tlprintf("stream alloc failed, wait for memory\n");
-					goto wait_for_memory;
-				}
-
-				if(sk->sk_route_caps & NETIF_F_ALL_CSUM)
-					skb->ip_summed = CHECKSUM_PARTIAL;
-
-				if(skb->ip_summed != buff->ip_summed)
-				{
-					tlprintf("ip_summed not set was %u expect %u\n", skb->ip_summed, buff->ip_summed);
-					skb->ip_summed = buff->ip_summed;
-				}
-
-				skb_entail(sk, skb);
-				copy = size_goal;
-				segment_count++;
+				tlprintf("No free memory wait for sndbuf total %d queued %d segments %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, segment_count);
+				goto wait_for_sndbuf;
 			}
+			
+			skb = sk_stream_alloc_skb(sk, select_size(sk), sk->sk_allocation);
+			if(!skb)
+			{
+				tlprintf("stream alloc failed, wait for memory\n");
+				goto wait_for_memory;
+			}
+			
+			if(sk->sk_route_caps & NETIF_F_ALL_CSUM)
+				skb->ip_summed = CHECKSUM_PARTIAL;
+			
+			if(skb->ip_summed != buff->ip_summed)
+			{
+				tlprintf("ip_summed not set was %u expect %u\n", skb->ip_summed, buff->ip_summed);
+				skb->ip_summed = buff->ip_summed;
+			}
+			
+			skb_entail(sk, skb);
+			copy = size_goal;
+			segment_count++;
 
 			if(copy > seglen)
 				copy = seglen;
@@ -1276,31 +1284,16 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 			copied += copy;
 			seglen -= copy;
 
-			if(skb->len < size_goal)
-				continue;
+			tcp_init_tso_segs(sk, skb, mss_now);
 
-			if(forced_push(tp))
-			{
-				tcp_mark_push(tp, skb);
-				__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
-			}
-			else if(skb == tcp_send_head(sk))
-			{
-				tcp_push_one(sk, mss_now);
-			}
-			
-			continue;
+			break;
 
+		
 		wait_for_sndbuf:
 			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 
 		wait_for_memory:
 
-			if(copied)
-			{
-				tlprintf("out of memory push\n");
-				tcp_push(sk, 0, mss_now, TCP_NAGLE_PUSH);
-			}
 			tlprintf("timeout %ld\n", timeo);
 			if((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 				panic("Wait for memory returned error %d\n", err);
@@ -1310,10 +1303,24 @@ static void restore_queued_socket_buffers(struct list_head* saved_buffers, struc
 		}
 	}
 
-	if(copied)
+	sprint("Moving snd_nxt to %u\n", stcp->snd_nxt);
+	tcp_for_write_queue(skb, sk)
 	{
-		tcp_push(sk, 0, mss_now, tp->nonagle);
+		if(TCP_SKB_CB(skb)->end_seq == stcp->snd_nxt)
+		{
+			resume_point = skb;
+			break;
+		}
 	}
+	if(!resume_point)
+	{
+		panic("Could not find tcp resume point\n");
+	}
+	tcp_advance_send_head(sk, skb);
+	tp->snd_nxt = stcp->snd_nxt;
+
+	if(copied)
+		tcp_push(sk, 0, mss_now, tp->nonagle);
 
 }
 
@@ -1473,7 +1480,7 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->nonagle = saved_socket->tcp->nonagle;
 	tlprintf("Forcing sndbuf to %d\n", saved_socket->tcp->sk_sndbuf );
 	sk->sk_sndbuf = saved_socket->tcp->sk_sndbuf;
-	restore_queued_socket_buffers(&saved_socket->tcp->sk_buffs, sk, saved_socket->tcp->num_saved_buffs);
+	restore_queued_socket_buffers(sk, saved_socket->tcp);
 
 	release_sock(sk);
 }
@@ -2212,6 +2219,7 @@ int do_set_state(struct state_info* info)
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
+		debug_was_state_restored = 1;
 		unregister_set_state_hook();
 		resume_saved_state();
 		return 0;
