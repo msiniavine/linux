@@ -9,7 +9,7 @@ cd test
 
 #./test_loop < test_pid.c &> test.out
 #./test_sockload -h 142.150.234.186 -p 5000 -l 4 < test_pid.c &> test.out
-./test_sockserver
+#./test_sockserver
 #./test_sleep < test_pid.c &> test.out
 
 #./script &

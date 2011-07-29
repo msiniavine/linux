@@ -14,7 +14,7 @@
 #include <linux/fcntl.h>
 #include <linux/smp_lock.h>
 #include <linux/swap.h>
-#include <linux/string.h>r
+#include <linux/string.h>
 #include <linux/init.h>
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
@@ -44,6 +44,8 @@
 #include <linux/kd.h>
 #include <linux/console_struct.h>
 #include <linux/console.h>
+#include <linux/vt_kern.h>
+#include <linux/kbd_kern.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -53,12 +55,16 @@
 #include <linux/set_state.h>
 #include <linux/string.h>
 
+#include <linux/mousedev.h>
+
 void restore_socket_listen ( struct saved_file *saved_file );
 
 static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_info );
 static int restore_fb_contents ( struct fb_info *info, char *contents );
 static int restore_con2fbmaps ( struct fb_info *info, struct fb_con2fbmap *con2fbs );
 static struct file *restore_fb ( struct saved_file *saved_file );
+
+struct file *restore_mouse ( struct saved_file *saved_file );
 
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
 {
@@ -918,6 +924,7 @@ void restore_fifo(struct saved_file* f, struct global_state_info* global_state, 
 void restore_file(struct saved_file* f);
 void redraw_screen(struct vc_data*, int);
 
+// Warning: This function does not restore everything that should be restore.
 struct file* restore_vc_terminal(struct saved_file* f)
 {
 	struct file* file;
@@ -926,6 +933,9 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd = f->vcd;
 	char full_name[PATH_LENGTH];
+	unsigned long arg = 0;
+	int ret;
+	
 	//memset(full_name, 0, sizeof(full_name));
 	//strcat(full_name, "/dev");
 	//strcat(full_name, f->name);
@@ -935,18 +945,93 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	{
 		panic("Could not open terminal file with error: %ld\n", PTR_ERR(file));
 	}
+	
+	tty = file->private_data;
+	driver = tty->driver;
+	vcd = tty->driver_data;
+	//
+	
+	//
+	arg = svcd->v_active;
+	if ( arg == 0 || arg > MAX_NR_CONSOLES )
+	{
+		panic( "Unable to continue due to invalid VT number, %d.\n", arg );
+	}
+	else 
+	{
+		arg--;
+		acquire_console_sem();
+		ret = vc_allocate( arg );
+		release_console_sem();
+		if ( ret )
+		{
+			panic( "Function vc_allocate() failed.\n" );
+		}
+		set_console( arg );
+	}
+	
+	
+	if ( svcd->vt_mode.mode != VT_AUTO && svcd->vt_mode.mode != VT_PROCESS )
+	{
+		panic( "Unable to continue due to invalid VT modes.\n" );
+	}
+	acquire_console_sem();
+	vcd->vt_mode = svcd->vt_mode;
+	// the frsig is ignored, so we set it to 0
+	vcd->vt_mode.frsig = 0;
+	put_pid( vcd->vt_pid );
+	vcd->vt_pid = get_pid( task_pid( current ) );
+	// no switch is required -- saw@shade.msu.ru
+	vcd->vt_newvt = -1;
+	release_console_sem();
+	
+	
+	arg = svcd->vc_mode;
+	switch ( arg )
+	{
+		case KD_GRAPHICS:
+			break;
+		case KD_TEXT0:
+		case KD_TEXT1:
+			arg = KD_TEXT;
+		case KD_TEXT:
+			break;
+		default:
+			panic( "Unable to continue due to invalid VC modes.\n" );
+	}
+	if ( vcd->vc_mode != ( unsigned char ) arg )
+	{
+		vcd->vc_mode = ( unsigned char ) arg;
+		if ( vcd->vc_num == fg_console )
+		{
+			//
+			// explicitly blank/unblank the screen if switching modes
+			//
+			acquire_console_sem();
+			if ( arg == KD_TEXT )
+			{
+				do_unblank_screen( 1 );
+			}
+			else
+			{
+				do_blank_screen( 1 );
+			}
+			release_console_sem();
+		}
+	}
+	//
 
-	tty = (struct tty_struct*)file->private_data;
+	//tty = (struct tty_struct*)file->private_data;
 	if(tty->magic != TTY_MAGIC)
 	{
 		panic("tty magic value does not match\n");
 	}
-	driver = tty->driver;
+	//driver = tty->driver;
 	if(driver->type != TTY_DRIVER_TYPE_CONSOLE || driver->subtype !=0)
 	{
 		panic("Driver type des not match\n");
 	}
-	vcd = (struct vc_data*)tty->driver_data;
+	//vcd = (struct vc_data*)tty->driver_data;
 	if(vcd->vc_screenbuf_size != svcd->screen_buffer_size)
 	{
 		panic("Screen buffer sizes do not match\n");
@@ -977,6 +1062,9 @@ void restore_file(struct saved_file* f)
 		case FRAMEBUFFER:
 			file = restore_fb( f );
 			break;
+		case MOUSE:
+			file = restore_mouse( f );
+			break;
 		default:
 			file = do_filp_open(-100, f->name, f->flags, -1074763960, 0); 
 			if(IS_ERR(file))
@@ -986,6 +1074,10 @@ void restore_file(struct saved_file* f)
 			sprint("Restoring some normal file.\n");
 			break;
 	}
+	
+	//
+	//file->f_pos = f->f_pos;
+	//
 
 	atomic_long_set(&(file->f_count), f->count);
 	sprint("Set file count value to %ld\n", f->count);
@@ -1335,6 +1427,7 @@ void restore_udp_socket(struct saved_file* f){
 	
 
 	//create a socket using the original spec
+	sprint("Restoring udp socket\n");
 
 	retval = sock_create(sock.sock_family, sock.type, sock.sock_protocol, &socket);
 	if (retval < 0){
@@ -1402,6 +1495,10 @@ void restore_socket(struct saved_file* f)
 		{
 			restore_tcp_socket(f);
 		}
+	}
+	else
+	{
+		sprint("Unknown socket family %d type %d\n", sock->sock_family, sock->sock_type);
 	}
 }
 
@@ -2472,6 +2569,64 @@ static struct file *restore_fb ( struct saved_file *saved_file )
 	{
 		panic( "Unable to restore framebuffer %d.\n", saved_file->fb.minor );
 	}*/
+	//
+	
+	return file;
+}
+
+struct file *restore_mouse ( struct saved_file *saved_file )
+{
+	//
+	struct file *file;
+	
+	struct mousedev_client *client;
+	struct mousedev *mousedev;
+	
+	struct saved_mousedev_client *saved_client = &saved_file->mouse.client;
+	struct saved_mousedev *saved_mousedev = &saved_file->mouse.mousedev;
+	//
+	
+	//
+	file = filp_open( saved_file->name, saved_file->flags, 0 );
+	if ( IS_ERR( file ) )
+	{
+		panic( "Unable to open mouse file \'%s\'.\n", saved_file->name );
+	}
+	
+	client = file->private_data;
+	mousedev = client->mousedev;
+	//
+	
+	//
+	//
+	
+	// Interrupts already disabled before call to set_state().
+	spin_lock( &client->packet_lock );
+	memcpy( client->packets, saved_client->packets, sizeof( client->packets ) );
+	spin_unlock( &client->packet_lock );
+	
+	client->head = saved_client->head;
+	client->tail = saved_client->tail;
+	client->pos_x = saved_client->pos_x;
+	client->pos_y = saved_client->pos_y;
+
+	memcpy( client->ps2, saved_client->ps2, sizeof( client->ps2 ) );
+	client->ready = saved_client->ready;
+	client->buffer = saved_client->buffer;
+	client->bufsiz = saved_client->bufsiz;
+	client->imexseq = saved_client->imexseq;
+	client->impsseq = saved_client->impsseq;
+	client->mode = saved_client->mode;
+	client->last_buttons = saved_client->last_buttons;
+	
+	
+	mousedev->packet = saved_mousedev->packet;
+	mousedev->pkt_count = saved_mousedev->pkt_count;
+	memcpy( mousedev->old_x, saved_mousedev->old_x, sizeof( mousedev->old_x ) );
+	memcpy( mousedev->old_y, saved_mousedev->old_y, sizeof( mousedev->old_y ) );
+	mousedev->frac_dx = saved_mousedev->frac_dx;
+	mousedev->frac_dy = saved_mousedev->frac_dy;
+	mousedev->touch = saved_mousedev->touch;
 	//
 	
 	return file;

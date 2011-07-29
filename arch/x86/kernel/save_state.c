@@ -29,6 +29,9 @@
 #include <linux/mount.h>
 #include <linux/limits.h>
 #include <linux/vmalloc.h>
+#include <linux/vt_kern.h>
+
+#include <linux/mousedev.h>
 
 static void get_path_absolute ( struct file *file, char *path );
 
@@ -41,6 +44,9 @@ static void save_fb ( struct file *file, struct saved_file *saved_file, struct m
 static void restore_fbs ( void );
 static void save_con2fbmaps ( void );
 static void restore_con2fbmaps ( void );*/
+
+static int file_is_mouse ( struct file *file );
+static void save_mouse ( struct file *file, struct saved_file *saved_file );
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
@@ -490,6 +496,7 @@ static int file_is_vc_terminal ( struct file *file )
 }
 //
 
+// Warning: This function does not save everything that should be saved.
 static void save_vc_term_info(struct file* f, struct saved_file* file)
 {
 	struct tty_struct* tty;
@@ -527,6 +534,14 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	svcd->screen_buffer = screen_buffer;
 	file->type = VC_TTY;
 	file->vcd = svcd;
+	
+	//
+	svcd->v_active = fg_console + 1;
+	
+	svcd->vt_mode = vcd->vt_mode;
+	
+	svcd->vc_mode = vcd->vc_mode;
+	//
 
 	sprint("Saved terminal state\n");
 	
@@ -686,8 +701,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		file->count = file_count(f);
 		//
 		
-		// Stores whether the file was read enabled, write enabled, or both.
-		if(f->f_mode & FMODE_READ)
+		//
+		/*if(f->f_mode & FMODE_READ)
 		{
 			file->flags = O_RDONLY;
 		}
@@ -699,7 +714,10 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		if((f->f_mode & FMODE_READ) && (f->f_mode & FMODE_WRITE))
 		{
 			file->flags = O_RDWR;
-		}
+		}*/
+		
+		file->flags = f->f_flags;
+		file->f_pos = f->f_pos;
 		//
 
 		// The first three if and/or else if blocks identify what kind of file the
@@ -732,9 +750,17 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 			
 			save_fb( f, file, head );
 		}
+		else if ( file_is_mouse( f ) )
+		{
+			sprint( "fd %d is a mouse.\n", fd );
+			
+			save_mouse( f, file );
+		}
 		//file->next = task->open_files;
 		//task->open_files = file;
 		
+		// Warning: The below is not a good/permanent solution
+		// for getting listening sockets to be restored before accept sockets.
 		if ( !saved_last )
 		{
 			task->open_files = file;
@@ -1235,7 +1261,9 @@ static void print_saved_processes(void)
 static int load_state = 0;
 static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x)
 {
+	local_irq_disable();
 	save_running_processes();
+	local_irq_enable();
 	
 	//save_fbs();
 	//save_con2fbmaps();
@@ -1246,7 +1274,9 @@ static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, v
 
 asmlinkage void sys_save_state(void)
 {
+	local_irq_disable();
 	save_running_processes();
+	local_irq_enable();
 	
 	//save_fbs();
 	//save_con2fbmaps();
@@ -1376,11 +1406,6 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	/* 	  } */
 	/*   } */
 
-	// The below will be placed temporarily here...
-	//restore_fbs();
-	//restore_con2fbmaps();
-	//
-
 	state = (struct saved_state*)get_reserved_region();
 	
 	if(state->processes == NULL)
@@ -1389,9 +1414,10 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 		sprint( "##### sys_load_saved_state() end #####\n" );
 		return -1;
 	}
-
-	//while ( state->processes )
-	//{
+	
+	local_irq_disable();
+	while ( state->processes )
+	{
 		print_saved_processes();
 		ret = set_state(&regs, state->processes);
 		sprint( "set_state returned %d\n", ret);
@@ -1402,14 +1428,15 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 		}
 	
 		sprint( "##### state->counter: %d\n", state->counter );
-	//}
+	}
+	local_irq_enable();
 	
-	/*if( !state->processes )
+	if( !state->processes )
 	{
 		sprint( "No more saved state.\n" );
 		sprint( "##### sys_load_saved_state() end #####\n" );
 		return -1;
-	}*/
+	}
 	
 	sprint( "##### sys_load_saved_state() end #####\n" );
 
@@ -1851,4 +1878,78 @@ static void restore_con2fbmaps ( void )
 	
 	return;
 }*/
+
+// Warning: This function might only detect '/dev/input/mice', '/dev/input/mouse0', and '/dev/input/mouse1'.
+static int file_is_mouse ( struct file *file )
+{
+	//
+	struct inode *inode = file->f_dentry->d_inode;
+	int major = MAJOR( inode->i_rdev );
+	int minor = MINOR( inode->i_rdev );
+	
+	int index = minor - MOUSEDEV_MINOR_BASE;
+	
+	int is_mouse = 0;
+	//
+	
+	//
+	if ( major == INPUT_MAJOR && ( index == 0 || index == 1 || index == 31 ) )
+	{
+		is_mouse = 1;
+	}
+	
+	return is_mouse;
+	//
+}
+
+static void save_mouse ( struct file *file, struct saved_file *saved_file )
+{
+	//
+	struct mousedev_client *client = file->private_data;
+	struct mousedev *mousedev = client->mousedev;
+	
+	struct saved_mousedev_client *saved_client = &saved_file->mouse.client;
+	struct saved_mousedev *saved_mousedev = &saved_file->mouse.mousedev;
+	//
+	
+	//
+	saved_file->type = MOUSE;
+	
+	/*if( file->f_flags & O_NONBLOCK )
+	{
+		saved_file->flags |= O_NONBLOCK;
+	}*/
+	//
+	
+	// Interrupts already disabled before call to save_running_processes().
+	spin_lock( &client->packet_lock );
+	memcpy( saved_client->packets, client->packets, sizeof( client->packets ) );
+	spin_unlock( &client->packet_lock );
+	
+	saved_client->head = client->head;
+	saved_client->tail = client->tail;
+	saved_client->pos_x = client->pos_x;
+	saved_client->pos_y = client->pos_y;
+
+	memcpy( saved_client->ps2, client->ps2, sizeof( client->ps2 ) );
+	saved_client->ready = client->ready;
+	saved_client->buffer = client->buffer;
+	saved_client->bufsiz = client->bufsiz;
+	saved_client->imexseq = client->imexseq;
+	saved_client->impsseq = client->impsseq;
+	saved_client->mode = client->mode;
+	saved_client->last_buttons = client->last_buttons;
+	
+	
+	saved_mousedev->packet = mousedev->packet;
+	saved_mousedev->pkt_count = mousedev->pkt_count;
+	memcpy( saved_mousedev->old_x, mousedev->old_x, sizeof( mousedev->old_x ) );
+	memcpy( saved_mousedev->old_y, mousedev->old_y, sizeof( mousedev->old_y ) );
+	saved_mousedev->frac_dx = mousedev->frac_dx;
+	saved_mousedev->frac_dy = mousedev->frac_dy;
+	saved_mousedev->touch = mousedev->touch;
+	//
+	
+	return;
+}
 

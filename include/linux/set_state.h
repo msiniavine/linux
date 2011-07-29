@@ -1,5 +1,6 @@
 #include <linux/fb.h>
 #include <linux/vt.h>
+#include <linux/mousedev.h>
 
 #define FASTREBOOT_REGION_SIZE 64 * 1024 * 1024
 #define FASTREBOOT_REGION_START (0x1000000 + FASTREBOOT_REGION_SIZE)
@@ -20,6 +21,7 @@
 #define VC_TTY  5
 #define SOCKET 6
 #define FRAMEBUFFER 7
+#define MOUSE 8
 
 struct saved_inet_sock
 {     
@@ -133,6 +135,11 @@ struct saved_vc_data
 	int screen_buffer_size;
 	unsigned char* screen_buffer;
 	unsigned int x, y;
+	
+	unsigned char vc_mode;
+	
+	unsigned short v_active;
+	struct vt_mode vt_mode;
 };
 
 struct saved_fb_info
@@ -151,6 +158,36 @@ struct saved_fb
 	struct fb_con2fbmap *con2fbs;
 };
 
+//
+struct saved_mousedev
+{
+	struct mousedev_hw_data packet;
+	unsigned int pkt_count;
+	int old_x[4], old_y[4];
+	int frac_dx, frac_dy;
+	unsigned long touch;
+};
+
+struct saved_mousedev_client
+{
+	struct mousedev_motion packets[PACKET_QUEUE_LEN];
+	unsigned int head, tail;
+	int pos_x, pos_y;
+
+	signed char ps2[6];
+	unsigned char ready, buffer, bufsiz;
+	unsigned char imexseq, impsseq;
+	enum mousedev_emul mode;
+	unsigned long last_buttons;
+};
+
+struct saved_mouse
+{
+	struct saved_mousedev mousedev;
+	struct saved_mousedev_client client;
+};
+//
+
 struct saved_file
 {
 	unsigned int type;
@@ -158,11 +195,13 @@ struct saved_file
 	unsigned int fd;
 	long count;
 	int flags;
+	loff_t f_pos;
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_file* next;
 	struct saved_socket socket;
 	struct saved_fb fb;
+	struct saved_mouse mouse;
 };
 
 struct saved_page
