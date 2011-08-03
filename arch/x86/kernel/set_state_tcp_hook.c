@@ -123,6 +123,7 @@ void set_state_tcp_hook(void)
 void unregister_set_state_hook(void)
 {
 	struct port_entry* pe, *n;
+	if(list_empty(&blocked_ports)) return;
 	nf_unregister_hook(&set_state_ops);
 
 	list_for_each_entry_safe(pe, n, &blocked_ports, next)
