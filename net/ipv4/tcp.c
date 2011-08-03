@@ -1687,7 +1687,7 @@ skip_copy:
 
 	TCP_CHECK_TIMER(sk);
 	sk->io_in_progress = 0;
-	if(sk->io_progress != copied)
+	if(copied >= 0 && sk->io_progress != copied)
 	{
 		sprint("WARNING wrong progress expected %d got %d\n", copied, sk->io_progress);
 	}
