@@ -7,8 +7,7 @@ cd test
     kexec -e
 } &
 
-#./test_sockload -h 192.168.122.1 -p 5000 -t
-./test_terminal
+./test_sockload -h undead -p 5000 -t -l 1
 
 #cd test
 #./test_loop < Makefile &> trace &

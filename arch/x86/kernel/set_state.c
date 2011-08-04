@@ -1304,19 +1304,22 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	}
 
 	sprint("Moving snd_nxt to %u\n", stcp->snd_nxt);
-	tcp_for_write_queue(skb, sk)
+	if(!list_empty(saved_buffers))
 	{
-		if(TCP_SKB_CB(skb)->end_seq == stcp->snd_nxt)
+		tcp_for_write_queue(skb, sk)
 		{
-			resume_point = skb;
-			break;
+			if(TCP_SKB_CB(skb)->end_seq == stcp->snd_nxt)
+			{
+				resume_point = skb;
+				break;
+			}
 		}
+		if(!resume_point)
+		{
+			panic("Could not find tcp resume point\n");
+		}
+		tcp_advance_send_head(sk, skb);
 	}
-	if(!resume_point)
-	{
-		panic("Could not find tcp resume point\n");
-	}
-	tcp_advance_send_head(sk, skb);
 	tp->snd_nxt = stcp->snd_nxt;
 
 	if(copied)

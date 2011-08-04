@@ -922,7 +922,6 @@ new_segment:
 					/* We can extend the last page
 					 * fragment. */
 					merge = 1;
-					tlprintf("Can extend last page fragment\n");
 				} else if (i == MAX_SKB_FRAGS ||
 					   (!i &&
 					   !(sk->sk_route_caps & NETIF_F_SG))) {
@@ -930,7 +929,6 @@ new_segment:
 					 * do this because interface is non-SG,
 					 * or because all the page slots are
 					 * busy. */
-					tlprintf("Can't add a new fragment, creating new segment\n");
 					tcp_mark_push(tp, skb);
 					goto new_segment;
 				} else if (page) {
@@ -950,7 +948,6 @@ new_segment:
 
 				if (!page) {
 					/* Allocate new cache page. */
-					tlprintf("Allocate new cache page\n");
 					if (!(page = sk_stream_alloc_page(sk)))
 						goto wait_for_memory;
 				}
@@ -969,15 +966,12 @@ new_segment:
 					}
 					goto do_error;
 				}
-				tlprintf("%d bytes copied to page\n", copy);
 
 				/* Update the skb. */
 				if (merge) {
 					skb_shinfo(skb)->frags[i - 1].size +=
 									copy;
-					tlprintf("Merge segment\n");
 				} else {
-					tlprintf("Create new segment descriptor\n");
 					skb_fill_page_desc(skb, i, page, off, copy);
 					if (TCP_PAGE(sk)) {
 						get_page(page);
