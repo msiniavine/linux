@@ -59,13 +59,21 @@
 
 #include <linux/mousedev.h>
 
-void restore_socket_listen ( struct saved_file *saved_file );
+void restore_listen_socket ( struct saved_file *saved_file );
 
 static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_info );
 static int restore_fb_contents ( struct fb_info *info, char *contents );
 static int restore_con2fbmaps ( struct fb_info *info, struct fb_con2fbmap *con2fbs );
 static struct file *restore_fb ( struct saved_file *saved_file );
-struct file *restore_mouse ( struct saved_file *saved_file );
+static struct file *restore_mouse ( struct saved_file *saved_file );
+
+static void restore_unix_socket ( struct saved_file *saved_file, struct map_entry *head );
+
+// These three are altered versions of the socket(), bind(), and listen() system calls, respectively.
+struct file *create_socket ( int fd, int flags_additional, int family, int type, int protocol );
+int bind_socket ( struct file *file, struct sockaddr *address, int address_length );
+int listen_socket ( struct file *file, int backlog );
+//
 
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
 {
@@ -1478,114 +1486,92 @@ void restore_udp_socket(struct saved_file* f){
 	return;
 }
 
-void restore_socket(struct saved_file* f)
-{
-	struct saved_socket* sock = &f->socket;
-	if(sock->sock_family == PF_INET && sock->sock_type == SOCK_DGRAM)
-	{
-		restore_udp_socket(f);
-	}
-	else if(sock->sock_family == PF_INET && sock->sock_type == SOCK_STREAM)
-	{
-		if ( sock->tcp->state == TCP_LISTEN )
-		{
-			restore_socket_listen( f );
-		}
-		
-		else
-		{
-			restore_tcp_socket(f);
-		}
-	}
-	else
-	{
-		sprint("Unknown socket family %d type %d\n", sock->sock_family, sock->sock_type);
-	}
-}
-
-void restore_socket_listen ( struct saved_file *saved_file )
+void restore_unix_socket ( struct saved_file *saved_file )
 {
 	//
-	int retval;
-	struct socket *socket;
-	struct saved_socket saved_socket = saved_file->socket;
-	int flags;
+	int family = saved_file->socket.sock_family;
+	int type = saved_file->socket.sock_type;
+	int protocol = saved_file->socket.sock_protocol;
+	
 	unsigned int fd;
 	struct file *file;
 	
-	struct sockaddr_in address;
-	int err;
+	int state = saved_file->socket.state;
+	int backlog = saved_file->socket.backlog;
+	
+	struct sockaddr_un address = saved_file->socket.unix.address;
+	
+	int retval = 0;
+	int err = 0;
+	int flags;
+	
+	struct socket *socket;
 	
 	int somaxconn;
-	int backlog = saved_socket.tcp->backlog;
 	//
-
-	//
+	
+	// Create.
 	/* Check the SOCK_* constants for consistency.  */
 	BUILD_BUG_ON(SOCK_CLOEXEC != O_CLOEXEC);
 	BUILD_BUG_ON((SOCK_MAX | SOCK_TYPE_MASK) != SOCK_TYPE_MASK);
 	BUILD_BUG_ON(SOCK_CLOEXEC & SOCK_TYPE_MASK);
 	BUILD_BUG_ON(SOCK_NONBLOCK & SOCK_TYPE_MASK);
 
-	flags = saved_socket.type & ~SOCK_TYPE_MASK;
-	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
+	flags = type & ~SOCK_TYPE_MASK;
+	if ( flags & ~( SOCK_CLOEXEC | SOCK_NONBLOCK ) )
 	{
-		panic( "Invalid socket flags detected.\n" );
+		panic( "Unable to restore UNIX socket due to invalid socket flags.\n" );
 	}
-	saved_socket.type &= SOCK_TYPE_MASK;
+	type &= SOCK_TYPE_MASK;
 
-	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
-		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
+	if ( SOCK_NONBLOCK != O_NONBLOCK && ( flags & SOCK_NONBLOCK ) )
+	{
+		flags = ( flags & ~SOCK_NONBLOCK ) | O_NONBLOCK;
+	}
 
-	retval = sock_create(	saved_socket.sock_family, 
-				saved_socket.type, 
-				saved_socket.sock_protocol, 
-				&socket );
+	retval = sock_create( family, type, protocol, &socket );
 	if ( retval < 0 )
 	{
-		panic( "Unable to create socket.\n" );
+		panic( "Unable to create UNIX socket.\n" );
 	}
 
-	/*retval = sock_map_fd(socket, flags & (O_CLOEXEC | O_NONBLOCK));
-	if (retval < 0)
+	/*retval = sock_map_fd( socket, flags & ( O_CLOEXEC | O_NONBLOCK ) );
+	if ( retval < 0 )
 	{
-		panic( "Function sock_map_fd() failed.\n" );
+		sock_release( socket );
+		
+		panic( "Function sock_map_fd() failed while restoring UNIX socket.\n" );
 	}*/
 	
 	fd = alloc_fd( saved_file->fd, 0 );
 	if ( fd != saved_file->fd )
 	{
-		panic( "Unable obtain original socket file descriptor, %d\n", saved_file->fd );
+		panic( "Unable obtain original UNIX socket file descriptor, %d\n", saved_file->fd );
 	}
 	
 	file = get_empty_filp();
-	if ( saved_file->flags == O_NONBLOCK )
+	/*if ( saved_file->flags == O_NONBLOCK )
 	{
 		flags |= O_NONBLOCK;
-	}
+	}*/
 	
 	err = sock_attach_fd( socket, file, flags );
 	if ( err < 0 )
 	{
-		panic( "Unable to attach socket to file.\n" );
+		panic( "Unable to attach UNIX socket to file.\n" );
 	}
 	
 	fd_install( fd, file );
 	//
 	
+	// Bind.
+	
 	//
-	memset( &address, 0, sizeof( address ) );
-	address.sin_family = AF_INET;
-	address.sin_port = htons( saved_socket.inet.num );
-	address.sin_addr.s_addr = htonl( INADDR_ANY );
-	if ( saved_socket.inet.rcv_saddr )
-	{
-		address.sin_addr.s_addr = htonl( saved_socket.inet.rcv_saddr );
-	}
+	// I need to "get rid of" or "unbind" the named sockets, if there are any, or
+	// else I will get an "address already in use" error.
+	//
 	
-	sprint( "##### IP Address N: %d\tPort N: %d\n", address.sin_addr.s_addr, address.sin_port );
-	
-	err = security_socket_bind ( socket, ( struct sockaddr * ) &address, sizeof( address ) );
+	err = security_socket_bind( socket, ( struct sockaddr * ) &address, sizeof( address ) );
 	if ( !err )
 	{
 		err = socket->ops->bind( socket, ( struct sockaddr * ) &address, sizeof( address ) );
@@ -1593,31 +1579,132 @@ void restore_socket_listen ( struct saved_file *saved_file )
 	
 	if ( err < 0 )
 	{
-		panic( "Unable to bind to socket. Error: %d\n", err );
+		panic( "Unable to bind to UNIX socket.\n" );
 	}
 	//
 	
-	//
-	somaxconn = sock_net( socket->sk )->core.sysctl_somaxconn;
-	if ( ( unsigned ) backlog > somaxconn )
+	// Listen.
+	if ( state == SS_LISTENING )
 	{
-		backlog = somaxconn;
-	}
+		somaxconn = sock_net( socket->sk )->core.sysctl_somaxconn;
+		if ( ( unsigned ) backlog > somaxconn )
+		{
+			backlog = somaxconn;
+		}
 
-	err = security_socket_listen( socket, backlog );
-	if ( !err )
-	{
-		err = socket->ops->listen( socket, backlog );
-	}
+		err = security_socket_listen( socket, backlog );
+		if ( !err )
+		{
+			err = socket->ops->listen( socket, backlog );
+		}
 	
-	if ( err < 0 )
+		if ( err < 0 )
+		{
+			panic( "Unable to put UNIX socket into listening state." );
+		}
+	}
+	//
+	
+	return;
+}
+
+void restore_socket ( struct saved_file* f, struct map_entry *head )
+{
+	struct saved_socket* sock = &f->socket;
+	
+	//
+	switch ( sock->sock_family )
 	{
-		panic( "Unable to put socket into listening state.\n" );
+		case AF_INET:
+			switch ( sock->sock_type )
+			{
+				case SOCK_STREAM:
+					if ( sock->tcp->state == TCP_LISTEN )
+					{
+						restore_listen_socket( f );
+					}
+					
+					else
+					{
+						restore_tcp_socket( f );
+					}
+					
+					break;
+					
+				case SOCK_DGRAM:
+					restore_udp_socket( f );
+					
+					break;
+			}
+			
+			break;
+			
+		case AF_UNIX:
+			restore_unix_socket( f, head );
+			
+			break;
+			
+		default:
+			sprint( "Unknown socket family %d, type %d.\n", sock->sock_family, sock->sock_type );
+			
+			break;
 	}
 	//
 }
 
-void restore_files(struct saved_task_struct* state, struct global_state_info* global_state)
+void restore_listen_socket ( struct saved_file *saved_file )
+{
+	//
+	struct file *file;
+	int fd = saved_file->fd;
+	int flags = saved_file->flags;
+	
+	int family = saved_file->socket.sock_family;
+	int type = saved_file->socket.sock_type;
+	int protocol = saved_file->socket.sock_protocol;
+	
+	int backlog = saved_socket.tcp->backlog;
+	
+	struct sockaddr_in address;
+	//
+
+	//
+	file = create_socket( fd, flags, family, type, protocol  );
+	if ( IS_ERR( file ) )
+	{
+		panic( "Unable to recreate TCP listening socket.  Error: %d\n", -( ( int ) file ) );
+	}
+	//
+	
+	//
+	memset( &address, 0, sizeof( address ) );
+	
+	address.sin_family = AF_INET;
+	address.sin_port = htons( saved_socket.inet.num );
+	
+	address.sin_addr.s_addr = htonl( INADDR_ANY );
+	if ( saved_socket.inet.rcv_saddr )
+	{
+		address.sin_addr.s_addr = htonl( saved_socket.inet.rcv_saddr );
+	}
+	
+	status = bind_socket( file, &address, sizeof( address ) );
+	if ( status < 0 )
+	{
+		panic( "Unable to rebind TCP listening socket.  Error: %d\n", -status );
+	}
+	//
+	
+	//
+	status = listen_socket( file, backlog );
+	if ( status < 0 )
+	{
+		panic( "Unable to put TCP listening socket back to listening state.  Error: %d\n", -status );
+	}
+	//
+}
+
+void restore_files ( struct saved_task_struct* state, struct global_state_info* global_state, struct map_entry *head )
 {
 	struct saved_file* f;
 	unsigned int max_fd = 0;
@@ -1646,7 +1733,7 @@ void restore_files(struct saved_task_struct* state, struct global_state_info* gl
 				restore_fifo(f, global_state, state, &max_fd);
 				break;
 		        case SOCKET:
-			        restore_socket(f);
+			        restore_socket( f, head );
 				break;
 			default:
 				restore_file(f);
@@ -2251,7 +2338,7 @@ int do_set_state(struct state_info* info)
 		//
 
 		// ???
-		restore_files(state, info->global_state);
+		restore_files( state, info->global_state, info->head );
 		sprint("Ptrace flags: %x, thread_info flags: %x\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
 		restore_creds(state);
@@ -2576,7 +2663,7 @@ static struct file *restore_fb ( struct saved_file *saved_file )
 	return file;
 }
 
-struct file *restore_mouse ( struct saved_file *saved_file )
+static struct file *restore_mouse ( struct saved_file *saved_file )
 {
 	//
 	struct file *file;
@@ -2633,4 +2720,291 @@ struct file *restore_mouse ( struct saved_file *saved_file )
 	
 	return file;
 }
+
+static void restore_unix_socket ( struct saved_file *saved_file, struct map_entry *head )
+{
+	//
+	struct file *file;
+	
+	int fd = saved_file->fd;
+	int flags = saved_file->flags;
+	
+	int state = saved_file->socket.state;
+	int backlog = saved_file->socket.backlog;
+	
+	int family = saved_file->socket.sock_family;
+	int type = saved_file->socket.sock_type;
+	int protocol = saved_file->socket.sock_protocol;
+	
+	struct sockaddr_un address = saved_file->socket.unix.address;
+	
+	struct socket *socket;
+	struct sock *sock;
+	struct unix_sock *unix;
+	
+	struct sock *sock_peer;
+	
+	struct sk_buff *skb;
+	struct saved_sk_buff *current;
+	
+	int status = 0;
+	//
+	
+	//
+	file = create_socket( fd, flags, family, type, protocol );
+	if ( IS_ERR( file ) )
+	{
+		panic( "Unable to recreate UNIX socket.  Error: %d\n", -( ( int ) file ) );
+	}
+	
+	socket = file->private_data;
+	sock = socket->sk;
+	unix = unix_sk( sock );
+	
+	if ( saved_file->socket.unix.kind == SOCKET_BOUND )
+	{
+		status = bind_socket( file, &address, sizeof( address ) );
+		if ( status < 0 )
+		{
+			panic( "Unable to rebind UNIX socket.  Error: %d\n", -status );
+		}
+		
+		if ( state == TCP_LISTEN )
+		{
+			status = listen_socket( file, backlog );
+			if ( status < 0 )
+			{
+				panic( "Unable to put UNIX socket back to listening state.  Error: %d\n", -status );
+			}
+		}
+	}
+	
+	else if ( saved_file->socket.unix.kind == SOCKET_CONNECTED )
+	{
+		sock_peer = find_by_first( head, saved_file->socket.unix.peer );
+		if ( sock_peer )
+		{
+			// This here might not yet be acceptable...
+			sock_hold( sock );
+			sock_hold( sock_peer );
+			
+			unix_peer( sock ) = sock_peer;
+			unix_peer( sock_peer ) = sock;
+			
+			if ( sock->sk_type != SOCK_DGRAM )
+			{
+				sock->sk_state = TCP_ESTABLISHED;
+				sock_peer->sk_state = TCP_ESTABLISHED;
+				
+				sock->sk_socket->state = SS_CONNECTED;
+				sock_peer->sk_socket->state = SS_CONNECTED;
+			}
+			//
+		}
+		
+		insert_entry( head, &saved_file->socket.unix, sock );
+	}
+	//
+	
+	// ???
+	sock->sk_shutdown = saved_file->socket.unix.shutdown;
+	
+	sock->sk_peercred = saved_file->socket.unix.peercred;
+	//
+	
+	// Restore the receive queue.
+	current = saved_file->socket.unix.head;
+	while ( current )
+	{
+		//
+		skb = sock_alloc_send_skb( sock, current->len, 1, &status );
+		if ( status < 0 )
+		{
+			panic( "Unable to allocate UNIX socket buffer.  Error: %d\n", -status );
+		}
+		//
+		
+		//
+		memcpy( skb->cb, current->cb, sizeof( skb->cb ) );
+		
+		memcpy( skb_put( skb, current->len ), current->data, current->len );
+		
+		skb_queue_tail( &sock->sk_receive_queue, skb );
+		//
+		
+		//
+		current = current->next;
+		//
+	}
+	//
+	
+	return;
+}
+
+// This is an altered version of the socket() system call in net/socket.c.
+struct file *create_socket ( int fd, int flags_additional, int family, int type, int protocol )
+{
+	//
+	struct socket *socket;
+	int flags;
+	
+	int file_fd;
+	struct file *file = NULL;
+	
+	int status = 0;
+	//
+
+	//
+	BUILD_BUG_ON( SOCK_CLOEXEC != O_CLOEXEC );
+	BUILD_BUG_ON( ( SOCK_MAX | SOCK_TYPE_MASK ) != SOCK_TYPE_MASK );
+	BUILD_BUG_ON( SOCK_CLOEXEC & SOCK_TYPE_MASK );
+	BUILD_BUG_ON( SOCK_NONBLOCK & SOCK_TYPE_MASK );
+	//
+
+	//
+	flags = type & ~SOCK_TYPE_MASK;
+	if ( flags & ~( SOCK_CLOEXEC | SOCK_NONBLOCK ) )
+	{
+		status = -EINVAL;
+	
+		goto done;
+	}
+	type &= SOCK_TYPE_MASK;
+
+	if ( SOCK_NONBLOCK != O_NONBLOCK && ( flags & SOCK_NONBLOCK ) )
+	{
+		flags = ( flags & ~SOCK_NONBLOCK ) | O_NONBLOCK;
+	}
+	
+	flags |= flags_additional;
+	//
+
+	//
+	status = sock_create( family, type, protocol, &socket );
+	if ( status < 0 )
+	{
+		goto done;
+	}
+	//
+	
+	//
+	file_fd = alloc_fd( fd, 0 );
+	if ( file_fd < 0 )
+	{
+		status = file_fd;
+	
+		goto release;
+	}
+	else if ( file_fd != fd && fd >= 0 )
+	{
+		status = -EEXIST;
+	
+		goto put_fd;
+	}
+	
+	file = get_empty_filp();
+	
+	status = sock_attach_fd( socket, file, flags );
+	if ( status < 0 )
+	{
+		goto put_file;
+	}
+	
+	fd_install( file_fd, file );
+	//
+	
+	goto done;
+	
+put_file:
+	put_filp( file );
+	file = NULL;
+	
+put_fd:
+	put_unused_fd( file_fd );
+	
+release:
+	sock_release( socket );
+	
+done:
+	if ( status < 0 )
+	{
+		file = ERR_PTR( status );
+	}
+
+	return file;
+}
+//
+
+// This is an altered version of the bind() system call in net/socket.c.
+int bind_socket ( struct file *file, struct sockaddr *address, int address_length )
+{
+	//
+	struct socket *socket;
+	int status = 0;
+	//
+	
+	//
+	if ( !file || !file->private_data || !address || address_length < 0 )
+	{
+		status = -EINVAL;
+		
+		goto done;
+	}
+	
+	socket = file->private_data;
+	//
+
+	//
+	status = security_socket_bind( socket, address, address_length );
+	if ( !status )
+	{
+		status = socket->ops->bind( socket, address, address_length );
+	}
+	//
+	
+done:
+	return status;
+}
+//
+
+// This is an altered version of the listen() system call in net/socket.c.
+int listen_socket ( struct file *file, int backlog )
+{
+	//
+	struct socket *socket;
+
+	int somaxconn;
+	
+	int status = 0;
+	//
+	
+	//
+	if ( !file || !file->private_data )
+	{
+		status = -EINVAL;
+		
+		goto done;
+	}
+	
+	socket = file->private_data;
+	//
+
+	//
+	somaxconn = sock_net( socket->sk )->core.sysctl_somaxconn;
+	if ( ( unsigned ) backlog > somaxconn )
+	{
+		backlog = somaxconn;
+	}
+
+	status = security_socket_listen( socket, backlog );
+	if ( !status )
+	{
+		status = socket->ops->listen( socket, backlog );
+	}
+	//
+	
+done:
+	return status;
+}
+//
 

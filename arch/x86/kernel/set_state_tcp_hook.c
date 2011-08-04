@@ -69,7 +69,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 
 		if(tcp == NULL) continue;
 
-		sprint("Blocking port %d\n", tcp->dport);
+		sprint("Blocking port %d\n", tcp->sport);
 		pe = kmalloc(sizeof(*pe), GFP_KERNEL);
 		if(!pe)
 		{
@@ -77,7 +77,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 			return;
 		}
 		
-		pe->port = tcp->dport;
+		pe->port = tcp->sport;
 		list_add_tail(&pe->next, &blocked_ports);
 
 	}

@@ -111,9 +111,40 @@ struct saved_tcp_state
 	u32 copied_seq;
 };
 
+//
+enum {	SOCKET_NONE,
+	SOCKET_BOUND,
+	SOCKET_CONNECTED };
+
+struct saved_sk_buff
+{
+	char cb[48];
+
+	unsigned int len;
+	unsigned char *data;
+	
+	struct saved_sk_buff *next;
+}
+
+struct saved_unix_socket
+{
+	int kind;
+	
+	struct saved_unix_socket *peer;
+	
+	unsigned int shutdown :2;
+	struct ucred peercred;
+
+	struct sockaddr_un address;
+	
+	struct saved_sk_buff *head;
+};
+//
+
 struct saved_socket
 {
         int		        state;
+        int backlog;
 	short			type;
 	unsigned long		flags;
         wait_queue_head_t	wait;
@@ -122,6 +153,7 @@ struct saved_socket
 	unsigned short		sock_family;
         struct saved_inet_sock  inet;
 	struct saved_tcp_state* tcp;
+	struct saved_unix_socket unix;
   int userlocks;
   int binded;
 };
