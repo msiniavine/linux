@@ -201,21 +201,41 @@ int read_all(int fd, void* buffer, size_t len)
 	return received;
 }
 
+void print_addresses(struct addrinfo* res)
+{
+	struct addrinfo* p;
+	char ipstr[INET6_ADDRSTRLEN];
+	for(p=res; p!=NULL; p=p->ai_next)
+	{
+		struct sockaddr_in* addr = p->ai_addr;
+		inet_ntop(p->ai_family, &addr->sin_addr, ipstr, sizeof(ipstr));
+		printf("%s\n", ipstr);
+	}
+}
+
 int do_send(const char* hostname, int port, int limit, int ttcp_pattern)
 {
 	int fd;
-	struct hostent* host;
-	struct sockaddr_in serv_addr;
 	unsigned int* buffer;
 	int packets_sent = 0;
 	unsigned int start;
 	struct pattern_state state;
-	host = gethostbyname(hostname);
-	if(!host)
+
+	struct addrinfo hints;
+	struct addrinfo* servinfo;
+	int err;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+
+	if((err = getaddrinfo(hostname, "5000", &hints, &servinfo)) != 0)
 	{
-		herror("Resolving host");
-		return -11;		
+		printf("getaddrinfo error: %s\n", gai_strerror(err));
+		return -1;
 	}
+
+	print_addresses(servinfo);
 
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if(fd < 0)
@@ -223,14 +243,14 @@ int do_send(const char* hostname, int port, int limit, int ttcp_pattern)
 		perror("Error creating socket");
 		return -1;
 	}
-	serv_addr.sin_family = AF_INET;
-	memcpy(&serv_addr.sin_addr.s_addr, host->h_addr, host->h_length);
-	serv_addr.sin_port = htons(port);
-	if(connect(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
+	if(connect(fd, servinfo->ai_addr, servinfo->ai_addrlen) < 0)
 	{
 		perror("Connecting to host");
 		return -1;
 	}
+
+	freeaddrinfo(servinfo);
+
 
 	buffer = (unsigned int*)malloc(1024);
 	memset(buffer, 0, 1024);
