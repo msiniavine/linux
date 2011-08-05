@@ -87,7 +87,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 
 	list_for_each_entry(child, &tsk->children, sibling)
 	{
-		find_blocked_ports_tsk(tsk);
+		find_blocked_ports_tsk(child);
 	}
 }
 

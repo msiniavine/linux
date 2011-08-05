@@ -7,7 +7,8 @@ cd test
     kexec -e
 } &
 
-./test_sockload -h undead -p 5000 -t -l 1
+#./test_sockload -h undead -p 5000 -t -l 1
+./test_fork
 
 #cd test
 #./test_loop < Makefile &> trace &
