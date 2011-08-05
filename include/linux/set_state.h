@@ -1,6 +1,13 @@
 #include <linux/fb.h>
 #include <linux/vt.h>
 #include <linux/mousedev.h>
+#include <linux/socket.h>
+#include <linux/un.h>
+#include <net/af_unix.h>
+
+#ifdef unix
+#undef unix
+#endif
 
 #define FASTREBOOT_REGION_SIZE 64 * 1024 * 1024
 #define FASTREBOOT_REGION_START (0x1000000 + FASTREBOOT_REGION_SIZE)
@@ -124,7 +131,7 @@ struct saved_sk_buff
 	unsigned char *data;
 	
 	struct saved_sk_buff *next;
-}
+};
 
 struct saved_unix_socket
 {
@@ -144,7 +151,7 @@ struct saved_unix_socket
 struct saved_socket
 {
         int		        state;
-        int backlog;
+        int			backlog;
 	short			type;
 	unsigned long		flags;
         wait_queue_head_t	wait;

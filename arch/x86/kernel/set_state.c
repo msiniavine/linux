@@ -75,6 +75,10 @@ int bind_socket ( struct file *file, struct sockaddr *address, int address_lengt
 int listen_socket ( struct file *file, int backlog );
 //
 
+// This is an altered version of do_unlinkat() in fs/namei.c
+static int unlink_file ( char *path );
+//
+
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
 {
 	return len <= MAX_ARG_STRLEN;
@@ -1486,128 +1490,6 @@ void restore_udp_socket(struct saved_file* f){
 	return;
 }
 
-void restore_unix_socket ( struct saved_file *saved_file )
-{
-	//
-	int family = saved_file->socket.sock_family;
-	int type = saved_file->socket.sock_type;
-	int protocol = saved_file->socket.sock_protocol;
-	
-	unsigned int fd;
-	struct file *file;
-	
-	int state = saved_file->socket.state;
-	int backlog = saved_file->socket.backlog;
-	
-	struct sockaddr_un address = saved_file->socket.unix.address;
-	
-	int retval = 0;
-	int err = 0;
-	int flags;
-	
-	struct socket *socket;
-	
-	int somaxconn;
-	//
-	
-	// Create.
-	/* Check the SOCK_* constants for consistency.  */
-	BUILD_BUG_ON(SOCK_CLOEXEC != O_CLOEXEC);
-	BUILD_BUG_ON((SOCK_MAX | SOCK_TYPE_MASK) != SOCK_TYPE_MASK);
-	BUILD_BUG_ON(SOCK_CLOEXEC & SOCK_TYPE_MASK);
-	BUILD_BUG_ON(SOCK_NONBLOCK & SOCK_TYPE_MASK);
-
-	flags = type & ~SOCK_TYPE_MASK;
-	if ( flags & ~( SOCK_CLOEXEC | SOCK_NONBLOCK ) )
-	{
-		panic( "Unable to restore UNIX socket due to invalid socket flags.\n" );
-	}
-	type &= SOCK_TYPE_MASK;
-
-	if ( SOCK_NONBLOCK != O_NONBLOCK && ( flags & SOCK_NONBLOCK ) )
-	{
-		flags = ( flags & ~SOCK_NONBLOCK ) | O_NONBLOCK;
-	}
-
-	retval = sock_create( family, type, protocol, &socket );
-	if ( retval < 0 )
-	{
-		panic( "Unable to create UNIX socket.\n" );
-	}
-
-	/*retval = sock_map_fd( socket, flags & ( O_CLOEXEC | O_NONBLOCK ) );
-	if ( retval < 0 )
-	{
-		sock_release( socket );
-		
-		panic( "Function sock_map_fd() failed while restoring UNIX socket.\n" );
-	}*/
-	
-	fd = alloc_fd( saved_file->fd, 0 );
-	if ( fd != saved_file->fd )
-	{
-		panic( "Unable obtain original UNIX socket file descriptor, %d\n", saved_file->fd );
-	}
-	
-	file = get_empty_filp();
-	/*if ( saved_file->flags == O_NONBLOCK )
-	{
-		flags |= O_NONBLOCK;
-	}*/
-	
-	err = sock_attach_fd( socket, file, flags );
-	if ( err < 0 )
-	{
-		panic( "Unable to attach UNIX socket to file.\n" );
-	}
-	
-	fd_install( fd, file );
-	//
-	
-	// Bind.
-	
-	//
-	// I need to "get rid of" or "unbind" the named sockets, if there are any, or
-	// else I will get an "address already in use" error.
-	//
-	
-	err = security_socket_bind( socket, ( struct sockaddr * ) &address, sizeof( address ) );
-	if ( !err )
-	{
-		err = socket->ops->bind( socket, ( struct sockaddr * ) &address, sizeof( address ) );
-	}
-	
-	if ( err < 0 )
-	{
-		panic( "Unable to bind to UNIX socket.\n" );
-	}
-	//
-	
-	// Listen.
-	if ( state == SS_LISTENING )
-	{
-		somaxconn = sock_net( socket->sk )->core.sysctl_somaxconn;
-		if ( ( unsigned ) backlog > somaxconn )
-		{
-			backlog = somaxconn;
-		}
-
-		err = security_socket_listen( socket, backlog );
-		if ( !err )
-		{
-			err = socket->ops->listen( socket, backlog );
-		}
-	
-		if ( err < 0 )
-		{
-			panic( "Unable to put UNIX socket into listening state." );
-		}
-	}
-	//
-	
-	return;
-}
-
 void restore_socket ( struct saved_file* f, struct map_entry *head )
 {
 	struct saved_socket* sock = &f->socket;
@@ -1663,9 +1545,11 @@ void restore_listen_socket ( struct saved_file *saved_file )
 	int type = saved_file->socket.sock_type;
 	int protocol = saved_file->socket.sock_protocol;
 	
-	int backlog = saved_socket.tcp->backlog;
+	int backlog = saved_file->socket.tcp->backlog;
 	
 	struct sockaddr_in address;
+	
+	int status = 0;
 	//
 
 	//
@@ -1680,15 +1564,15 @@ void restore_listen_socket ( struct saved_file *saved_file )
 	memset( &address, 0, sizeof( address ) );
 	
 	address.sin_family = AF_INET;
-	address.sin_port = htons( saved_socket.inet.num );
+	address.sin_port = htons( saved_file->socket.inet.num );
 	
 	address.sin_addr.s_addr = htonl( INADDR_ANY );
-	if ( saved_socket.inet.rcv_saddr )
+	if ( saved_file->socket.inet.rcv_saddr )
 	{
-		address.sin_addr.s_addr = htonl( saved_socket.inet.rcv_saddr );
+		address.sin_addr.s_addr = htonl( saved_file->socket.inet.rcv_saddr );
 	}
 	
-	status = bind_socket( file, &address, sizeof( address ) );
+	status = bind_socket( file, ( struct sockaddr * ) &address, sizeof( address ) );
 	if ( status < 0 )
 	{
 		panic( "Unable to rebind TCP listening socket.  Error: %d\n", -status );
@@ -2111,6 +1995,17 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 //	DECLARE_COMPLETION_ONSTACK(all_done);
 //	wait_queue_head_t wq;
 
+	//
+	static struct map_entry *map_entry_head = NULL;
+	//
+	
+	//
+	if ( !map_entry_head )
+	{
+		map_entry_head = new_map();
+	}
+	//
+
 	// init_waitqueue_head() sets the variable pointed to by the argument to NULL.
 	//
 	// atomic_set() sets (v)->counter to equal to its second argument, where v is
@@ -2139,7 +2034,7 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	//
 	// What is the stuff after info->parent = NULL;?
 	info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
-	info->head = new_map();
+	info->head = map_entry_head;
 	info->state = state;
 	info->parent = NULL;
 	info->global_state = &global_state;
@@ -2745,7 +2640,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	struct sock *sock_peer;
 	
 	struct sk_buff *skb;
-	struct saved_sk_buff *current;
+	struct saved_sk_buff *cur;
 	
 	int status = 0;
 	//
@@ -2763,7 +2658,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	
 	if ( saved_file->socket.unix.kind == SOCKET_BOUND )
 	{
-		status = bind_socket( file, &address, sizeof( address ) );
+		status = bind_socket( file, ( struct sockaddr * )&address, sizeof( address ) );
 		if ( status < 0 )
 		{
 			panic( "Unable to rebind UNIX socket.  Error: %d\n", -status );
@@ -2788,8 +2683,8 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 			sock_hold( sock );
 			sock_hold( sock_peer );
 			
-			unix_peer( sock ) = sock_peer;
-			unix_peer( sock_peer ) = sock;
+			unix->peer = sock_peer;
+			unix_sk( sock_peer )->peer = sock;
 			
 			if ( sock->sk_type != SOCK_DGRAM )
 			{
@@ -2813,11 +2708,11 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	//
 	
 	// Restore the receive queue.
-	current = saved_file->socket.unix.head;
-	while ( current )
+	cur = saved_file->socket.unix.head;
+	while ( cur )
 	{
 		//
-		skb = sock_alloc_send_skb( sock, current->len, 1, &status );
+		skb = sock_alloc_send_skb( sock, cur->len, 1, &status );
 		if ( status < 0 )
 		{
 			panic( "Unable to allocate UNIX socket buffer.  Error: %d\n", -status );
@@ -2825,15 +2720,15 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		//
 		
 		//
-		memcpy( skb->cb, current->cb, sizeof( skb->cb ) );
+		memcpy( skb->cb, cur->cb, sizeof( skb->cb ) );
 		
-		memcpy( skb_put( skb, current->len ), current->data, current->len );
+		memcpy( skb_put( skb, cur->len ), cur->data, cur->len );
 		
 		skb_queue_tail( &sock->sk_receive_queue, skb );
 		//
 		
 		//
-		current = current->next;
+		cur = cur->next;
 		//
 	}
 	//
@@ -3005,6 +2900,75 @@ int listen_socket ( struct file *file, int backlog )
 	
 done:
 	return status;
+}
+//
+
+// This is an altered version of do_unlinkat() in fs/namei.c
+static int unlink_file ( char *path )
+{
+	//
+	int error;
+	struct dentry *dentry;
+	struct nameidata nd;
+	struct inode *inode = NULL;
+	//
+
+	/*error = user_path_parent(dfd, pathname, &nd, &name);
+	if (error)
+		return error;*/
+	
+	//
+	if ( !path )
+	{
+		return -EINVAL;
+	}
+	
+	error = path_lookup( path, LOOKUP_PARENT, &nd );
+	if ( error < 0 )
+	{
+		return error;
+	}
+	//
+
+	error = -EISDIR;
+	if (nd.last_type != LAST_NORM)
+		goto exit1;
+
+	nd.flags &= ~LOOKUP_PARENT;
+
+	mutex_lock_nested(&nd.path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
+	dentry = lookup_hash(&nd);
+	error = PTR_ERR(dentry);
+	if (!IS_ERR(dentry)) {
+		/* Why not before? Because we want correct error value */
+		if (nd.last.name[nd.last.len])
+			goto slashes;
+		inode = dentry->d_inode;
+		if (inode)
+			atomic_inc(&inode->i_count);
+		error = mnt_want_write(nd.path.mnt);
+		if (error)
+			goto exit2;
+		error = security_path_unlink(&nd.path, dentry);
+		if (error)
+			goto exit3;
+		error = vfs_unlink(nd.path.dentry->d_inode, dentry);
+exit3:
+		mnt_drop_write(nd.path.mnt);
+	exit2:
+		dput(dentry);
+	}
+	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	if (inode)
+		iput(inode);	/* truncate the inode here */
+exit1:
+	path_put(&nd.path);
+	return error;
+
+slashes:
+	error = !dentry->d_inode ? -ENOENT :
+		S_ISDIR(dentry->d_inode->i_mode) ? -EISDIR : -ENOTDIR;
+	goto exit2;
 }
 //
 

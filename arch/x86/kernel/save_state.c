@@ -32,6 +32,7 @@
 #include <linux/vt_kern.h>
 
 #include <linux/mousedev.h>
+#include <linux/skbuff.h>
 
 static void get_path_absolute ( struct file *file, char *path );
 
@@ -406,7 +407,7 @@ static void get_path_absolute ( struct file *file, char *path )
 free:
 	vfree( elements );
 	
-done:
+//done:
 	return;
 	//
 }
@@ -734,7 +735,7 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
 	struct sock *sk = sock->sk;
 	
 	struct inet_sock *inet;
-	struct unix_sock *unix;
+	//struct unix_sock *unix;
 	//
 	
 	//
@@ -2114,7 +2115,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	
 	if ( unix->addr )
 	{
-		memcpy( saved_file->socket.unix.address, unix->addr->name, sizeof( saved_file->socket.unix.address ) );
+		memcpy( &saved_file->socket.unix.address, unix->addr->name, sizeof( saved_file->socket.unix.address ) );
 		
 		saved_file->socket.unix.kind = SOCKET_BOUND;
 	}
@@ -2125,7 +2126,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 		saved_file->socket.unix.peer = NULL;
 	
 		saved_unix_peer = find_by_first( head, unix->peer );
-		if ( saved_sock_peer )
+		if ( saved_unix_peer )
 		{
 			saved_unix_peer->peer = &saved_file->socket.unix;
 			
@@ -2148,7 +2149,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	// Saves the receive queue.
 	saved_file->socket.unix.head = NULL;
 	tail = NULL;
-	skb_queue_walk ( sock->sk_receive_queue, skb )
+	skb_queue_walk ( &sock->sk_receive_queue, skb )
 	{
 		//
 		saved_skb = alloc( sizeof( struct saved_sk_buff ) );
