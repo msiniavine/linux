@@ -49,6 +49,7 @@ static void restore_con2fbmaps ( void );*/
 static int file_is_mouse ( struct file *file );
 static void save_mouse ( struct file *file, struct saved_file *saved_file );
 
+static int file_is_unix_socket ( struct file *file );
 static void save_unix_socket ( struct file *file, struct saved_file *saved_file, struct map_entry *head );
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
@@ -96,6 +97,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 {
 	struct shared_resource* elem;
 	struct saved_task_struct* child;
+	sprint("Reserving for task %s[%d]\n", task->name, task->pid);
 	for(elem=task->mm->pages; elem!=NULL; elem=elem->next)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
@@ -107,7 +109,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 		}
 		else
 		{
-			//sprint("Reserved pfn: %ld\n", page->pfn);
+			sprint("Reserved pfn: %ld\n", page->pfn);
 		}
 	}
 
@@ -351,21 +353,41 @@ static void get_path_absolute ( struct file *file, char *path )
 	struct dentry *dentry = file->f_dentry;
 	struct vfsmount *vfsmount = file->f_vfsmnt;
 	
-	struct dentry **elements = ( struct dentry ** ) vmalloc( PATH_MAX * sizeof( struct dentry * ) );
+	struct dentry **elements;
+	//static struct dentry *elements[PATH_MAX];
 	int index = 0;
 	//
 	
+	sprint( "##### start get_path_absolute()\n" );
+	
 	//
-	spin_lock( &elements[index]->d_lock );
+	sprint( "Before vmalloc().\n" );
+	
+	elements = ( struct dentry ** ) vmalloc( PATH_MAX * sizeof( struct dentry * ) );
+	if ( !elements )
+	{
+		panic( "Unable to allocate memory in function get_path_absolute().\n" );
+	}
+	
+	sprint( "After vmalloc().\n" );
+	//
+	
+	sprint( "Before.\n" );
+	
+	//
+	spin_lock( &dentry->d_lock );
 	if ( strcmp( dentry->d_name.name, "/" ) == 0 )
 	{
 		strcpy( path, "/" );
 		
-		spin_unlock( &elements[index]->d_lock );
+		spin_unlock( &dentry->d_lock );
 		
 		goto free;
 	}
+	spin_unlock( &dentry->d_lock );
 	//
+	
+	sprint( "After.\n" );
 	
 	//
 	index = 0;
@@ -408,6 +430,8 @@ free:
 	vfree( elements );
 	
 //done:
+	sprint( "path: \"%s\"\n", path );
+	sprint( "##### end get_path_absolute()\n" );
 	return;
 	//
 }
@@ -2089,6 +2113,31 @@ static void save_mouse ( struct file *file, struct saved_file *saved_file )
 	return;
 }
 
+static int file_is_unix_socket ( struct file *file )
+{
+	//
+	struct socket *socket;
+	struct sock *sock;
+	
+	int is_unix_socket = 0;
+	//
+	
+	//
+	if ( file_is_socket( file ) )
+	{
+		socket = file->private_data;
+		sock = socket->sk;
+		
+		if ( sock->sk_family == AF_UNIX )
+		{
+			is_unix_socket = 1;
+		}
+	}
+	//
+	
+	return is_unix_socket;
+}
+
 static void save_unix_socket ( struct file *file, struct saved_file *saved_file, struct map_entry *head )
 {
 	//
@@ -2115,6 +2164,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	
 	if ( unix->addr )
 	{
+		get_path_absolute( file, saved_file->socket.unix.path );
 		memcpy( &saved_file->socket.unix.address, unix->addr->name, sizeof( saved_file->socket.unix.address ) );
 		
 		saved_file->socket.unix.kind = SOCKET_BOUND;
@@ -2141,6 +2191,8 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	//
 	
 	// ???
+	saved_file->socket.unix.state = sock->sk_state;
+	
 	saved_file->socket.unix.shutdown = sock->sk_shutdown;
 	
 	saved_file->socket.unix.peercred = sock->sk_peercred;

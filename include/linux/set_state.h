@@ -136,12 +136,14 @@ struct saved_sk_buff
 struct saved_unix_socket
 {
 	int kind;
+	int state;
 	
 	struct saved_unix_socket *peer;
 	
 	unsigned int shutdown :2;
 	struct ucred peercred;
 
+	char path[UNIX_PATH_MAX];
 	struct sockaddr_un address;
 	
 	struct saved_sk_buff *head;

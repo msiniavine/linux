@@ -2624,14 +2624,15 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	int fd = saved_file->fd;
 	int flags = saved_file->flags;
 	
-	int state = saved_file->socket.state;
+	int state = saved_file->socket.unix.state;
 	int backlog = saved_file->socket.backlog;
 	
 	int family = saved_file->socket.sock_family;
 	int type = saved_file->socket.sock_type;
 	int protocol = saved_file->socket.sock_protocol;
 	
-	struct sockaddr_un address = saved_file->socket.unix.address;
+	char *path = saved_file->socket.unix.path;
+	struct sockaddr_un address;
 	
 	struct socket *socket;
 	struct sock *sock;
@@ -2658,7 +2659,24 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	
 	if ( saved_file->socket.unix.kind == SOCKET_BOUND )
 	{
-		status = bind_socket( file, ( struct sockaddr * )&address, sizeof( address ) );
+		//
+		address = saved_file->socket.unix.address;
+		if ( address.sun_path[0] )
+		{
+			sprint( "address.sun_path: \"%s\"", address.sun_path );
+			sprint( "path: \"%s\"", path );
+			
+			//strcpy( address.sun_path, path );
+			
+			status = unlink_file( address.sun_path );
+			if ( status < 0 )
+			{
+				sprint( "Unable to unlink file \'%s\'.  Error: %d\n", address.sun_path, -status );
+			}
+		}
+		//
+	
+		status = bind_socket( file, ( struct sockaddr * ) &address, sizeof( address ) );
 		if ( status < 0 )
 		{
 			panic( "Unable to rebind UNIX socket.  Error: %d\n", -status );

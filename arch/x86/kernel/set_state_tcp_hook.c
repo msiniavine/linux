@@ -84,7 +84,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 
 	list_for_each_entry(child, &tsk->children, sibling)
 	{
-		find_blocked_ports_tsk(tsk);
+		find_blocked_ports_tsk(child);
 	}
 }
 
@@ -120,6 +120,8 @@ void set_state_tcp_hook(void)
 void unregister_set_state_hook(void)
 {
 	struct port_entry* pe, *n;
+	if(list_empty(&blocked_ports)) return;
+	
 	nf_unregister_hook(&set_state_ops);
 
 	list_for_each_entry_safe(pe, n, &blocked_ports, next)
