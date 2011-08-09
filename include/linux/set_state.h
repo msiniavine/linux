@@ -140,9 +140,8 @@ struct saved_sk_buff
 
 struct saved_unix_address
 {
-	int		len;
-	unsigned	hash;
 	struct sockaddr_un address;
+	int length;
 };
 
 struct saved_unix_socket

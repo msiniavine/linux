@@ -2229,10 +2229,11 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 		}
 		//
 		
-		saved_unix->unix_address.len = unix->addr->len;
-		saved_unix->unix_address.hash = unix->addr->hash;
+		//
+		memcpy( &saved_unix->unix_address.address, unix->addr->name, unix->addr->len );
 		
-		memcpy( &saved_unix->unix_address.address, unix->addr->name, sizeof( struct unix_address ) + unix->addr->len );
+		saved_unix->unix_address.length = unix->addr->len;
+		//
 	}
 	
 	else if ( sock->sk_state == TCP_ESTABLISHED )

@@ -2673,6 +2673,8 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	
 	if ( saved_unix->kind == SOCKET_BOUND )
 	{
+		int index;
+	
 		sprint( "saved_unix->kind == SOCKET_BOUND\n" );
 	
 		//
@@ -2680,7 +2682,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		if ( address.sun_path[0] )
 		{
 			sprint( "address.sun_path: \"%s\"", address.sun_path );
-			
+		
 			status = unlink_file( address.sun_path );
 			if ( status < 0 )
 			{
@@ -2689,12 +2691,15 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		}
 		//
 	
-		status = bind_socket( file, ( struct sockaddr * ) &address, sizeof( address ) );
+		//
+		status = bind_socket( file, ( struct sockaddr * ) &address, saved_unix->unix_address.length );
 		if ( status < 0 )
 		{
 			panic( "Unable to rebind UNIX socket.  Error: %d\n", -status );
 		}
+		//
 		
+		//
 		if ( state == TCP_LISTEN )
 		{
 			sprint( "state == TCP_LISTEN\n" );
@@ -2709,12 +2714,20 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 			insert_entry( head, saved_unix, sock );
 			//
 		}
+		//
 	}
 	
 	else if (	saved_unix->kind == SOCKET_ACCEPTED || 
 			saved_unix->kind == SOCKET_CONNECTED )
 	{
 		sprint( "saved_unix->kind == SOCKET_ACCEPTED || saved_unix->kind == SOCKET_CONNECTED\n" );
+		
+		//
+		if ( !saved_unix->peer )
+		{
+			panic( "Unable to restore UNIX connected socket due to missing peer.\n" );
+		}
+		//
 		
 		unix_state_lock( sock );
 		
@@ -2777,7 +2790,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 
 		}
 		
-		sprint( "Before insert_entry( head, saved_unix, sock );\n" );
+		sprint( "Before insert_entry( head, saved_unix, socket );\n" );
 		if ( !socket->sk )
 		{
 			sprint( "Before insert_entry().\n" );
@@ -2785,7 +2798,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		}
 		
 		insert_entry( head, saved_unix, socket );
-		sprint( "After insert_entry( head, saved_unix, sock );\n" );
+		sprint( "After insert_entry( head, saved_unix, socket );\n" );
 		
 		socket_other = find_by_first( head, saved_unix->peer->peer );
 		if ( socket_other && !socket_other->sk )
@@ -2835,7 +2848,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 			{
 				sprint( "else\n" );
 				
-				unix->addr = kmalloc( sizeof( struct unix_address ) + saved_unix->unix_address.len, GFP_KERNEL );
+				unix->addr = kmalloc( sizeof( struct unix_address ) + saved_unix->unix_address.length, GFP_KERNEL );
 				if ( !unix->addr )
 				{
 					panic( "Unable to allocate memory for UNIX \'accept\' socket address.\n" );
