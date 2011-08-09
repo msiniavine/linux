@@ -1547,7 +1547,7 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	struct saved_state* state;
 	//
 	
-	sprint( "##### sys_load_saved_state() start #####\n" );
+	sprint( "##### start sys_load_saved_state()\n" );
 	
 	/*   unsigned long i; */
 	/*   unsigned long start = FASTREBOOT_REGION_START; */
@@ -1571,13 +1571,13 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	if(state->processes == NULL)
 	{
 		sprint( "No more saved state\n");
-		sprint( "##### sys_load_saved_state() end #####\n" );
+		sprint( "##### end sys_load_saved_state()\n" );
 		return -1;
 	}
 	
 	local_irq_disable();
-	while ( state->processes )
-	{
+	//while ( state->processes )
+	//{
 		print_saved_processes();
 		ret = set_state(&regs, state->processes);
 		sprint( "set_state returned %d\n", ret);
@@ -1587,18 +1587,18 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 			add_to_restored_list(current);
 		}
 	
-		sprint( "##### state->counter: %d\n", state->counter );
-	}
+		sprint( "state->counter: %d\n", state->counter );
+	//}
 	local_irq_enable();
 	
-	if( !state->processes )
+	/*if( !state->processes )
 	{
 		sprint( "No more saved state.\n" );
-		sprint( "##### sys_load_saved_state() end #####\n" );
+		sprint( "##### end sys_load_saved_state()\n" );
 		return -1;
-	}
+	}*/
 	
-	sprint( "##### sys_load_saved_state() end #####\n" );
+	sprint( "##### end sys_load_saved_state()\n" );
 
 	return regs.ax;
 }
@@ -2145,7 +2145,10 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	struct sock *sock = socket->sk;
 	struct unix_sock *unix = unix_sk( sock );
 	
-	struct saved_unix_socket *saved_unix_peer;
+	struct saved_unix_socket *saved_unix = &saved_file->socket.unix ;
+	struct saved_unix_socket *saved_unix_other;
+	
+	struct map_entry *entry_current;
 	
 	struct sk_buff *skb;
 	struct saved_sk_buff *saved_skb;
@@ -2159,48 +2162,113 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	}
 	//
 	
+	unix_state_lock( sock );
+	
 	// Determines the kind of UNIX socket we have and saves the necessary information.
-	saved_file->socket.unix.kind = SOCKET_NONE;
+	saved_unix->kind = SOCKET_NONE;
 	
 	if ( unix->addr )
 	{
-		get_path_absolute( file, saved_file->socket.unix.path );
-		memcpy( &saved_file->socket.unix.address, unix->addr->name, sizeof( saved_file->socket.unix.address ) );
+		//
+		if ( sock->sk_state == TCP_ESTABLISHED )
+		{
+			// Link to peer and link peer to self and broadcast self.
+			saved_unix->peer = NULL;
+			
+			saved_unix_other = find_by_first( head, unix->peer );
+			if ( saved_unix_other )
+			{
+				saved_unix->peer = saved_unix_other;
+				
+				saved_unix_other->peer = saved_unix;
+			}
+			
+			insert_entry( head, sock, saved_unix );
+			//
+			
+			// Link to listening socket and broadcast self.
+			saved_unix->listen = NULL;
+			list_for_each_entry ( entry_current, &head->list, list )
+			{
+				saved_unix_other = entry_current->second;
+				
+				if (	entry_current->first == unix->addr && 
+					saved_unix_other->state == TCP_LISTEN )
+				{
+					saved_unix->listen = saved_unix_other;
+				}
+			}
+			
+			insert_entry( head, unix->addr, saved_unix );
+			//
 		
-		saved_file->socket.unix.kind = SOCKET_BOUND;
+			saved_unix->kind = SOCKET_ACCEPTED;
+		}
+		
+		else
+		{
+			if ( sock->sk_state == TCP_LISTEN )
+			{
+				// Link accept sockets to self and broadcast self.
+				list_for_each_entry ( entry_current, &head->list, list )
+				{
+					saved_unix_other = entry_current->second;
+					
+					if (	entry_current->first == unix->addr && 
+						saved_unix_other->kind == SOCKET_ACCEPTED )
+					{
+						saved_unix_other->listen = saved_unix;
+					}
+				}
+				
+				insert_entry( head, unix->addr, saved_unix );
+				//
+			}
+		
+			saved_unix->kind = SOCKET_BOUND;
+		}
+		//
+		
+		saved_unix->unix_address.len = unix->addr->len;
+		saved_unix->unix_address.hash = unix->addr->hash;
+		
+		memcpy( &saved_unix->unix_address.address, unix->addr->name, sizeof( struct unix_address ) + unix->addr->len );
 	}
 	
 	else if ( sock->sk_state == TCP_ESTABLISHED )
 	{
-		//
-		saved_file->socket.unix.peer = NULL;
+		// Link to peer and link peer to self and broadcast self.
+		saved_unix->peer = NULL;
 	
-		saved_unix_peer = find_by_first( head, unix->peer );
-		if ( saved_unix_peer )
+		saved_unix_other = find_by_first( head, unix->peer );
+		if ( saved_unix_other )
 		{
-			saved_unix_peer->peer = &saved_file->socket.unix;
+			saved_unix->peer = saved_unix_other;
 			
-			saved_file->socket.unix.peer = saved_unix_peer;
+			saved_unix_other->peer = saved_unix;
 		}
+		
+		insert_entry( head, sock, saved_unix );
 		//
 	
-		saved_file->socket.unix.kind = SOCKET_CONNECTED;
-		
-		insert_entry( head, sock, &saved_file->socket.unix );
+		saved_unix->kind = SOCKET_CONNECTED;
 	}
 	//
 	
 	// ???
-	saved_file->socket.unix.state = sock->sk_state;
+	saved_unix->state = sock->sk_state;
 	
-	saved_file->socket.unix.shutdown = sock->sk_shutdown;
+	saved_unix->shutdown = sock->sk_shutdown;
 	
-	saved_file->socket.unix.peercred = sock->sk_peercred;
+	saved_unix->peercred = sock->sk_peercred;
 	//
 	
 	// Saves the receive queue.
-	saved_file->socket.unix.head = NULL;
+	saved_unix->head = NULL;
 	tail = NULL;
+	
+	spin_lock( &sock->sk_receive_queue.lock );
+	
 	skb_queue_walk ( &sock->sk_receive_queue, skb )
 	{
 		//
@@ -2223,9 +2291,9 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 		//
 		
 		//
-		if ( !saved_file->socket.unix.head )
+		if ( !saved_unix->head )
 		{
-			saved_file->socket.unix.head = saved_skb;
+			saved_unix->head = saved_skb;
 			
 			tail = saved_skb;
 		}
@@ -2237,7 +2305,11 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 		}
 		//
 	}
+	
+	spin_unlock( &sock->sk_receive_queue.lock );
 	//
+	
+	unix_state_unlock( sock );
 	
 	return;
 }

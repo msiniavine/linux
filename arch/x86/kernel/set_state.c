@@ -2616,6 +2616,8 @@ static struct file *restore_mouse ( struct saved_file *saved_file )
 	return file;
 }
 
+// Warning: Listening sockets must be restored before accept sockets or else terrible
+// things might happen...
 static void restore_unix_socket ( struct saved_file *saved_file, struct map_entry *head )
 {
 	//
@@ -2631,20 +2633,26 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	int type = saved_file->socket.sock_type;
 	int protocol = saved_file->socket.sock_protocol;
 	
-	char *path = saved_file->socket.unix.path;
 	struct sockaddr_un address;
 	
 	struct socket *socket;
 	struct sock *sock;
 	struct unix_sock *unix;
 	
-	struct sock *sock_peer;
+	struct saved_unix_socket *saved_unix = &saved_file->socket.unix;
+	struct socket *socket_other;
+	struct sock *sock_other;
+	struct unix_sock *unix_other;
+	
+	struct map_entry *entry_current;
 	
 	struct sk_buff *skb;
 	struct saved_sk_buff *cur;
 	
 	int status = 0;
 	//
+	
+	sprint( "##### start restore_unix_socket()\n" );
 	
 	//
 	file = create_socket( fd, flags, family, type, protocol );
@@ -2657,16 +2665,21 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	sock = socket->sk;
 	unix = unix_sk( sock );
 	
-	if ( saved_file->socket.unix.kind == SOCKET_BOUND )
+	if ( !socket->sk )
 	{
+		sprint( "After create_socket().\n" );
+		panic( "socket->sk is NULL.\n" );
+	}
+	
+	if ( saved_unix->kind == SOCKET_BOUND )
+	{
+		sprint( "saved_unix->kind == SOCKET_BOUND\n" );
+	
 		//
-		address = saved_file->socket.unix.address;
+		address = saved_unix->unix_address.address;
 		if ( address.sun_path[0] )
 		{
 			sprint( "address.sun_path: \"%s\"", address.sun_path );
-			sprint( "path: \"%s\"", path );
-			
-			//strcpy( address.sun_path, path );
 			
 			status = unlink_file( address.sun_path );
 			if ( status < 0 )
@@ -2684,72 +2697,219 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		
 		if ( state == TCP_LISTEN )
 		{
+			sprint( "state == TCP_LISTEN\n" );
+			
 			status = listen_socket( file, backlog );
 			if ( status < 0 )
 			{
 				panic( "Unable to put UNIX socket back to listening state.  Error: %d\n", -status );
 			}
+			
+			// Broadcast self.
+			insert_entry( head, saved_unix, sock );
+			//
 		}
 	}
 	
-	else if ( saved_file->socket.unix.kind == SOCKET_CONNECTED )
+	else if (	saved_unix->kind == SOCKET_ACCEPTED || 
+			saved_unix->kind == SOCKET_CONNECTED )
 	{
-		sock_peer = find_by_first( head, saved_file->socket.unix.peer );
-		if ( sock_peer )
+		sprint( "saved_unix->kind == SOCKET_ACCEPTED || saved_unix->kind == SOCKET_CONNECTED\n" );
+		
+		unix_state_lock( sock );
+		
+		//
+		sock->sk_state = TCP_ESTABLISHED;
+		socket->state = SS_CONNECTED;
+		//
+		
+		// Form connection with peer and broadcast self.
+		socket_other = find_by_first( head, saved_unix->peer );
+		if ( socket_other )
 		{
-			// This here might not yet be acceptable...
-			sock_hold( sock );
-			sock_hold( sock_peer );
+			sprint( "socket_other\n" );
 			
-			unix->peer = sock_peer;
-			unix_sk( sock_peer )->peer = sock;
+			if ( !socket_other->sk )
+			{
+				sprint( "After find_by_first().\n" );
+				
+				sprint( "socket_other->state: %d\n", socket_other->state );
+				sprint( "socket_other->type: %d\n", socket_other->type );
+				sprint( "socket_other->flags: %d\n", socket_other->type );
+				sprint( "socket_other->fasync_list: 0x%.8X\n", socket_other->fasync_list );
+				sprint( "socket_other->file: 0x%.8X\n", socket_other->file );
+				sprint( "socket_other->sk: 0x%.8X\n", socket_other->sk );
+				sprint( "socket_other->ops: 0x%.8X\n", socket_other->ops );
+				
+				
+				panic( "socket_other->sk is NULL.\n" );
+			}
+			
+			sock_other = socket_other->sk;
+			sprint( "socket_other->sk: 0x%.8X\n", ( unsigned int ) socket_other->sk );
+			unix_other = unix_sk( sock_other );
+			sprint( "unix_other: 0x%.8X\n", ( unsigned int ) unix_other );
+			
+			unix_state_lock( sock_other );
+			
+			sock_hold( sock );
+			sprint( "sock: 0x%.8X\n", ( unsigned int ) sock );
+			sock_hold( sock_other );
+			sprint( "sock_other: 0x%.8X\n", ( unsigned int ) sock_other );
+			
+			unix->peer = sock_other;
+			sprint( "sock_other: 0x%.8X\n", ( unsigned int ) sock_other );
+			unix_other->peer = sock;
+			sprint( "sock: 0x%.8X\n", ( unsigned int ) sock );
 			
 			if ( sock->sk_type != SOCK_DGRAM )
 			{
-				sock->sk_state = TCP_ESTABLISHED;
-				sock_peer->sk_state = TCP_ESTABLISHED;
+				sprint( "sock->sk_type != SOCK_DGRAM\n" );
 				
-				sock->sk_socket->state = SS_CONNECTED;
-				sock_peer->sk_socket->state = SS_CONNECTED;
+				sock->sk_state = TCP_ESTABLISHED;
+				sock_other->sk_state = TCP_ESTABLISHED;
+				
+				socket->state = SS_CONNECTED;
+				socket_other->state = SS_CONNECTED;
+			}
+			
+			unix_state_unlock( sock_other );
+
+		}
+		
+		sprint( "Before insert_entry( head, saved_unix, sock );\n" );
+		if ( !socket->sk )
+		{
+			sprint( "Before insert_entry().\n" );
+			panic( "socket->sk is NULL.\n" );
+		}
+		
+		insert_entry( head, saved_unix, socket );
+		sprint( "After insert_entry( head, saved_unix, sock );\n" );
+		
+		socket_other = find_by_first( head, saved_unix->peer->peer );
+		if ( socket_other && !socket_other->sk )
+		{
+			panic( "socket_other->sk is NULL.\n" );
+		}
+		//
+		
+		//
+		if ( saved_unix->kind == SOCKET_ACCEPTED )
+		{
+			sprint( "saved_unix->kind == SOCKET_ACCEPTED\n" );
+			
+			// Link self addr, dentry, and mnt to that of the listening socket.
+			if ( saved_unix->listen )
+			{
+				sprint( "saved_unix->listen\n" );
+				
+				sock_other = find_by_first( head, saved_unix->listen );
+				if ( !sock_other )
+				{
+					panic( "Unable to restore UNIX \'accept\' socket before the listening socket.\n" );
+				}
+				
+				unix_other = unix_sk( sock_other );
+				
+				if ( unix_other->addr )
+				{
+					sprint( "unix_other->addr\n" );
+					
+					atomic_inc( &unix_other->addr->refcnt );
+					
+					unix->addr = unix_other->addr;
+				}
+				
+				if ( unix_other->dentry )
+				{
+					sprint( "unix_other->dentry\n" );
+					
+					unix->dentry = dget( unix_other->dentry );
+					
+					unix->mnt = mntget( unix_other->mnt );
+				}
+			}
+			
+			else
+			{
+				sprint( "else\n" );
+				
+				unix->addr = kmalloc( sizeof( struct unix_address ) + saved_unix->unix_address.len, GFP_KERNEL );
+				if ( !unix->addr )
+				{
+					panic( "Unable to allocate memory for UNIX \'accept\' socket address.\n" );
+				}
+				
+				// Warning: These two aren't quite correct...
+				unix->dentry = NULL;
+					
+				unix->mnt = NULL;
+				//
 			}
 			//
 		}
 		
-		insert_entry( head, &saved_file->socket.unix, sock );
+		if ( !socket->sk )
+		{
+			sprint( "After if ( saved_unix->kind == SOCKET_ACCEPTED ) block.\n" );
+			panic( "socket->sk is NULL.\n" );
+		}
+		//
+		
+		unix_state_unlock( sock );
 	}
 	//
 	
 	// ???
-	sock->sk_shutdown = saved_file->socket.unix.shutdown;
+	sprint( "start ???" );
+	sock->sk_shutdown = saved_unix->shutdown;
 	
-	sock->sk_peercred = saved_file->socket.unix.peercred;
+	sock->sk_peercred = saved_unix->peercred;
+	sprint( "end ???" );
 	//
 	
 	// Restore the receive queue.
-	cur = saved_file->socket.unix.head;
+	sprint( "Before loop.\n" );
+	cur = saved_unix->head;
+	
+	unix_state_lock( sock );
+	
+	spin_lock( &sock->sk_receive_queue.lock );
+	
 	while ( cur )
 	{
 		//
 		skb = sock_alloc_send_skb( sock, cur->len, 1, &status );
-		if ( status < 0 )
+		if ( !skb || status < 0 )
 		{
 			panic( "Unable to allocate UNIX socket buffer.  Error: %d\n", -status );
 		}
 		//
 		
 		//
+		sprint( "Before copies.\n" );
 		memcpy( skb->cb, cur->cb, sizeof( skb->cb ) );
 		
 		memcpy( skb_put( skb, cur->len ), cur->data, cur->len );
 		
 		skb_queue_tail( &sock->sk_receive_queue, skb );
+		sprint( "After copies.\n" );
 		//
 		
 		//
 		cur = cur->next;
 		//
 	}
+	
+	spin_unlock( &sock->sk_receive_queue.lock );
+	
+	unix_state_unlock( sock );
+	
+	sprint( "After loop.\n" );
 	//
+	
+	sprint( "##### end restore_unix_socket()\n" );
 	
 	return;
 }

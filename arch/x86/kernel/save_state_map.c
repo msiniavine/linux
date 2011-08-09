@@ -23,31 +23,6 @@ static int page_pool_index = -1;
 static int page_offset = PAGE_SIZE;
 static int map_count = 0;
 
-// first appears to be a pointer to a "not backed up" object.
-// second appears to be a pointer to a "backed up" object.
-//
-// For example:
-// 	If first points to a task_struct, then
-// 	second points to a saved_task_struct.
-//
-// 	If first points to a vm_area_struct, then
-// 	second points to a saved_vm_area.
-//
-//	If first points to a mm_struct, then
-//	second points to a saved_mm_struct.
-//
-//	If first points to a page, then
-//	second points to a saved_page.
-//
-// I am not sure why struct map_entry is used.
-struct map_entry
-{
-	struct list_head list;
-	void* first;
-	void* second;
-};
-//
-
 static void* alloc_map(size_t size)
 {
 	unsigned long ret;

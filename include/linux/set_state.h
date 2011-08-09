@@ -119,8 +119,13 @@ struct saved_tcp_state
 };
 
 //
+/*enum {	SOCKET_NONE,
+	SOCKET_BOUND,
+	SOCKET_CONNECTED };*/
+	
 enum {	SOCKET_NONE,
 	SOCKET_BOUND,
+	SOCKET_ACCEPTED,
 	SOCKET_CONNECTED };
 
 struct saved_sk_buff
@@ -133,18 +138,25 @@ struct saved_sk_buff
 	struct saved_sk_buff *next;
 };
 
+struct saved_unix_address
+{
+	int		len;
+	unsigned	hash;
+	struct sockaddr_un address;
+};
+
 struct saved_unix_socket
 {
 	int kind;
 	int state;
 	
 	struct saved_unix_socket *peer;
+	struct saved_unix_socket *listen;
 	
 	unsigned int shutdown :2;
 	struct ucred peercred;
 
-	char path[UNIX_PATH_MAX];
-	struct sockaddr_un address;
+	struct saved_unix_address unix_address;
 	
 	struct saved_sk_buff *head;
 };
@@ -389,7 +401,30 @@ struct global_state_info
 	struct pipes_to_close *pipe_close_head;
 };
 
-struct map_entry;
+// first appears to be a pointer to a "not backed up" object.
+// second appears to be a pointer to a "backed up" object.
+//
+// For example:
+// 	If first points to a task_struct, then
+// 	second points to a saved_task_struct.
+//
+// 	If first points to a vm_area_struct, then
+// 	second points to a saved_vm_area.
+//
+//	If first points to a mm_struct, then
+//	second points to a saved_mm_struct.
+//
+//	If first points to a page, then
+//	second points to a saved_page.
+//
+// I am not sure why struct map_entry is used.
+struct map_entry
+{
+	struct list_head list;
+	void* first;
+	void* second;
+};
+//
 
 struct map_entry* new_map(void);
 void delete_map(struct map_entry*);
