@@ -33,6 +33,9 @@ extern int debug_was_state_restored;
 #define csprint(format, ...)
 #endif
 
+// Enable some cheesy work arounds, in tcp 
+#define SET_STATE_HAX 1
+
 #define tlprintf(format, ...) {		       \
 		struct task_struct* __tsk = current;		\
 		if(!strcmp("test_sockload", __tsk->comm))		\
