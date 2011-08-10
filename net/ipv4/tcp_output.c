@@ -1047,7 +1047,10 @@ unsigned int tcp_current_mss(struct sock *sk, int large_allowed)
 	struct tcp_md5sig_key *md5;
 
 	mss_now = tp->mss_cache;
-
+#if SET_STATE_HAX
+#warning "Enabled set_state mss override, fix mss later please"
+	mss_now = 1448;
+#else
 	if (large_allowed && sk_can_gso(sk))
 		doing_tso = 1;
 
@@ -1067,7 +1070,7 @@ unsigned int tcp_current_mss(struct sock *sk, int large_allowed)
 		int delta = (int) header_len - tp->tcp_header_len;
 		mss_now -= delta;
 	}
-
+#endif
 	xmit_size_goal = mss_now;
 
 	if (doing_tso) {
