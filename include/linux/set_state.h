@@ -157,6 +157,9 @@ struct saved_unix_socket
 
 	struct saved_unix_address unix_address;
 	
+	uid_t user;
+	gid_t group;
+	
 	struct saved_sk_buff *head;
 };
 //

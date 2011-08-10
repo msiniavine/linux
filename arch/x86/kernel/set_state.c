@@ -75,8 +75,13 @@ int bind_socket ( struct file *file, struct sockaddr *address, int address_lengt
 int listen_socket ( struct file *file, int backlog );
 //
 
-// This is an altered version of do_unlinkat() in fs/namei.c
-static int unlink_file ( char *path );
+// This is an altered version of do_unlinkat() in fs/namei.c.
+int unlink_file ( char *path );
+//
+
+// The function set_owner() is an altered version of the chown() system call in fs/open.c.
+int chown_common ( struct path *path, uid_t user, gid_t group );
+int set_owner ( char *path, uid_t user, gid_t group );
 //
 
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
@@ -2673,8 +2678,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	
 	if ( saved_unix->kind == SOCKET_BOUND )
 	{
-		int index;
-	
 		sprint( "saved_unix->kind == SOCKET_BOUND\n" );
 	
 		//
@@ -2682,6 +2685,11 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		if ( address.sun_path[0] )
 		{
 			sprint( "address.sun_path: \"%s\"", address.sun_path );
+			
+			if ( address.sun_path[0] != '/' )
+			{
+				panic( "Unable to handle UNIX socket bind address of non-absolute path \'%s\'.\n", address.sun_path );
+			}
 		
 			status = unlink_file( address.sun_path );
 			if ( status < 0 )
@@ -2696,6 +2704,20 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		if ( status < 0 )
 		{
 			panic( "Unable to rebind UNIX socket.  Error: %d\n", -status );
+		}
+		//
+		
+		//
+		if ( address.sun_path[0] )
+		{
+			sprint( "saved_unix->user: %d\n", saved_unix->user );
+			sprint( "saved_unix->group: %d\n", saved_unix->group );
+		
+			status = set_owner( address.sun_path, saved_unix->user, saved_unix->group );
+			if ( status < 0 )
+			{
+				panic( "Unable to restore ownership of bounded UNIX socket file.  Error: %d\n", -status );
+			}
 		}
 		//
 		
@@ -3094,8 +3116,8 @@ done:
 }
 //
 
-// This is an altered version of do_unlinkat() in fs/namei.c
-static int unlink_file ( char *path )
+// This is an altered version of do_unlinkat() in fs/namei.c.
+int unlink_file ( char *path )
 {
 	//
 	int error;
@@ -3160,6 +3182,70 @@ slashes:
 	error = !dentry->d_inode ? -ENOENT :
 		S_ISDIR(dentry->d_inode->i_mode) ? -EISDIR : -ENOTDIR;
 	goto exit2;
+}
+//
+
+// The function set_owner() is an altered version of the chown() system call in fs/open.c.
+int chown_common ( struct path *path, uid_t user, gid_t group )
+{
+	struct inode *inode = path->dentry->d_inode;
+	int error;
+	struct iattr newattrs;
+
+	newattrs.ia_valid =  ATTR_CTIME;
+	if (user != (uid_t) -1) {
+		newattrs.ia_valid |= ATTR_UID;
+		newattrs.ia_uid = user;
+	}
+	if (group != (gid_t) -1) {
+		newattrs.ia_valid |= ATTR_GID;
+		newattrs.ia_gid = group;
+	}
+	if (!S_ISDIR(inode->i_mode))
+		newattrs.ia_valid |=
+			ATTR_KILL_SUID | ATTR_KILL_SGID | ATTR_KILL_PRIV;
+	mutex_lock(&inode->i_mutex);
+	error = security_path_chown(path, user, group);
+	if (!error)
+		error = notify_change(path->dentry, &newattrs);
+	mutex_unlock(&inode->i_mutex);
+
+	return error;
+}
+
+int set_owner ( char *path, uid_t user, gid_t group )
+{
+	//
+	struct nameidata nd;
+	struct path patho;
+	
+	int error = 0;
+	//
+
+	//
+	error = path_lookup( path, LOOKUP_FOLLOW, &nd );
+	if ( error < 0 )
+	{
+		goto done;
+	}
+	
+	patho = nd.path;
+	
+	error = mnt_want_write( patho.mnt );
+	if ( error < 0 )
+	{
+		goto put_path;
+	}
+	error = chown_common( &patho, user, group );
+	mnt_drop_write( patho.mnt );
+	//
+	
+	//
+put_path:
+	path_put( &patho );
+done:
+	return error;
+	//
 }
 //
 

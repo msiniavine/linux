@@ -33,6 +33,7 @@
 
 #include <linux/mousedev.h>
 #include <linux/skbuff.h>
+#include <linux/namei.h>
 
 static void get_path_absolute ( struct file *file, char *path );
 
@@ -51,6 +52,10 @@ static void save_mouse ( struct file *file, struct saved_file *saved_file );
 
 static int file_is_unix_socket ( struct file *file );
 static void save_unix_socket ( struct file *file, struct saved_file *saved_file, struct map_entry *head );
+
+// This is an altered version of the function vfs_fstatat() in fs/stat.c
+int get_status ( char *path, struct kstat *stat );
+//
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 static struct notifier_block fr_notifier = {
@@ -2150,9 +2155,14 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	
 	struct map_entry *entry_current;
 	
+	struct sockaddr_un address;
+	struct kstat stat;
+	
 	struct sk_buff *skb;
 	struct saved_sk_buff *saved_skb;
 	struct saved_sk_buff *tail;
+	
+	int status = 0;
 	//
 	
 	// This here may be temporary...
@@ -2169,6 +2179,12 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	
 	if ( unix->addr )
 	{
+		//
+		memcpy( &saved_unix->unix_address.address, unix->addr->name, unix->addr->len );
+		
+		saved_unix->unix_address.length = unix->addr->len;
+		//
+		
 		//
 		if ( sock->sk_state == TCP_ESTABLISHED )
 		{
@@ -2224,15 +2240,30 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 				insert_entry( head, unix->addr, saved_unix );
 				//
 			}
+			
+			//
+			address = saved_unix->unix_address.address;
+			
+			if ( address.sun_path[0] )
+			{
+				if ( address.sun_path[0] != '/' )
+				{
+					panic( "Unable to handle UNIX socket bind address of non-absolute path \'%s\'.\n", address.sun_path );
+				}
+				
+				status = get_status( address.sun_path, &stat );
+				if ( status < 0 )
+				{
+					panic( "Unable to obtain ownership of bounded UNIX socket file.  Error: %d\n", -status );
+				}
+		
+				saved_unix->user = stat.uid;
+				saved_unix->group = stat.gid;
+			}
+			//
 		
 			saved_unix->kind = SOCKET_BOUND;
 		}
-		//
-		
-		//
-		memcpy( &saved_unix->unix_address.address, unix->addr->name, unix->addr->len );
-		
-		saved_unix->unix_address.length = unix->addr->len;
 		//
 	}
 	
@@ -2314,4 +2345,36 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	
 	return;
 }
+
+// This is an altered version of the function vfs_fstatat() in fs/stat.c
+int get_status ( char *path, struct kstat *stat )
+{
+	//
+	struct nameidata nd;
+	struct path patho;
+	
+	int error = 0;
+	//
+
+	//
+	error = path_lookup( path, LOOKUP_FOLLOW, &nd );
+	if ( error < 0 )
+	{
+		goto done;
+	}
+	
+	patho = nd.path;
+	//
+
+	//
+	error = vfs_getattr( patho.mnt, patho.dentry, stat );
+	path_put( &patho );
+	//
+	
+	//
+done:
+	return error;
+	//
+}
+//
 
