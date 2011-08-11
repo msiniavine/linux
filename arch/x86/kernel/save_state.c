@@ -457,6 +457,7 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->rcv_ssthresh = tp->rcv_ssthresh;
 	saved_tcp->advmss = tp->advmss;
 	saved_tcp->rcv_wscale = tp->rx_opt.rcv_wscale;
+	saved_tcp->snd_wscale = tp->rx_opt.snd_wscale;
 
 	saved_tcp->pred_flags = tp->pred_flags;
 	saved_tcp->tcp_header_len = tp->tcp_header_len;

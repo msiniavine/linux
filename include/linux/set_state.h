@@ -127,6 +127,7 @@ struct saved_tcp_state
 	u16 tcp_header_len;
 
 	int rcv_wscale;
+	int snd_wscale;
 
 	u32 copied_seq;
 
