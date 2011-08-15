@@ -22,6 +22,7 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 // TCP hook used to drop some incoming tcp packets until the state is restored
 void set_state_tcp_hook(void);
 void unregister_set_state_hook(void);
+void unblock_port(u16 port);
 
 #define STATE_DEBUG 1
 #if STATE_DEBUG

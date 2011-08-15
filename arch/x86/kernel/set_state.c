@@ -1322,6 +1322,9 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	}
 	tp->snd_nxt = stcp->snd_nxt;
 
+	// unblock port, so no acks are missed
+	unblock_port(stcp->sport);
+
 	if(copied)
 		tcp_push(sk, 0, mss_now, tp->nonagle);
 

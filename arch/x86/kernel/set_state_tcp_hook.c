@@ -6,6 +6,8 @@
 #include <linux/set_state.h>
 
 static LIST_HEAD(blocked_ports);
+static spinlock_t ports_lock = SPIN_LOCK_UNLOCKED;
+
 struct port_entry
 {
 	u16 port;
@@ -19,6 +21,7 @@ static unsigned int set_state_tcp_rx_hook(unsigned int hook, struct sk_buff* skb
 	struct iphdr* ih;
 	u16 port;
 	struct port_entry* pe;
+	unsigned long flags;
 	
 	if(!skb) return NF_ACCEPT;
 
@@ -32,14 +35,16 @@ static unsigned int set_state_tcp_rx_hook(unsigned int hook, struct sk_buff* skb
 	th = (struct tcphdr*)((u32*)ih + ih->ihl);
 	port = ntohs(th->dest);
 
+	spin_lock_irqsave(&ports_lock, flags);
 	list_for_each_entry(pe, &blocked_ports, next)
 	{
 		if(pe->port == port)
 		{
+			spin_unlock_irqrestore(&ports_lock, flags);
 			return NF_DROP;
 		}
 	}
-
+	spin_unlock_irqrestore(&ports_lock, flags);
 	return NF_ACCEPT;
 }
 
@@ -52,6 +57,49 @@ static struct nf_hook_ops set_state_ops =
 	.priority = NF_IP_PRI_RAW
 };
 
+void block_port(u16 port)
+{
+	struct port_entry* pe;
+	unsigned long flags;
+	sprint("Blocking port %u\n", port);
+	pe = kmalloc(sizeof(*pe), GFP_KERNEL);
+	if(!pe)
+	{
+		sprint("Out of memory when blocking port\n");
+		return; 
+	}
+	pe->port = port;
+	spin_lock_irqsave(&ports_lock, flags);
+	list_add_tail(&pe->next, &blocked_ports);
+	spin_unlock_irqrestore(&ports_lock, flags);
+}
+
+void unblock_port(u16 port)
+{
+	struct port_entry* pe = NULL;
+	unsigned long flags;
+	spin_lock_irqsave(&ports_lock, flags);
+	list_for_each_entry(pe, &blocked_ports, next)
+	{
+		if(pe->port == port)
+		{
+			list_del(&pe->next);
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&ports_lock, flags);
+	kfree(pe);
+}
+
+int blocking_ports(void)
+{
+	int empty;
+	unsigned long flags;
+	spin_lock_irqsave(&ports_lock, flags);
+	empty = list_empty(&blocked_ports);
+	spin_unlock_irqrestore(&ports_lock, flags);
+	return !empty;
+}
 
 static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 {
@@ -63,7 +111,6 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 	{
 		struct saved_socket* socket;
 		struct saved_tcp_state* tcp;
-		struct port_entry* pe;
 
 		if(file->type != SOCKET) continue;
 
@@ -72,16 +119,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 
 		if(tcp == NULL) continue;
 
-		sprint("Blocking port %d\n", tcp->sport);
-		pe = kmalloc(sizeof(*pe), GFP_KERNEL);
-		if(!pe)
-		{
-			sprint("Out of memory when setting up set_state hook\n");
-			return;
-		}
-		
-		pe->port = tcp->sport;
-		list_add_tail(&pe->next, &blocked_ports);
+		block_port(tcp->sport);
 
 	}
 
@@ -110,7 +148,7 @@ void set_state_tcp_hook(void)
 {
 	int err;
 	find_blocked_ports();
-	if(list_empty(&blocked_ports)) return;
+	if(!blocking_ports()) return;
 
 	err = nf_register_hook(&set_state_ops);
 	if(err < 0)
@@ -123,7 +161,7 @@ void set_state_tcp_hook(void)
 void unregister_set_state_hook(void)
 {
 	struct port_entry* pe, *n;
-	if(list_empty(&blocked_ports)) return;
+	if(!blocking_ports()) return;
 	nf_unregister_hook(&set_state_ops);
 
 	list_for_each_entry_safe(pe, n, &blocked_ports, next)
