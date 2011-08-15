@@ -1467,6 +1467,11 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->copied_seq = saved_socket->tcp->copied_seq;
 //	tp->pushed_seq = saved_socket->tcp->snd_nxt;
 
+	// Packets in flight and congestion control
+	sprint("Packets in flight %u, saved snd_cwnd %u\n", saved_socket->tcp->packets_in_flight, saved_socket->tcp->snd_cwnd);
+	tp->packets_out = saved_socket->tcp->packets_in_flight;  // Set correct number of packets in flight
+	tp->snd_cwnd = tp->packets_out + 1; // open up the congestion window so that one packet could be sent at least
+	
 	// Set correct mtu and mss
 	tp->mss_cache = saved_socket->tcp->mss_cache;
 	tp->xmit_size_goal = saved_socket->tcp->xmit_size_goal;

@@ -137,6 +137,10 @@ struct saved_tcp_state
 	u32 dst_mtu;  // 0 if dst is not available
 	u32 rx_opt_mss_clamp;
 
+	// Packets in flight and congestion window
+	u32 packets_in_flight;
+	u32 snd_cwnd;
+
 	u32 sk_sndbuf;
 
 	u32 nonagle;

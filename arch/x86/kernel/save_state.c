@@ -466,6 +466,9 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->mss_cache = tp->mss_cache;
 	saved_tcp->xmit_size_goal = tp->xmit_size_goal;		
 	saved_tcp->rx_opt_mss_clamp = tp->rx_opt.mss_clamp;
+
+	saved_tcp->snd_cwnd = tp->snd_cwnd;
+	saved_tcp->packets_in_flight = tcp_packets_in_flight(tp);
 	
 	if(dst)
 	{
