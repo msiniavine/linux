@@ -1454,6 +1454,7 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->advmss = saved_socket->tcp->advmss;
 	tp->rx_opt.rcv_wscale = saved_socket->tcp->rcv_wscale;
 	tp->rx_opt.snd_wscale = saved_socket->tcp->snd_wscale;
+	sprint("rcvwscle %u, sndwscale %u, snd_wnd %u\n", saved_socket->tcp->rcv_wscale, saved_socket->tcp->snd_wscale, saved_socket->tcp->snd_wnd);
 
 	tp->pred_flags = saved_socket->tcp->pred_flags;
 	tp->tcp_header_len = saved_socket->tcp->tcp_header_len;

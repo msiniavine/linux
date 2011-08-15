@@ -67,6 +67,7 @@ static void tcp_event_new_data_sent(struct sock *sk, struct sk_buff *skb)
 	unsigned int prior_packets = tp->packets_out;
 
 	tcp_advance_send_head(sk, skb);
+	sprint("Advancing snd_nxt to %u\n", TCP_SKB_CB(skb)->end_seq);
 	tp->snd_nxt = TCP_SKB_CB(skb)->end_seq;
 
 	/* Don't override Nagle indefinately with F-RTO */
@@ -695,6 +696,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	if (after(tcb->end_seq, tp->snd_nxt) || tcb->seq == tcb->end_seq)
 		TCP_INC_STATS(sock_net(sk), TCP_MIB_OUTSEGS);
 
+	sprint("Sending skb down %u-%u\n", tcb->seq, tcb->end_seq);
 	err = icsk->icsk_af_ops->queue_xmit(skb, 0);
 	if (likely(err <= 0))
 		return err;
@@ -1147,6 +1149,7 @@ static inline unsigned int tcp_cwnd_test(struct tcp_sock *tp,
 
 	in_flight = tcp_packets_in_flight(tp);
 	cwnd = tp->snd_cwnd;
+	sprint("in_flight %u cwnd %u\n", in_flight, cwnd);
 	if (in_flight < cwnd)
 		return (cwnd - in_flight);
 
@@ -1553,19 +1556,31 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle)
 
 		cwnd_quota = tcp_cwnd_test(tp, skb);
 		if (!cwnd_quota)
+		{
+			sprint("Congestion test failed\n");
 			break;
+		}
 
 		if (unlikely(!tcp_snd_wnd_test(tp, skb, mss_now)))
+		{
+			sprint("Send window test failed\n");
 			break;
-
+		}
+		
 		if (tso_segs == 1) {
 			if (unlikely(!tcp_nagle_test(tp, skb, mss_now,
 						     (tcp_skb_is_last(sk, skb) ?
 						      nonagle : TCP_NAGLE_PUSH))))
+			{
+				sprint("Naggle test failed\n");
 				break;
+			}
 		} else {
 			if (tcp_tso_should_defer(sk, skb))
+			{
+				sprint("TSO should defer\n");
 				break;
+			}
 		}
 
 		limit = mss_now;
@@ -1575,7 +1590,10 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle)
 
 		if (skb->len > limit &&
 		    unlikely(tso_fragment(sk, skb, limit, mss_now)))
+		{
+			sprint("tso framgment test failed\n");
 			break;
+		}
 
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
 
@@ -2003,6 +2021,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	 */
 	TCP_SKB_CB(skb)->when = tcp_time_stamp;
 
+	sprint("Retransmit\n");
 	err = tcp_transmit_skb(sk, skb, 1, GFP_ATOMIC);
 
 	if (err == 0) {
