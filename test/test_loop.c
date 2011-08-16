@@ -9,7 +9,7 @@ int main ( void )
 	
 	int index = 0;
 	
-	fork();
+	//fork();
 	
         while(1)
 	{
@@ -22,4 +22,3 @@ int main ( void )
 	
 	return 0;
 }
-

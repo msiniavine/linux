@@ -4,6 +4,7 @@
 #include <linux/socket.h>
 #include <linux/un.h>
 #include <net/af_unix.h>
+#include <linux/termios.h>
 
 #ifdef unix
 #undef unix
@@ -237,6 +238,10 @@ struct saved_vc_data
 	
 	unsigned short v_active;
 	struct vt_mode vt_mode;
+	
+	struct ktermios kterm;
+	
+	unsigned char kbdmode :2;
 };
 
 struct saved_fb_info
@@ -285,6 +290,16 @@ struct saved_mouse
 };
 //
 
+//
+struct saved_fown_struct
+{
+	pid_t pid;
+	enum pid_type pid_type;
+	uid_t uid, euid;
+	int signum;
+};
+//
+
 struct saved_file
 {
 	unsigned int type;
@@ -293,6 +308,9 @@ struct saved_file
 	long count;
 	int flags;
 	loff_t f_pos;
+	
+	struct saved_fown_struct owner;
+	
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_file* next;
@@ -343,7 +361,6 @@ struct saved_mm_struct
 	pgd_t pgd[SAVED_PGD_SIZE];  // leave the upper 256 out of 1024 entries unchanged because they are used by the kernel
 };
 
-
 struct saved_task_struct
 {
 	struct saved_task_struct* next;
@@ -360,8 +377,6 @@ struct saved_task_struct
 	struct pt_regs registers;
 	unsigned int gs;                                      // gs registor is not saved automatically
 	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];  // Thread local storage segment descriptors
-
-
 
 	char exe_file[PATH_LENGTH];         // name of the executable file
 	struct saved_file* open_files;

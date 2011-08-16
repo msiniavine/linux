@@ -34,6 +34,16 @@
 #include <linux/mousedev.h>
 #include <linux/skbuff.h>
 #include <linux/namei.h>
+#include <asm/siginfo.h>
+#include <asm/signal.h>
+
+#include <linux/kbd_kern.h>
+#include <linux/smp_lock.h>
+
+#include <linux/termios.h>
+
+#include <linux/device.h>
+#include <linux/reboot.h>
 
 static void get_path_absolute ( struct file *file, char *path );
 
@@ -55,6 +65,18 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 
 // This is an altered version of the function vfs_fstatat() in fs/stat.c
 int get_status ( char *path, struct kstat *stat );
+//
+
+// This is an altered version of kill_something_info() in kernel/signal.c.
+int send_all_signal ( int signal_number );
+//
+
+// This is an altered version of copy_termios() in drivers/char/tty_ioctl.c.
+int get_termios ( struct tty_struct *tty, struct ktermios *kterm );
+//
+
+//
+void prepare ( void );
 //
 
 static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
@@ -358,15 +380,15 @@ static void get_path_absolute ( struct file *file, char *path )
 	struct dentry *dentry = file->f_dentry;
 	struct vfsmount *vfsmount = file->f_vfsmnt;
 	
-	struct dentry **elements;
-	//static struct dentry *elements[PATH_MAX];
+	//struct dentry **elements;
+	static struct dentry *elements[PATH_MAX];
 	int index = 0;
 	//
 	
 	sprint( "##### start get_path_absolute()\n" );
 	
 	//
-	sprint( "Before vmalloc().\n" );
+	/*sprint( "Before vmalloc().\n" );
 	
 	elements = ( struct dentry ** ) vmalloc( PATH_MAX * sizeof( struct dentry * ) );
 	if ( !elements )
@@ -374,7 +396,7 @@ static void get_path_absolute ( struct file *file, char *path )
 		panic( "Unable to allocate memory in function get_path_absolute().\n" );
 	}
 	
-	sprint( "After vmalloc().\n" );
+	sprint( "After vmalloc().\n" );*/
 	//
 	
 	sprint( "Before.\n" );
@@ -411,7 +433,6 @@ static void get_path_absolute ( struct file *file, char *path )
 	}
 	while ( !IS_ROOT( dentry ) );
 	
-	//elements[index] = dentry;
 	index--;
 	//
 	
@@ -432,7 +453,7 @@ static void get_path_absolute ( struct file *file, char *path )
 	
 	//
 free:
-	vfree( elements );
+	//vfree( elements );
 	
 //done:
 	sprint( "path: \"%s\"\n", path );
@@ -618,12 +639,17 @@ static int file_is_vc_terminal ( struct file *file )
 // Warning: This function does not save everything that should be saved.
 static void save_vc_term_info(struct file* f, struct saved_file* file)
 {
+	//
 	struct tty_struct* tty;
 	struct tty_driver* driver;
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd;
 	unsigned char* screen_buffer;
 	
+	struct kbd_struct *kbd;
+	//
+	
+	//
 	tty = (struct tty_struct*)f->private_data;
 	//sprint("tty private data %p\n", tty);
 	if(tty->magic != TTY_MAGIC)
@@ -637,7 +663,12 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	}
 
 	vcd = (struct vc_data*)tty->driver_data;
-	//sprint("driver data %p\n", vcd);
+	
+	kbd = &kbd_table[vcd->vc_num];
+	//
+	
+	lock_kernel();
+	
 	svcd = (struct saved_vc_data*)alloc(sizeof(*svcd));
 	svcd->index = vcd->vc_num;
 	svcd->rows = vcd->vc_rows;
@@ -661,6 +692,16 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	
 	svcd->vc_mode = vcd->vc_mode;
 	//
+	
+	//
+	svcd->kbdmode = kbd->kbdmode;
+	//
+	
+	//
+	get_termios( tty, &svcd->kterm );
+	//
+	
+	unlock_kernel();
 
 	sprint("Saved terminal state\n");
 	
@@ -883,6 +924,18 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		
 		file->flags = f->f_flags;
 		file->f_pos = f->f_pos;
+		//
+		
+		//
+		read_lock( &f->f_owner.lock );
+		
+		file->owner.pid = pid_vnr( f->f_owner.pid );
+		file->owner.pid_type = f->f_owner.pid_type;
+		file->owner.uid = f->f_owner.uid;
+		file->owner.euid = f->f_owner.euid;
+		file->owner.signum = f->f_owner.signum;
+		
+		read_unlock( &f->f_owner.lock );
 		//
 
 		// The first three if and/or else if blocks identify what kind of file the
@@ -1426,12 +1479,9 @@ static void print_saved_processes(void)
 static int load_state = 0;
 static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x)
 {
-	local_irq_disable();
+	prepare();
+
 	save_running_processes();
-	local_irq_enable();
-	
-	//save_fbs();
-	//save_con2fbmaps();
 	
 	sprint( "State saved\n");
 	return 0;
@@ -1439,12 +1489,9 @@ static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, v
 
 asmlinkage void sys_save_state(void)
 {
-	local_irq_disable();
-	save_running_processes();
-	local_irq_enable();
+	prepare();
 	
-	//save_fbs();
-	//save_con2fbmaps();
+	save_running_processes();
 }
 
 static int set_load_state(char* arg)
@@ -1553,34 +1600,17 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	//
 	
 	sprint( "##### start sys_load_saved_state()\n" );
-	
-	/*   unsigned long i; */
-	/*   unsigned long start = FASTREBOOT_REGION_START; */
-	/*   unsigned long end = FASTREBOOT_REGION_START + FASTREBOOT_REGION_SIZE; */
-	/*   sprint("Begin: %lu End:%lu\n",  start >> PAGE_SHIFT,  */
-	/* 	 end >> PAGE_SHIFT); */
-	/*   for(i = start; i<=end; i+=PAGE_SIZE) */
-	/*   { */
-	/* 	  unsigned long pfn = i>>PAGE_SHIFT; */
-	/* 	  struct page* page = pfn_to_page(pfn); */
-	/* 	  if(atomic_read(&page->_count) != 1 || page->flags != 1073742848 || !PageReserved(page)) */
-	/* 	  { */
-	/* 		  sprint("Bad page %lu: count: %d, flags: %08lx, reserved: %s\n", pfn, atomic_read(&page->_count),  */
-	/* 			 page->flags, PageReserved(page) ? "yes" : "no"); */
-	/* 		  return 0; */
-	/* 	  } */
-	/*   } */
 
 	state = (struct saved_state*)get_reserved_region();
 	
 	if(state->processes == NULL)
 	{
 		sprint( "No more saved state\n");
+		
 		sprint( "##### end sys_load_saved_state()\n" );
 		return -1;
 	}
 	
-	local_irq_disable();
 	//while ( state->processes )
 	//{
 		print_saved_processes();
@@ -1594,7 +1624,6 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	
 		sprint( "state->counter: %d\n", state->counter );
 	//}
-	local_irq_enable();
 	
 	/*if( !state->processes )
 	{
@@ -2086,10 +2115,10 @@ static void save_mouse ( struct file *file, struct saved_file *saved_file )
 	}*/
 	//
 	
-	// Interrupts already disabled before call to save_running_processes().
-	spin_lock( &client->packet_lock );
+	//
+	spin_lock_irq( &client->packet_lock );
 	memcpy( saved_client->packets, client->packets, sizeof( client->packets ) );
-	spin_unlock( &client->packet_lock );
+	spin_unlock_irq( &client->packet_lock );
 	
 	saved_client->head = client->head;
 	saved_client->tail = client->tail;
@@ -2254,7 +2283,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 				status = get_status( address.sun_path, &stat );
 				if ( status < 0 )
 				{
-					panic( "Unable to obtain ownership of bounded UNIX socket file.  Error: %d\n", -status );
+					panic( "Unable to obtain ownership information of bounded UNIX socket file.  Error: %d\n", -status );
 				}
 		
 				saved_unix->user = stat.uid;
@@ -2375,6 +2404,90 @@ int get_status ( char *path, struct kstat *stat )
 done:
 	return error;
 	//
+}
+//
+
+// This is an altered version of kill_something_info() in kernel/signal.c.
+int send_all_signal ( int signal_number )
+{
+	//
+	struct siginfo info;
+	
+	int count = 0;
+	
+	struct task_struct *p;
+	
+	int ret;
+	int retval = 0;
+	//
+	
+	//
+	info.si_signo = signal_number;
+	info.si_errno = 0;
+	info.si_code = SI_USER;
+	info.si_pid = task_tgid_vnr( current );
+	info.si_uid = current_uid();
+	//
+
+	//
+	read_lock(&tasklist_lock);
+
+	for_each_process ( p )
+	{
+		if ( task_pid_vnr( p ) > 1 && !same_thread_group( p, current ) )
+		{
+			int err = group_send_sig_info( signal_number, &info, p );
+			++count;
+			if ( err != -EPERM )
+			{
+				retval = err;
+			}
+		}
+	}
+	ret = count ? retval : -ESRCH;
+	
+	read_unlock( &tasklist_lock );
+	//
+
+	return ret;
+}
+//
+
+// This is an altered version of copy_termios() in drivers/char/tty_ioctl.c.
+int get_termios ( struct tty_struct *tty, struct ktermios *kterm )
+{
+	//
+	int ret = 0;
+	//
+	
+	//
+	if ( !tty || !kterm )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	//
+	
+	//
+	mutex_lock( &tty->termios_mutex );
+	memcpy( kterm, tty->termios, sizeof( struct ktermios ) );
+	mutex_unlock( &tty->termios_mutex );
+	//
+	
+done:
+	return ret;
+}
+//
+
+//
+void prepare ( void )
+{
+	device_shutdown();
+	sysdev_shutdown();
+	machine_shutdown();
+	
+	return;
 }
 //
 

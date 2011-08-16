@@ -59,6 +59,13 @@
 
 #include <linux/mousedev.h>
 
+#include <linux/kbd_kern.h>
+#include <linux/smp_lock.h>
+
+#include <linux/termios.h>
+
+#define NOSET_MASK(x, y, z) (x = ((x) & ~(z)) | ((y) & (z)))
+
 void restore_listen_socket ( struct saved_file *saved_file );
 
 static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_info );
@@ -80,8 +87,16 @@ int unlink_file ( char *path );
 //
 
 // The function set_owner() is an altered version of the chown() system call in fs/open.c.
-int chown_common ( struct path *path, uid_t user, gid_t group );
+static int chown_common ( struct path *path, uid_t user, gid_t group );
 int set_owner ( char *path, uid_t user, gid_t group );
+//
+
+//
+static void restore_fown_struct ( struct saved_file *saved_file, struct file *file );
+//
+
+// This is an altered version of the combination of set_termios() and change_termios() in drivers/char/tty_ioctl.c.
+int set_termios ( struct tty_struct *tty, struct ktermios *kterm );
 //
 
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
@@ -945,14 +960,19 @@ void redraw_screen(struct vc_data*, int);
 // Warning: This function does not restore everything that should be restore.
 struct file* restore_vc_terminal(struct saved_file* f)
 {
+	//
 	struct file* file;
 	struct tty_struct* tty;
 	struct tty_driver* driver;
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd = f->vcd;
+	
+	struct kbd_struct *kbd;
+	
 	char full_name[PATH_LENGTH];
 	unsigned long arg = 0;
 	int ret;
+	//
 	
 	//memset(full_name, 0, sizeof(full_name));
 	//strcat(full_name, "/dev");
@@ -967,7 +987,14 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	tty = file->private_data;
 	driver = tty->driver;
 	vcd = tty->driver_data;
+	kbd = &kbd_table[vcd->vc_num];
 	//
+	
+	//
+	restore_fown_struct( f, file );
+	//
+	
+	lock_kernel();
 	
 	//
 	arg = svcd->v_active;
@@ -1038,6 +1065,42 @@ struct file* restore_vc_terminal(struct saved_file* f)
 		}
 	}
 	//
+	
+	//
+	arg = ((svcd->kbdmode == VC_RAW) ? K_RAW :
+				 (kbd->kbdmode == VC_MEDIUMRAW) ? K_MEDIUMRAW :
+				 (kbd->kbdmode == VC_UNICODE) ? K_UNICODE :
+				 K_XLATE);
+	
+	switch ( arg )
+	{
+		case K_RAW:
+			kbd->kbdmode = VC_RAW;
+			break;
+		case K_MEDIUMRAW:
+			kbd->kbdmode = VC_MEDIUMRAW;
+			break;
+		case K_XLATE:
+			kbd->kbdmode = VC_XLATE;
+			compute_shiftstate();
+			break;
+		case K_UNICODE:
+			kbd->kbdmode = VC_UNICODE;
+			compute_shiftstate();
+			break;
+		default:
+			panic( "Unable to restore VC terminal due to invalid KBD mode %d.\n", arg );
+	}
+	tty_ldisc_flush(tty);
+	//
+	
+	//
+	ret = set_termios( tty, &svcd->kterm );
+	if ( ret < 0 )
+	{
+		panic( "Unable to restore VC terminal attributes.  Error: %d\n", ret );
+	}
+	//
 
 	//tty = (struct tty_struct*)file->private_data;
 	if(tty->magic != TTY_MAGIC)
@@ -1058,6 +1121,9 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	vcd->vc_x = svcd->x;
 	vcd->vc_y = svcd->y;
 	redraw_screen(vcd, 0);
+	
+	unlock_kernel();
+	
 	return file;
 }
 
@@ -1628,6 +1694,8 @@ void restore_files ( struct saved_task_struct* state, struct global_state_info* 
 				restore_file(f);
 				break;
 		}
+		
+		
 	}
 	//
 }
@@ -1818,7 +1886,6 @@ void restore_signals(struct saved_task_struct* state)
 	
 	current->blocked = state->sighand.blocked;
 	current->pending.signal = state->sighand.pending;
-
 	current->signal->shared_pending.signal = state->sighand.shared_pending;
 	spin_unlock_irq(&sighand->siglock);	
 
@@ -1842,7 +1909,7 @@ void restore_signals(struct saved_task_struct* state)
 
 void become_user_process(void)
 {
-	current->flags = current->flags & ~PF_KTHREAD;
+	current->flags &= ~PF_KTHREAD;
 }
 
 void restore_creds(struct saved_task_struct* state)
@@ -2264,7 +2331,6 @@ int do_set_state(struct state_info* info)
 			list_add_tail(&current->sibling, &current->real_parent->children);
 		}
 
-
 		sprint("Current %d, parent %d %s\n", current->pid, current->real_parent->pid, current->real_parent->comm);
 
 		if (atomic_dec_and_test(&info->global_state->processes_left)) {
@@ -2589,10 +2655,10 @@ static struct file *restore_mouse ( struct saved_file *saved_file )
 	//
 	//
 	
-	// Interrupts already disabled before call to set_state().
-	spin_lock( &client->packet_lock );
+	//
+	spin_lock_irq( &client->packet_lock );
 	memcpy( client->packets, saved_client->packets, sizeof( client->packets ) );
-	spin_unlock( &client->packet_lock );
+	spin_unlock_irq( &client->packet_lock );
 	
 	client->head = saved_client->head;
 	client->tail = saved_client->tail;
@@ -2716,7 +2782,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 			status = set_owner( address.sun_path, saved_unix->user, saved_unix->group );
 			if ( status < 0 )
 			{
-				panic( "Unable to restore ownership of bounded UNIX socket file.  Error: %d\n", -status );
+				panic( "Unable to restore ownership information of bounded UNIX socket file.  Error: %d\n", -status );
 			}
 		}
 		//
@@ -2910,8 +2976,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	
 	unix_state_lock( sock );
 	
-	spin_lock( &sock->sk_receive_queue.lock );
-	
 	while ( cur )
 	{
 		//
@@ -2936,8 +3000,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		cur = cur->next;
 		//
 	}
-	
-	spin_unlock( &sock->sk_receive_queue.lock );
 	
 	unix_state_unlock( sock );
 	
@@ -3186,7 +3248,7 @@ slashes:
 //
 
 // The function set_owner() is an altered version of the chown() system call in fs/open.c.
-int chown_common ( struct path *path, uid_t user, gid_t group )
+static int chown_common ( struct path *path, uid_t user, gid_t group )
 {
 	struct inode *inode = path->dentry->d_inode;
 	int error;
@@ -3246,6 +3308,156 @@ put_path:
 done:
 	return error;
 	//
+}
+//
+
+// Warning: This function is right now only called for VC terminals.
+static void restore_fown_struct ( struct saved_file *saved_file, struct file *file )
+{
+	//
+	struct pid *pid;
+	//
+	
+	//
+	rcu_read_lock();
+	
+	security_file_set_fowner( file );
+	
+	pid = find_vpid( saved_file->owner.pid );
+	if ( !pid && saved_file->owner.pid )
+	{
+		panic( "Unable to restore file's \'struct fown_struct\' due to missing \'struct pid\' of pid %d\n", saved_file->owner.pid );
+	}
+	
+	write_lock_irq( &file->f_owner.lock );
+	
+	put_pid( file->f_owner.pid );
+	file->f_owner.pid = get_pid( pid );
+	file->f_owner.pid_type = saved_file->owner.pid_type;
+	file->f_owner.uid = saved_file->owner.uid;
+	file->f_owner.euid = saved_file->owner.euid;
+	file->f_owner.signum = saved_file->owner.signum;
+	
+	write_unlock_irq( &file->f_owner.lock );
+	
+	rcu_read_unlock();
+	//
+	
+	return;
+}
+//
+
+// This is an altered version of the combination of set_termios(), 
+// change_termios(), and unset_locked_termios() in drivers/char/tty_ioctl.c.
+int set_termios ( struct tty_struct *tty, struct ktermios *kterm )
+{
+	//
+	struct tty_ldisc *ld;
+	
+	int i;
+	
+	struct ktermios old_kterm;
+	unsigned long flags;
+	
+	int retval = 0;
+	//
+
+	//
+	if ( !tty || !kterm )
+	{
+		return -EINVAL;
+	}
+	
+	retval = tty_check_change( tty );
+	if ( retval )
+	{
+		return retval;
+	}
+	//
+
+	//
+	ld = tty_ldisc_ref( tty );
+	if ( ld )
+	{
+		tty_ldisc_deref( ld );
+	}
+	//
+
+	//
+	mutex_lock( &tty->termios_mutex );
+	
+	old_kterm = *tty->termios;
+	*tty->termios = *kterm;
+	
+	//
+	if ( tty->termios_locked )
+	{
+		NOSET_MASK( tty->termios->c_iflag, old_kterm.c_iflag, tty->termios_locked->c_iflag );
+		NOSET_MASK( tty->termios->c_oflag, old_kterm.c_oflag, tty->termios_locked->c_oflag );
+		NOSET_MASK( tty->termios->c_cflag, old_kterm.c_cflag, tty->termios_locked->c_cflag );
+		NOSET_MASK( tty->termios->c_lflag, old_kterm.c_lflag, tty->termios_locked->c_lflag );
+		tty->termios->c_line = tty->termios_locked->c_line ? old_kterm.c_line : tty->termios->c_line;
+		for ( i = 0; i < NCCS; i++ )
+		{
+			tty->termios->c_cc[i] = tty->termios_locked->c_cc[i] ? old_kterm.c_cc[i] : tty->termios->c_cc[i];
+		}
+	}
+	//
+
+	// See if packet mode change of state.
+	if ( tty->link && tty->link->packet )
+	{
+		int old_flow = ((old_kterm.c_iflag & IXON) &&
+				(old_kterm.c_cc[VSTOP] == '\023') &&
+				(old_kterm.c_cc[VSTART] == '\021'));
+		int new_flow = (I_IXON(tty) &&
+				STOP_CHAR(tty) == '\023' &&
+				START_CHAR(tty) == '\021');
+		if ( old_flow != new_flow )
+		{
+			//
+			spin_lock_irqsave( &tty->ctrl_lock, flags );
+			
+			tty->ctrl_status &= ~( TIOCPKT_DOSTOP | TIOCPKT_NOSTOP );
+			if ( new_flow )
+			{
+				tty->ctrl_status |= TIOCPKT_DOSTOP;
+			}
+			else
+			{
+				tty->ctrl_status |= TIOCPKT_NOSTOP;
+			}
+			
+			spin_unlock_irqrestore( &tty->ctrl_lock, flags );
+			//
+			
+			wake_up_interruptible( &tty->link->read_wait );
+		}
+	}
+
+	if ( tty->ops->set_termios )
+	{
+		tty->ops->set_termios( tty, &old_kterm );
+	}
+	else
+	{
+		tty_termios_copy_hw( tty->termios, &old_kterm );
+	}
+
+	ld = tty_ldisc_ref( tty );
+	if ( ld )
+	{
+		if ( ld->ops->set_termios )
+		{
+			ld->ops->set_termios( tty, &old_kterm );
+		}
+		tty_ldisc_deref( ld );
+	}
+	
+	mutex_unlock( &tty->termios_mutex );
+	//
+
+	return 0;
 }
 //
 
