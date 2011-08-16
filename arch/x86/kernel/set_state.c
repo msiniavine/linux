@@ -2200,7 +2200,7 @@ int do_set_state(struct state_info* info)
 		if (displaced)
 			put_files_struct(displaced);
 
-		
+		debug_was_state_restored = 1;
 		restore_files(state, info->global_state);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
@@ -2232,7 +2232,6 @@ int do_set_state(struct state_info* info)
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
-		debug_was_state_restored = 1;
 		unregister_set_state_hook();
 		resume_saved_state();
 		return 0;
