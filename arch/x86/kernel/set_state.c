@@ -2346,7 +2346,7 @@ int do_set_state(struct state_info* info)
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
-		unregister_set_state_hook();
+		//unregister_set_state_hook();
 		resume_saved_state();
 		
 		sprint( "####3 current->comm: %s\n", current->comm );

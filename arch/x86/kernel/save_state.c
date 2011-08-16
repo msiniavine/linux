@@ -1632,6 +1632,8 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	
 	complete_all( &global_state.all_parents_restored );
 	
+	unregister_set_state_hook();
+	
 	sprint( "##### end sys_load_saved_state()\n" );
 
 	return regs.ax;
