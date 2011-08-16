@@ -1993,7 +1993,7 @@ struct state_info
 };
 //
 
-static struct global_state_info global_state;
+struct global_state_info global_state;
 static struct pipe_restore_temp pipe_restore_head;
 static struct pipes_to_close pipe_close_head;
 
@@ -2095,8 +2095,6 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 //DEFINE_MUTEX(lock);
 //DECLARE_WAIT_QUEUE_HEAD(wq);
 // DECLARE_COMPLETION(all_done);
-
-
 
 
 	sprint("Restoring pid parent: %d\n", state->pid);
@@ -2338,6 +2336,12 @@ int do_set_state(struct state_info* info)
 			wake_up(&info->global_state->wq);
 		}
 		wait_for_completion(&info->global_state->all_done);
+		
+		//
+		wait_for_completion( &info->global_state->all_parents_restored );
+		//
+		
+		sprint( "##### After wait_for_completion() for \'%s\'.\n", current->comm );
 
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);

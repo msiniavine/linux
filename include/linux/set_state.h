@@ -416,6 +416,10 @@ struct global_state_info
 	struct completion all_done;
 	struct pipe_restore_temp *pipe_restore_head;
 	struct pipes_to_close *pipe_close_head;
+	
+	//
+	struct completion all_parents_restored;
+	//
 };
 
 // first appears to be a pointer to a "not backed up" object.

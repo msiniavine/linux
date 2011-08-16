@@ -1591,6 +1591,7 @@ asmlinkage int sys_state_present(struct pt_regs regs)
 }
 
 extern struct resource crashk_res;
+extern struct global_state_info global_state;
 asmlinkage int sys_load_saved_state(struct pt_regs regs)
 {
 	//
@@ -1601,9 +1602,9 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	
 	sprint( "##### start sys_load_saved_state()\n" );
 
-	state = (struct saved_state*)get_reserved_region();
+	state = ( struct saved_state* ) get_reserved_region();
 	
-	if(state->processes == NULL)
+	if( !state->processes )
 	{
 		sprint( "No more saved state\n");
 		
@@ -1611,8 +1612,12 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 		return -1;
 	}
 	
-	//while ( state->processes )
-	//{
+	//
+	init_completion( &global_state.all_parents_restored );
+	//
+	
+	while ( state->processes )
+	{
 		print_saved_processes();
 		ret = set_state(&regs, state->processes);
 		sprint( "set_state returned %d\n", ret);
@@ -1623,14 +1628,9 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 		}
 	
 		sprint( "state->counter: %d\n", state->counter );
-	//}
+	}
 	
-	/*if( !state->processes )
-	{
-		sprint( "No more saved state.\n" );
-		sprint( "##### end sys_load_saved_state()\n" );
-		return -1;
-	}*/
+	complete_all( &global_state.all_parents_restored );
 	
 	sprint( "##### end sys_load_saved_state()\n" );
 
