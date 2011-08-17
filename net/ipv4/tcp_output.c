@@ -1601,6 +1601,12 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle)
 
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
 
+		if(tp->expected_seq != TCP_SKB_CB(skb)->seq)
+		{
+			sprint("WARNING: expected seq %u, got %u\n", tp->expected_seq, TCP_SKB_CB(skb)->seq);
+		}
+		tp->expected_seq = TCP_SKB_CB(skb)->end_seq;
+
 		if (unlikely(tcp_transmit_skb(sk, skb, 1, GFP_ATOMIC)))
 			break;
 

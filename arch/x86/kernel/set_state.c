@@ -2200,7 +2200,7 @@ int do_set_state(struct state_info* info)
 		if (displaced)
 			put_files_struct(displaced);
 
-		debug_was_state_restored = 1;
+		debug_was_state_restored = 0;
 		restore_files(state, info->global_state);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);

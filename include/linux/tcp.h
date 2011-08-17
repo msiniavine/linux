@@ -251,6 +251,8 @@ struct tcp_sock {
 	u16	tcp_header_len;	/* Bytes of tcp header to send		*/
 	u16	xmit_size_goal;	/* Goal for segmenting output packets	*/
 
+	u32 expected_seq;  // sequence that is expected to be transmitted next
+
 /*
  *	Header prediction flags
  *	0x5?10 << 16 + snd_wnd in net byte order
