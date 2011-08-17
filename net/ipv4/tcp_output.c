@@ -2031,7 +2031,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	 */
 	TCP_SKB_CB(skb)->when = tcp_time_stamp;
 
-	sprint("Retransmit %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(SKB)->end_seq);
+	csprint("Retransmit\n");
 	err = tcp_transmit_skb(sk, skb, 1, GFP_ATOMIC);
 
 	if (err == 0) {
