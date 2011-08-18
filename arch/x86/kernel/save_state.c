@@ -689,6 +689,7 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	svcd->v_active = fg_console + 1;
 	
 	svcd->vt_mode = vcd->vt_mode;
+	svcd->vt_pid = pid_vnr( vcd->vt_pid );
 	
 	svcd->vc_mode = vcd->vc_mode;
 	//

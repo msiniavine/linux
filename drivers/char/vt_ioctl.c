@@ -1106,6 +1106,18 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		} else {
 			/* deallocate a single console, if possible */
 			arg--;
+			
+			// Note: This is temporary.
+			if ( console_driver && console_driver->ttys[arg] )
+			{
+				printk( KERN_ALERT "ttycheck: console_driver->ttys[arg]->count: %d\n", console_driver->ttys[arg]->count );
+			}
+	
+			printk( KERN_ALERT "ttycheck: fg_console: %d\n", fg_console );
+			printk( KERN_ALERT "ttycheck: vc_cons[arg].d: 0x%.8lX\n", ( unsigned long ) vc_cons[arg].d );
+			printk( KERN_ALERT "ttycheck: sel_cons: 0x%.8lX\n", ( unsigned long ) sel_cons );
+			//
+			
 			if (VT_BUSY(arg))
 				ret = -EBUSY;
 			else if (arg) {			      /* leave 0 */

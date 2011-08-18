@@ -238,6 +238,7 @@ struct saved_vc_data
 	
 	unsigned short v_active;
 	struct vt_mode vt_mode;
+	pid_t vt_pid;
 	
 	struct ktermios kterm;
 	
@@ -413,7 +414,7 @@ struct global_state_info
 	wait_queue_head_t wq;
 	atomic_t processes_left;
 
-	struct completion all_done;
+	//struct completion all_done;
 	struct pipe_restore_temp *pipe_restore_head;
 	struct pipes_to_close *pipe_close_head;
 	

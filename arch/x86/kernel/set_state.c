@@ -978,7 +978,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	//strcat(full_name, "/dev");
 	//strcat(full_name, f->name);
 	strcpy( full_name, f->name );
-	file = do_filp_open(-100, full_name, f->flags, -1074763960, 0);
+	file = filp_open( full_name, f->flags, 0 );
 	if(IS_ERR(file))
 	{
 		panic("Could not open terminal file with error: %ld\n", PTR_ERR(file));
@@ -997,24 +997,65 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	lock_kernel();
 	
 	//
-	arg = svcd->v_active;
-	if ( arg == 0 || arg > MAX_NR_CONSOLES )
+	sprint( "##### start 1\n" );
+	sprint( "vcd->vt_mode.mode: %d\n", vcd->vt_mode.mode );
+	sprint( "vcd->vt_mode.waitv: %d\n", vcd->vt_mode.waitv );
+	sprint( "vcd->vt_mode.relsig: %d\n", vcd->vt_mode.relsig );
+	sprint( "vcd->vt_mode.acqsig: %d\n", vcd->vt_mode.acqsig );
+	sprint( "vcd->vt_mode.frsig: %d\n", vcd->vt_mode.frsig );
+	sprint( "vcd->vc_mode: %u\n", vcd->vc_mode );
+	sprint( "kbd->kbdmode: %u\n", kbd->kbdmode );
+	sprint( "##### end 1\n" );
+	//
+	
+	sprint( "##### start 1\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 1\n" );
+	
+	// Set the active VT and wait for VT to become active.
+	//lock_kernel();
+	
+	if ( fg_console + 1 != svcd->v_active )
 	{
-		panic( "Unable to continue due to invalid VT number, %d.\n", arg );
-	}
-	else 
-	{
-		arg--;
-		acquire_console_sem();
-		ret = vc_allocate( arg );
-		release_console_sem();
+		arg = svcd->v_active;
+		if ( arg == 0 || arg > MAX_NR_CONSOLES )
+		{
+			panic( "Unable to continue due to invalid VT number, %d.\n", arg );
+		}
+		else
+		{
+			acquire_console_sem();
+			ret = vc_allocate( arg - 1 );
+			release_console_sem();
+			if ( ret )
+			{
+				panic( "Function vc_allocate() failed.\n" );
+			}
+			set_console( arg - 1 );
+		}
+		
+		ret = vt_waitactive( arg );
 		if ( ret )
 		{
-			panic( "Function vc_allocate() failed.\n" );
+			panic( "Function vt_waitactive() failed.\n" );
 		}
-		set_console( arg );
 	}
 	
+	sprint( "##### start 2\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 2\n" );
+	
+	//unlock_kernel();
+	//
+	
+	// Set the VT mode of the VT.
+	//lock_kernel();
 	
 	if ( svcd->vt_mode.mode != VT_AUTO && svcd->vt_mode.mode != VT_PROCESS )
 	{
@@ -1022,14 +1063,27 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	}
 	acquire_console_sem();
 	vcd->vt_mode = svcd->vt_mode;
-	// the frsig is ignored, so we set it to 0
-	vcd->vt_mode.frsig = 0;
 	put_pid( vcd->vt_pid );
-	vcd->vt_pid = get_pid( task_pid( current ) );
-	// no switch is required -- saw@shade.msu.ru
+	vcd->vt_pid = find_vpid( svcd->vt_pid );
 	vcd->vt_newvt = -1;
 	release_console_sem();
+	if ( !vcd->vt_pid && svcd->vt_pid )
+	{
+		sprint( "Unable to find \'struct pid\' for pid %d.\n", svcd->vt_pid );
+	}
 	
+	sprint( "##### start 3\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 3\n" );
+	
+	//unlock_kernel();
+	//
+	
+	// Set the VC mode of the VT.
+	//lock_kernel();
 	
 	arg = svcd->vc_mode;
 	switch ( arg )
@@ -1064,9 +1118,20 @@ struct file* restore_vc_terminal(struct saved_file* f)
 			release_console_sem();
 		}
 	}
+	
+	sprint( "##### start 4\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 4\n" );
+	
+	//unlock_kernel();
 	//
 	
-	//
+	// Set the KBD mode of the VT.
+	//lock_kernel();
+	
 	arg = ((svcd->kbdmode == VC_RAW) ? K_RAW :
 				 (kbd->kbdmode == VC_MEDIUMRAW) ? K_MEDIUMRAW :
 				 (kbd->kbdmode == VC_UNICODE) ? K_UNICODE :
@@ -1092,16 +1157,39 @@ struct file* restore_vc_terminal(struct saved_file* f)
 			panic( "Unable to restore VC terminal due to invalid KBD mode %d.\n", arg );
 	}
 	tty_ldisc_flush(tty);
+	
+	sprint( "##### start 5\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 5\n" );
+	
+	//unlock_kernel();
 	//
 	
-	//
+	// Set the terminal attributes.
+	//lock_kernel();
+	
 	ret = set_termios( tty, &svcd->kterm );
 	if ( ret < 0 )
 	{
 		panic( "Unable to restore VC terminal attributes.  Error: %d\n", ret );
 	}
+	
+	sprint( "##### start 6\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 6\n" );
+	
+	//unlock_kernel();
 	//
 
+	// Restore the terminal screen buffer.
+	//lock_kernel();
+	
 	//tty = (struct tty_struct*)file->private_data;
 	if(tty->magic != TTY_MAGIC)
 	{
@@ -1121,6 +1209,28 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	vcd->vc_x = svcd->x;
 	vcd->vc_y = svcd->y;
 	redraw_screen(vcd, 0);
+	
+	sprint( "##### start 7\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 7\n" );
+	
+	//unlock_kernel();
+	//
+	
+	//
+	sprint( "##### start 2\n" );
+	sprint( "vcd->vt_mode.mode: %d\n", vcd->vt_mode.mode );
+	sprint( "vcd->vt_mode.waitv: %d\n", vcd->vt_mode.waitv );
+	sprint( "vcd->vt_mode.relsig: %d\n", vcd->vt_mode.relsig );
+	sprint( "vcd->vt_mode.acqsig: %d\n", vcd->vt_mode.acqsig );
+	sprint( "vcd->vt_mode.frsig: %d\n", vcd->vt_mode.frsig );
+	sprint( "vcd->vc_mode: %u\n", vcd->vc_mode );
+	sprint( "kbd->kbdmode: %u\n", kbd->kbdmode );
+	sprint( "##### end 2\n" );
+	//
 	
 	unlock_kernel();
 	
@@ -1163,16 +1273,19 @@ void restore_file(struct saved_file* f)
 	//file->f_pos = f->f_pos;
 	//
 
+	// This causes trouble for at least one of the terminal files (/dev/tty8).
+	// The usage count is actually set to an incorrect value for /dev/tty8; 
+	// however, not setting the usage count at all for any of the files
+	// will eventually lead to frightening things happening after the restore...
 	atomic_long_set(&(file->f_count), f->count);
 	sprint("Set file count value to %ld\n", f->count);
+	//
 
 	if(IS_ERR(file))
 	{
 		sprint("Could not open %s error: %ld\n", f->name, PTR_ERR(file));
 		panic("Could not restore file");
 	}
-	atomic_long_set(&(file->f_count), f->count);
-	sprint("Set file count value to %ld\n", f->count);
 	fd_install(fd, file);
 }
 
@@ -2056,6 +2169,27 @@ int count_processes(struct saved_task_struct* state)
 	return count;
 }
 
+int count_processes_all ( struct saved_task_struct *state )
+{
+	//
+	struct saved_task_struct *current_saved_task;
+	
+	int number_of_processes = 0;
+	//
+	
+	//
+	current_saved_task = state;
+	while ( current_saved_task )
+	{
+		number_of_processes = count_processes( current_saved_task );
+	
+		current_saved_task = current_saved_task->next;
+	}
+	//
+	
+	return number_of_processes;
+}
+
 // What calls this function?  Where is this function called?
 int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
@@ -2088,7 +2222,7 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	// and only argument.
 	init_waitqueue_head(&global_state.wq);
 	atomic_set(&global_state.processes_left, count_processes(state));
-	init_completion(&global_state.all_done);
+	//init_completion(&global_state.all_done);
 	//
 
 //int restore_count;
@@ -2133,7 +2267,7 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	sprint("parent waiting for children\n");
 	wait_event(global_state.wq, atomic_read(&global_state.processes_left) == 0);
 	sprint("parent finishes waiting for children\n");
-	complete_all(&global_state.all_done);
+	//complete_all(&global_state.all_done);
 	return 0;
 	//
 }
@@ -2334,14 +2468,17 @@ int do_set_state(struct state_info* info)
 		if (atomic_dec_and_test(&info->global_state->processes_left)) {
 			sprint("child wakes up parent\n");
 			wake_up(&info->global_state->wq);
+			sprint("after child wakes up parent\n");
 		}
-		wait_for_completion(&info->global_state->all_done);
+		//wait_for_completion(&info->global_state->all_done);
 		
 		//
+		sprint( "##### Before wait_for_completion() for \'%s\'.\n", current->comm );
+		
 		wait_for_completion( &info->global_state->all_parents_restored );
-		//
 		
 		sprint( "##### After wait_for_completion() for \'%s\'.\n", current->comm );
+		//
 
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
