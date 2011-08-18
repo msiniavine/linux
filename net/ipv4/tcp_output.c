@@ -612,6 +612,7 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 
 	BUG_ON(!skb || !tcp_skb_pcount(skb));
 
+	
 	/* If congestion control is doing timestamping, we must
 	 * take such a timestamp before we potentially clone/copy.
 	 */
@@ -631,6 +632,13 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	tp = tcp_sk(sk);
 	tcb = TCP_SKB_CB(skb);
 	memset(&opts, 0, sizeof(opts));
+
+	if(tp->expected_seq != TCP_SKB_CB(skb)->seq)
+	{
+		sprint("WARNING: expected seq %u, got %u\n", tp->expected_seq, TCP_SKB_CB(skb)->seq);
+	}
+	tp->expected_seq = TCP_SKB_CB(skb)->end_seq;
+
 
 	if (unlikely(tcb->flags & TCPCB_FLAG_SYN))
 		tcp_options_size = tcp_syn_options(sk, skb, &opts, &md5);
@@ -1501,6 +1509,7 @@ static int tcp_mtu_probe(struct sock *sk)
 	/* We're ready to send.  If this fails, the probe will
 	 * be resegmented into mss-sized pieces by tcp_write_xmit(). */
 	TCP_SKB_CB(nskb)->when = tcp_time_stamp;
+	sprint("MTU probe\n");
 	if (!tcp_transmit_skb(sk, nskb, 1, GFP_ATOMIC)) {
 		/* Decrement cwnd here because we are sending
 		 * effectively two packets. */
@@ -1601,11 +1610,6 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle)
 
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
 
-		if(tp->expected_seq != TCP_SKB_CB(skb)->seq)
-		{
-			sprint("WARNING: expected seq %u, got %u\n", tp->expected_seq, TCP_SKB_CB(skb)->seq);
-		}
-		tp->expected_seq = TCP_SKB_CB(skb)->end_seq;
 
 		if (unlikely(tcp_transmit_skb(sk, skb, 1, GFP_ATOMIC)))
 			break;
@@ -1672,6 +1676,7 @@ void tcp_push_one(struct sock *sk, unsigned int mss_now)
 		/* Send it out now. */
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
 
+		sprint("push one %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 		if (likely(!tcp_transmit_skb(sk, skb, 1, sk->sk_allocation))) {
 			tcp_event_new_data_sent(sk, skb);
 			tcp_cwnd_validate(sk);
@@ -2599,6 +2604,7 @@ static int tcp_xmit_probe_skb(struct sock *sk, int urgent)
 	 */
 	tcp_init_nondata_skb(skb, tp->snd_una - !urgent, TCPCB_FLAG_ACK);
 	TCP_SKB_CB(skb)->when = tcp_time_stamp;
+	sprint("send probe\n");
 	return tcp_transmit_skb(sk, skb, 0, GFP_ATOMIC);
 }
 
@@ -2634,6 +2640,7 @@ int tcp_write_wakeup(struct sock *sk)
 
 		TCP_SKB_CB(skb)->flags |= TCPCB_FLAG_PSH;
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
+		sprint("write wake up\n");
 		err = tcp_transmit_skb(sk, skb, 1, GFP_ATOMIC);
 		if (!err)
 			tcp_event_new_data_sent(sk, skb);
