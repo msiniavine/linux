@@ -1486,27 +1486,8 @@ void tty_release_dev(struct file *filp)
 
 	inode = filp->f_path.dentry->d_inode;
 	tty = (struct tty_struct *)filp->private_data;
-	
-	// Note: This is temporary.
-	printk( KERN_ALERT "##### start 1\n" );
-	printk( KERN_ALERT "tty->name: %s\n", tty->name );
-	printk( KERN_ALERT "tty->index: %d\n", tty->index );
-	printk( KERN_ALERT "tty->count: %d\n", tty->count );
-	printk( KERN_ALERT "##### end 1\n" );
-	//
-	
 	if (tty_paranoia_check(tty, inode, "tty_release_dev"))
-	{
-		// Note: This is temporary.
-		printk( KERN_ALERT "##### start 2\n" );
-		printk( KERN_ALERT "tty->name: %s\n", tty->name );
-		printk( KERN_ALERT "tty->index: %d\n", tty->index );
-		printk( KERN_ALERT "tty->count: %d\n", tty->count );
-		printk( KERN_ALERT "##### end 2\n" );
-		//
-		
 		return;
-	}
 
 	check_tty_count(tty, "tty_release_dev");
 
@@ -1522,45 +1503,18 @@ void tty_release_dev(struct file *filp)
 	if (idx < 0 || idx >= tty->driver->num) {
 		printk(KERN_DEBUG "tty_release_dev: bad idx when trying to "
 				  "free (%s)\n", tty->name);
-				  
-		// Note: This is temporary.
-		printk( KERN_ALERT "##### start 3\n" );
-		printk( KERN_ALERT "tty->name: %s\n", tty->name );
-		printk( KERN_ALERT "tty->index: %d\n", tty->index );
-		printk( KERN_ALERT "tty->count: %d\n", tty->count );
-		printk( KERN_ALERT "##### end 3\n" );
-		//
-		
 		return;
 	}
 	if (!devpts) {
 		if (tty != tty->driver->ttys[idx]) {
 			printk(KERN_DEBUG "tty_release_dev: driver.table[%d] not tty "
 			       "for (%s)\n", idx, tty->name);
-			       
-			// Note: This is temporary.
-			printk( KERN_ALERT "##### start 4\n" );
-			printk( KERN_ALERT "tty->name: %s\n", tty->name );
-			printk( KERN_ALERT "tty->index: %d\n", tty->index );
-			printk( KERN_ALERT "tty->count: %d\n", tty->count );
-			printk( KERN_ALERT "##### end 4\n" );
-			//
-			       
 			return;
 		}
 		if (tty->termios != tty->driver->termios[idx]) {
 			printk(KERN_DEBUG "tty_release_dev: driver.termios[%d] not termios "
 			       "for (%s)\n",
 			       idx, tty->name);
-			       
-			// Note: This is temporary.
-			printk( KERN_ALERT "##### start 5\n" );
-			printk( KERN_ALERT "tty->name: %s\n", tty->name );
-			printk( KERN_ALERT "tty->index: %d\n", tty->index );
-			printk( KERN_ALERT "tty->count: %d\n", tty->count );
-			printk( KERN_ALERT "##### end 5\n" );
-			//
-			       
 			return;
 		}
 	}
@@ -1578,43 +1532,16 @@ void tty_release_dev(struct file *filp)
 			printk(KERN_DEBUG "tty_release_dev: other->table[%d] "
 					  "not o_tty for (%s)\n",
 			       idx, tty->name);
-			       
-			// Note: This is temporary.
-			printk( KERN_ALERT "##### start 6\n" );
-			printk( KERN_ALERT "tty->name: %s\n", tty->name );
-			printk( KERN_ALERT "tty->index: %d\n", tty->index );
-			printk( KERN_ALERT "tty->count: %d\n", tty->count );
-			printk( KERN_ALERT "##### end 6\n" );
-			//
-			       
 			return;
 		}
 		if (o_tty->termios != tty->driver->other->termios[idx]) {
 			printk(KERN_DEBUG "tty_release_dev: other->termios[%d] "
 					  "not o_termios for (%s)\n",
 			       idx, tty->name);
-			       
-			// Note: This is temporary.
-			printk( KERN_ALERT "##### start 7\n" );
-			printk( KERN_ALERT "tty->name: %s\n", tty->name );
-			printk( KERN_ALERT "tty->index: %d\n", tty->index );
-			printk( KERN_ALERT "tty->count: %d\n", tty->count );
-			printk( KERN_ALERT "##### end 7\n" );
-			//
-			       
 			return;
 		}
 		if (o_tty->link != tty) {
 			printk(KERN_DEBUG "tty_release_dev: bad pty pointers\n");
-			
-			// Note: This is temporary.
-			printk( KERN_ALERT "##### start 8\n" );
-			printk( KERN_ALERT "tty->name: %s\n", tty->name );
-			printk( KERN_ALERT "tty->index: %d\n", tty->index );
-			printk( KERN_ALERT "tty->count: %d\n", tty->count );
-			printk( KERN_ALERT "##### end 8\n" );
-			//
-			
 			return;
 		}
 	}
@@ -1738,17 +1665,7 @@ void tty_release_dev(struct file *filp)
 
 	/* check whether both sides are closing ... */
 	if (!tty_closing || (o_tty && !o_tty_closing))
-	{
-		// Note: This is temporary.
-		printk( KERN_ALERT "##### start 9\n" );
-		printk( KERN_ALERT "tty->name: %s\n", tty->name );
-		printk( KERN_ALERT "tty->index: %d\n", tty->index );
-		printk( KERN_ALERT "tty->count: %d\n", tty->count );
-		printk( KERN_ALERT "##### end 9\n" );
-		//
-			
 		return;
-	}
 
 #ifdef TTY_DEBUG_HANGUP
 	printk(KERN_DEBUG "freeing tty structure...");
@@ -1766,14 +1683,6 @@ void tty_release_dev(struct file *filp)
 	/* Make this pty number available for reallocation */
 	if (devpts)
 		devpts_kill_index(inode, idx);
-		
-	// Note: This is temporary.
-	printk( KERN_ALERT "##### start 10\n" );
-	printk( KERN_ALERT "tty->name: %s\n", tty->name );
-	printk( KERN_ALERT "tty->index: %d\n", tty->index );
-	printk( KERN_ALERT "tty->count: %d\n", tty->count );
-	printk( KERN_ALERT "##### end 10\n" );
-	//
 }
 
 /**

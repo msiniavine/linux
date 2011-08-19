@@ -41,10 +41,6 @@ static int sel_end;
 static int sel_buffer_lth;
 static char *sel_buffer;
 
-// Note: This is temporary.
-EXPORT_SYMBOL( sel_cons );
-//
-
 /* clear_selection, highlight and highlight_pointer can be called
    from interrupt (via scrollback/front) */
 

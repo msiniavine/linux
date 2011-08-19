@@ -2864,8 +2864,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	int status = 0;
 	//
 	
-	sprint( "##### start restore_unix_socket()\n" );
-	
 	//
 	file = create_socket( fd, flags, family, type, protocol );
 	if ( IS_ERR( file ) )
@@ -2877,22 +2875,12 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	sock = socket->sk;
 	unix = unix_sk( sock );
 	
-	if ( !socket->sk )
-	{
-		sprint( "After create_socket().\n" );
-		panic( "socket->sk is NULL.\n" );
-	}
-	
 	if ( saved_unix->kind == SOCKET_BOUND )
 	{
-		sprint( "saved_unix->kind == SOCKET_BOUND\n" );
-	
 		//
 		address = saved_unix->unix_address.address;
 		if ( address.sun_path[0] )
 		{
-			sprint( "address.sun_path: \"%s\"", address.sun_path );
-			
 			if ( address.sun_path[0] != '/' )
 			{
 				panic( "Unable to handle UNIX socket bind address of non-absolute path \'%s\'.\n", address.sun_path );
@@ -2917,9 +2905,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		//
 		if ( address.sun_path[0] )
 		{
-			sprint( "saved_unix->user: %d\n", saved_unix->user );
-			sprint( "saved_unix->group: %d\n", saved_unix->group );
-		
 			status = set_owner( address.sun_path, saved_unix->user, saved_unix->group );
 			if ( status < 0 )
 			{
@@ -2931,8 +2916,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		//
 		if ( state == TCP_LISTEN )
 		{
-			sprint( "state == TCP_LISTEN\n" );
-			
 			status = listen_socket( file, backlog );
 			if ( status < 0 )
 			{
@@ -2949,103 +2932,64 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	else if (	saved_unix->kind == SOCKET_ACCEPTED || 
 			saved_unix->kind == SOCKET_CONNECTED )
 	{
-		sprint( "saved_unix->kind == SOCKET_ACCEPTED || saved_unix->kind == SOCKET_CONNECTED\n" );
-		
-		//
-		if ( !saved_unix->peer )
-		{
-			panic( "Unable to restore UNIX connected socket due to missing peer.\n" );
-		}
-		//
-		
 		unix_state_lock( sock );
 		
-		//
-		sock->sk_state = TCP_ESTABLISHED;
-		socket->state = SS_CONNECTED;
-		//
-		
 		// Form connection with peer and broadcast self.
-		socket_other = find_by_first( head, saved_unix->peer );
-		if ( socket_other )
+		//
+		// Warning: The connection broken sockets are restored
+		// as unconnected sockets...
+		if ( saved_unix->peer )
 		{
-			sprint( "socket_other\n" );
-			
-			if ( !socket_other->sk )
+			socket_other = find_by_first( head, saved_unix->peer );
+			if ( socket_other )
 			{
-				sprint( "After find_by_first().\n" );
+				if ( !socket_other->sk )
+				{
+					sprint( "socket_other->state: %d\n", socket_other->state );
+					sprint( "socket_other->type: %d\n", socket_other->type );
+					sprint( "socket_other->flags: %d\n", socket_other->type );
+					sprint( "socket_other->fasync_list: 0x%.8X\n", socket_other->fasync_list );
+					sprint( "socket_other->file: 0x%.8X\n", socket_other->file );
+					sprint( "socket_other->sk: 0x%.8X\n", socket_other->sk );
+					sprint( "socket_other->ops: 0x%.8X\n", socket_other->ops );
 				
-				sprint( "socket_other->state: %d\n", socket_other->state );
-				sprint( "socket_other->type: %d\n", socket_other->type );
-				sprint( "socket_other->flags: %d\n", socket_other->type );
-				sprint( "socket_other->fasync_list: 0x%.8X\n", socket_other->fasync_list );
-				sprint( "socket_other->file: 0x%.8X\n", socket_other->file );
-				sprint( "socket_other->sk: 0x%.8X\n", socket_other->sk );
-				sprint( "socket_other->ops: 0x%.8X\n", socket_other->ops );
 				
+					panic( "socket_other->sk is NULL.\n" );
+				}
+			
+				sock_other = socket_other->sk;
+				unix_other = unix_sk( sock_other );
+			
+				unix_state_lock( sock_other );
+			
+				sock_hold( sock );
+				sock_hold( sock_other );
+			
+				unix->peer = sock_other;
+				unix_other->peer = sock;
+			
+				if ( sock->sk_type != SOCK_DGRAM )
+				{
+					sock->sk_state = TCP_ESTABLISHED;
+					sock_other->sk_state = TCP_ESTABLISHED;
 				
-				panic( "socket_other->sk is NULL.\n" );
+					socket->state = SS_CONNECTED;
+					socket_other->state = SS_CONNECTED;
+				}
+			
+				unix_state_unlock( sock_other );
 			}
-			
-			sock_other = socket_other->sk;
-			sprint( "socket_other->sk: 0x%.8X\n", ( unsigned int ) socket_other->sk );
-			unix_other = unix_sk( sock_other );
-			sprint( "unix_other: 0x%.8X\n", ( unsigned int ) unix_other );
-			
-			unix_state_lock( sock_other );
-			
-			sock_hold( sock );
-			sprint( "sock: 0x%.8X\n", ( unsigned int ) sock );
-			sock_hold( sock_other );
-			sprint( "sock_other: 0x%.8X\n", ( unsigned int ) sock_other );
-			
-			unix->peer = sock_other;
-			sprint( "sock_other: 0x%.8X\n", ( unsigned int ) sock_other );
-			unix_other->peer = sock;
-			sprint( "sock: 0x%.8X\n", ( unsigned int ) sock );
-			
-			if ( sock->sk_type != SOCK_DGRAM )
-			{
-				sprint( "sock->sk_type != SOCK_DGRAM\n" );
-				
-				sock->sk_state = TCP_ESTABLISHED;
-				sock_other->sk_state = TCP_ESTABLISHED;
-				
-				socket->state = SS_CONNECTED;
-				socket_other->state = SS_CONNECTED;
-			}
-			
-			unix_state_unlock( sock_other );
-
-		}
 		
-		sprint( "Before insert_entry( head, saved_unix, socket );\n" );
-		if ( !socket->sk )
-		{
-			sprint( "Before insert_entry().\n" );
-			panic( "socket->sk is NULL.\n" );
-		}
-		
-		insert_entry( head, saved_unix, socket );
-		sprint( "After insert_entry( head, saved_unix, socket );\n" );
-		
-		socket_other = find_by_first( head, saved_unix->peer->peer );
-		if ( socket_other && !socket_other->sk )
-		{
-			panic( "socket_other->sk is NULL.\n" );
+			insert_entry( head, saved_unix, socket );
 		}
 		//
 		
 		//
 		if ( saved_unix->kind == SOCKET_ACCEPTED )
 		{
-			sprint( "saved_unix->kind == SOCKET_ACCEPTED\n" );
-			
 			// Link self addr, dentry, and mnt to that of the listening socket.
 			if ( saved_unix->listen )
 			{
-				sprint( "saved_unix->listen\n" );
-				
 				sock_other = find_by_first( head, saved_unix->listen );
 				if ( !sock_other )
 				{
@@ -3056,8 +3000,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 				
 				if ( unix_other->addr )
 				{
-					sprint( "unix_other->addr\n" );
-					
 					atomic_inc( &unix_other->addr->refcnt );
 					
 					unix->addr = unix_other->addr;
@@ -3065,8 +3007,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 				
 				if ( unix_other->dentry )
 				{
-					sprint( "unix_other->dentry\n" );
-					
 					unix->dentry = dget( unix_other->dentry );
 					
 					unix->mnt = mntget( unix_other->mnt );
@@ -3075,8 +3015,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 			
 			else
 			{
-				sprint( "else\n" );
-				
 				unix->addr = kmalloc( sizeof( struct unix_address ) + saved_unix->unix_address.length, GFP_KERNEL );
 				if ( !unix->addr )
 				{
@@ -3091,12 +3029,6 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 			}
 			//
 		}
-		
-		if ( !socket->sk )
-		{
-			sprint( "After if ( saved_unix->kind == SOCKET_ACCEPTED ) block.\n" );
-			panic( "socket->sk is NULL.\n" );
-		}
 		//
 		
 		unix_state_unlock( sock );
@@ -3104,15 +3036,12 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	//
 	
 	// ???
-	sprint( "start ???" );
 	sock->sk_shutdown = saved_unix->shutdown;
 	
 	sock->sk_peercred = saved_unix->peercred;
-	sprint( "end ???" );
 	//
 	
 	// Restore the receive queue.
-	sprint( "Before loop.\n" );
 	cur = saved_unix->head;
 	
 	unix_state_lock( sock );
@@ -3128,13 +3057,11 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 		//
 		
 		//
-		sprint( "Before copies.\n" );
 		memcpy( skb->cb, cur->cb, sizeof( skb->cb ) );
 		
 		memcpy( skb_put( skb, cur->len ), cur->data, cur->len );
 		
 		skb_queue_tail( &sock->sk_receive_queue, skb );
-		sprint( "After copies.\n" );
 		//
 		
 		//
@@ -3143,11 +3070,7 @@ static void restore_unix_socket ( struct saved_file *saved_file, struct map_entr
 	}
 	
 	unix_state_unlock( sock );
-	
-	sprint( "After loop.\n" );
 	//
-	
-	sprint( "##### end restore_unix_socket()\n" );
 	
 	return;
 }

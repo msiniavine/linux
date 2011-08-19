@@ -2424,10 +2424,6 @@ int set_console(int nr)
 
 struct tty_driver *console_driver;
 
-// Note: This is temporary.
-EXPORT_SYMBOL( console_driver );
-//
-
 #ifdef CONFIG_VT_CONSOLE
 
 /*
