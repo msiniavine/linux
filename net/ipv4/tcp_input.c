@@ -673,6 +673,7 @@ static void tcp_rtt_estimator(struct sock *sk, const __u32 mrtt)
 		}
 	} else {
 		/* no previous measure. */
+		csprint("No previous measure\n");
 		tp->srtt = m << 3;	/* take the measured time to be rtt */
 		tp->mdev = m << 1;	/* make sure rto = 3*rtt */
 		tp->mdev_max = tp->rttvar = max(tp->mdev, tcp_rto_min(sk));
@@ -697,6 +698,8 @@ static inline void tcp_set_rto(struct sock *sk)
 	 *    ACKs in some circumstances.
 	 */
 	inet_csk(sk)->icsk_rto = (tp->srtt >> 3) + tp->rttvar;
+	csprint("srtt %u srtt>>3 %u rttvar %u rto %u\n", tp->srtt, tp->srtt>>3, tp->rttvar, inet_csk(sk)->icsk_rto);
+
 
 	/* 2. Fixups made earlier cannot be right.
 	 *    If we do not estimate RTO correctly without them,
@@ -2754,6 +2757,7 @@ static void tcp_ack_saw_tstamp(struct sock *sk, int flag)
 	 */
 	struct tcp_sock *tp = tcp_sk(sk);
 	const __u32 seq_rtt = tcp_time_stamp - tp->rx_opt.rcv_tsecr;
+	csprint("time_stamp %u, rcv_tsecr %u seq_rtt %u\n", tcp_time_stamp, tp->rx_opt.rcv_tsecr, seq_rtt);
 	tcp_rtt_estimator(sk, seq_rtt);
 	tcp_set_rto(sk);
 	inet_csk(sk)->icsk_backoff = 0;
@@ -2809,7 +2813,7 @@ static void tcp_rearm_rto(struct sock *sk)
 		csprint("Clear retransmit timer\n");
 		inet_csk_clear_xmit_timer(sk, ICSK_TIME_RETRANS);
 	} else {
-		csprint("Reset retransmit timer %u\n", inet_csk(sk)->icsk_rto);
+		csprint("Reset retransmit timer %u %u sec\n", inet_csk(sk)->icsk_rto, inet_csk(sk)->icsk_rto/HZ);
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
 					  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
 	}
