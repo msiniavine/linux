@@ -478,6 +478,14 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	{
 		saved_tcp->dst_mtu = 0;
 	}
+	
+	// RTT state and setting
+	saved_tcp->rto = inet_csk(sk)->icsk_rto;
+	saved_tcp->srtt = tp->srtt;
+	saved_tcp->mdev = tp->mdev;
+	saved_tcp->mdev_max = tp->mdev_max;
+	saved_tcp->rttvar = tp->rttvar;
+	saved_tcp->rtt_seq = tp->rtt_seq;
 
 	saved_tcp->sk_sndbuf = sk->sk_sndbuf;
 	saved_tcp->nonagle = tp->nonagle;

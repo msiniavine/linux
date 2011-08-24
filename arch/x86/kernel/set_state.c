@@ -1490,6 +1490,12 @@ void restore_tcp_socket(struct saved_file* f)
 
 	}
 
+	sprint("RTT state:\n");
+	sprint("rto %u srtt %u srtt >> 3 %u HZ %u\n", saved_socket->tcp->rto, saved_socket->tcp->srtt, saved_socket->tcp->srtt >> 3, HZ);
+	sprint("mdev %u, mdev max %u\n", saved_socket->tcp->mdev, saved_socket->tcp->mdev_max);
+	sprint("rttvar %u rtt_seq %u\n", saved_socket->tcp->rttvar, saved_socket->tcp->rtt_seq);
+	busy_wait(20);
+
 	tp->nonagle = saved_socket->tcp->nonagle;
 	tlprintf("Forcing sndbuf to %d\n", saved_socket->tcp->sk_sndbuf );
 	sk->sk_sndbuf = saved_socket->tcp->sk_sndbuf;

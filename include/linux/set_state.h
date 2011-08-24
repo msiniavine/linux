@@ -141,6 +141,14 @@ struct saved_tcp_state
 	u32 packets_in_flight;
 	u32 snd_cwnd;
 
+	// RTT setting 
+	u32 rto;
+	u32 srtt; // smoothed rtt << 3
+	u32 mdev;
+	u32 mdev_max;
+	u32 rttvar;
+	u32 rtt_seq;
+
 	u32 sk_sndbuf;
 
 	u32 nonagle;
