@@ -1676,7 +1676,7 @@ void tcp_push_one(struct sock *sk, unsigned int mss_now)
 		/* Send it out now. */
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
 
-		sprint("push one %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
+//		sprint("push one %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 		if (likely(!tcp_transmit_skb(sk, skb, 1, sk->sk_allocation))) {
 			tcp_event_new_data_sent(sk, skb);
 			tcp_cwnd_validate(sk);
