@@ -2585,6 +2585,8 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 				    (tcp_fackets_out(tp) > tp->reordering));
 	int fast_rexmit = 0, mib_idx;
 
+	sprint("fastretnas_alert is_dup %s\n", is_dupack ? "yes" : "no");
+
 	if (WARN_ON(!tp->packets_out && tp->sacked_out))
 		tp->sacked_out = 0;
 	if (WARN_ON(!tp->sacked_out && tp->fackets_out))
@@ -2593,11 +2595,17 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	/* Now state machine starts.
 	 * A. ECE, hence prohibit cwnd undoing, the reduction is required. */
 	if (flag & FLAG_ECE)
+	{
+		sprint("ECE flag\n");
 		tp->prior_ssthresh = 0;
+	}
 
 	/* B. In all the states check for reneging SACKs. */
 	if (tcp_check_sack_reneging(sk, flag))
+	{
+		sprint("reneging acks\n");
 		return;
+	}
 
 	/* C. Process data loss notification, provided it is valid. */
 	if (tcp_is_fack(tp) && (flag & FLAG_DATA_LOST) &&
@@ -2606,6 +2614,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	    tp->fackets_out > tp->reordering) {
 		tcp_mark_head_lost(sk, tp->fackets_out - tp->reordering);
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPLOSS);
+		sprint("marked head lost\n");
 	}
 
 	/* D. Check consistency of the current state. */
@@ -2659,18 +2668,31 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	case TCP_CA_Recovery:
 		if (!(flag & FLAG_SND_UNA_ADVANCED)) {
 			if (tcp_is_reno(tp) && is_dupack)
+			{
 				tcp_add_reno_sack(sk);
+				sprint("Recovery: add reno sack\n");
+			}
 		} else
+		{
 			do_lost = tcp_try_undo_partial(sk, pkts_acked);
+			sprint("Recovery: try_undo_partial\n");
+		}
 		break;
 	case TCP_CA_Loss:
 		if (flag & FLAG_DATA_ACKED)
+		{
 			icsk->icsk_retransmits = 0;
+			sprint("Loss data acked\n");
+		}
 		if (tcp_is_reno(tp) && flag & FLAG_SND_UNA_ADVANCED)
+		{
 			tcp_reset_reno_sack(tp);
+			sprint("Loss: reset reno sack\n");
+		}
 		if (!tcp_try_undo_loss(sk)) {
 			tcp_moderate_cwnd(tp);
 			tcp_xmit_retransmit_queue(sk);
+			sprint("Loss xmit_retransmit_queue\n");
 			return;
 		}
 		if (icsk->icsk_ca_state != TCP_CA_Open)
@@ -2679,16 +2701,26 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	default:
 		if (tcp_is_reno(tp)) {
 			if (flag & FLAG_SND_UNA_ADVANCED)
+			{
 				tcp_reset_reno_sack(tp);
+				sprint("default: reset reno sack\n");
+			}
 			if (is_dupack)
+			{
 				tcp_add_reno_sack(sk);
+				sprint("default add reno sack\n");
+			}
 		}
 
 		if (icsk->icsk_ca_state == TCP_CA_Disorder)
+		{
 			tcp_try_undo_dsack(sk);
+			sprint("Disorder: undo dsack\n");
+		}
 
 		if (!tcp_time_to_recover(sk)) {
 			tcp_try_to_open(sk, flag);
+			sprint("Default: try_to_open\n");
 			return;
 		}
 
@@ -2700,10 +2732,12 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			/* Restores the reduction we did in tcp_mtup_probe() */
 			tp->snd_cwnd++;
 			tcp_simple_retransmit(sk);
+			sprint("MTU probe failed\n");
 			return;
 		}
 
 		/* Otherwise enter Recovery state */
+		sprint("Enter recovery state\n");
 
 		if (tcp_is_reno(tp))
 			mib_idx = LINUX_MIB_TCPRENORECOVERY;
@@ -2731,9 +2765,13 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	}
 
 	if (do_lost || (tcp_is_fack(tp) && tcp_head_timedout(sk)))
+	{
 		tcp_update_scoreboard(sk, fast_rexmit);
+		sprint("Update score board\n");
+	}
 	tcp_cwnd_down(sk, flag);
 	tcp_xmit_retransmit_queue(sk);
+	sprint("xmit_retransmit_queue\n");
 }
 
 /* Read draft-ietf-tcplw-high-performance before mucking
