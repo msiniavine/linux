@@ -698,7 +698,8 @@ static inline void tcp_set_rto(struct sock *sk)
 	 *    ACKs in some circumstances.
 	 */
 	inet_csk(sk)->icsk_rto = (tp->srtt >> 3) + tp->rttvar;
-	csprint("srtt %u srtt>>3 %u rttvar %u rto %u\n", tp->srtt, tp->srtt>>3, tp->rttvar, inet_csk(sk)->icsk_rto);
+	if(inet_csk(sk)->icsk_rto > 10000)
+		csprint("srtt %u srtt>>3 %u rttvar %u rto %u\n", tp->srtt, tp->srtt>>3, tp->rttvar, inet_csk(sk)->icsk_rto);
 
 
 	/* 2. Fixups made earlier cannot be right.
@@ -2757,7 +2758,8 @@ static void tcp_ack_saw_tstamp(struct sock *sk, int flag)
 	 */
 	struct tcp_sock *tp = tcp_sk(sk);
 	const __u32 seq_rtt = tcp_time_stamp - tp->rx_opt.rcv_tsecr;
-	csprint("time_stamp %u, rcv_tsecr %u seq_rtt %u\n", tcp_time_stamp, tp->rx_opt.rcv_tsecr, seq_rtt);
+	if(seq_rtt > 100000)
+		csprint("time_stamp %u, rcv_tsecr %u seq_rtt %u\n", tcp_time_stamp, tp->rx_opt.rcv_tsecr, seq_rtt);
 	tcp_rtt_estimator(sk, seq_rtt);
 	tcp_set_rto(sk);
 	inet_csk(sk)->icsk_backoff = 0;
@@ -2810,10 +2812,10 @@ static void tcp_rearm_rto(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	if (!tp->packets_out) {
-		csprint("Clear retransmit timer\n");
+//		csprint("Clear retransmit timer\n");
 		inet_csk_clear_xmit_timer(sk, ICSK_TIME_RETRANS);
 	} else {
-		csprint("Reset retransmit timer %u %u sec\n", inet_csk(sk)->icsk_rto, inet_csk(sk)->icsk_rto/HZ);
+//		csprint("Reset retransmit timer %u %u sec\n", inet_csk(sk)->icsk_rto, inet_csk(sk)->icsk_rto/HZ);
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
 					  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
 	}
