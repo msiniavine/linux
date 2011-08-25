@@ -149,6 +149,13 @@ struct saved_tcp_state
 	u32 rttvar;
 	u32 rtt_seq;
 
+	u32 timestamp_ok; // Are we doing tcp timestamps
+	u32 tsval;
+	u32 tsecr;
+	u32 saw_tstamp;
+	u32 ts_recent;
+	u32 ts_recent_stamp;
+
 	u32 sk_sndbuf;
 
 	u32 nonagle;

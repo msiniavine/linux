@@ -487,6 +487,13 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->rttvar = tp->rttvar;
 	saved_tcp->rtt_seq = tp->rtt_seq;
 
+	saved_tcp->timestamp_ok = tp->rx_opt.tstamp_ok;
+	saved_tcp->tsval = tp->rx_opt.rcv_tsval;
+	saved_tcp->tsecr = tp->rx_opt.rcv_tsecr;
+	saved_tcp->saw_tstamp = tp->rx_opt.saw_tstamp;
+	saved_tcp->ts_recent = tp->rx_opt.ts_recent;
+	saved_tcp->ts_recent_stamp = tp->rx_opt.ts_recent_stamp;
+
 	saved_tcp->sk_sndbuf = sk->sk_sndbuf;
 	saved_tcp->nonagle = tp->nonagle;
 

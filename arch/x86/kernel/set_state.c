@@ -1491,10 +1491,10 @@ void restore_tcp_socket(struct saved_file* f)
 	}
 
 	// Restore RTT state
-	sprint("RTT state:\n");
-	sprint("rto %u srtt %u srtt >> 3 %u HZ %u\n", saved_socket->tcp->rto, saved_socket->tcp->srtt, saved_socket->tcp->srtt >> 3, HZ);
-	sprint("mdev %u, mdev max %u\n", saved_socket->tcp->mdev, saved_socket->tcp->mdev_max);
-	sprint("rttvar %u rtt_seq %u\n", saved_socket->tcp->rttvar, saved_socket->tcp->rtt_seq);
+	/* sprint("RTT state:\n"); */
+	/* sprint("rto %u srtt %u srtt >> 3 %u HZ %u\n", saved_socket->tcp->rto, saved_socket->tcp->srtt, saved_socket->tcp->srtt >> 3, HZ); */
+	/* sprint("mdev %u, mdev max %u\n", saved_socket->tcp->mdev, saved_socket->tcp->mdev_max); */
+	/* sprint("rttvar %u rtt_seq %u\n", saved_socket->tcp->rttvar, saved_socket->tcp->rtt_seq); */
 
 	inet_csk(sk)->icsk_rto = saved_socket->tcp->rto;
 	tp->srtt = saved_socket->tcp->srtt;
@@ -1502,6 +1502,13 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->mdev_max = saved_socket->tcp->mdev_max;
 	tp->rttvar = saved_socket->tcp->rttvar;
 	tp->rtt_seq = saved_socket->tcp->snd_nxt;
+
+	tp->rx_opt.tstamp_ok = saved_socket->tcp->timestamp_ok;
+	tp->rx_opt.rcv_tsval = saved_socket->tcp->tsval;
+	tp->rx_opt.rcv_tsecr = saved_socket->tcp->tsecr;
+	tp->rx_opt.saw_tstamp = saved_socket->tcp->saw_tstamp;
+	tp->rx_opt.ts_recent = saved_socket->tcp->ts_recent;
+	tp->rx_opt.ts_recent_stamp = saved_socket->tcp->ts_recent_stamp;
 
 	tp->nonagle = saved_socket->tcp->nonagle;
 	tlprintf("Forcing sndbuf to %d\n", saved_socket->tcp->sk_sndbuf );
