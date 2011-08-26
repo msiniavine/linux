@@ -494,6 +494,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->ts_recent = tp->rx_opt.ts_recent;
 	saved_tcp->ts_recent_stamp = tp->rx_opt.ts_recent_stamp;
 
+	saved_tcp->rx_opt = tp->rx_opt;
+
 	saved_tcp->sk_sndbuf = sk->sk_sndbuf;
 	saved_tcp->nonagle = tp->nonagle;
 

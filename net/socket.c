@@ -97,7 +97,7 @@
 #include <net/sock.h>
 #include <linux/netfilter.h>
 
-#include <linux/set_state.h>
+//#include <linux/set_state.h>
 
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);
 static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,

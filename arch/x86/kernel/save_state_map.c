@@ -17,7 +17,7 @@
 #include <linux/mempool.h>
 #include <linux/skbuff.h>
 
-#include <linux/set_state.h>
+//#include <linux/set_state.h>
 
 static unsigned long  page_pool[10];
 static int page_pool_index = -1;
@@ -65,7 +65,7 @@ struct map_entry* new_map(void)
 
 void delete_map(struct map_entry* head)
 {
-	sprint("Delete not yet implemented\n");
+//	sprint("Delete not yet implemented\n");
 }
 
 void insert_entry(struct map_entry* head, void* first, void* second)

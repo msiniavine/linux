@@ -156,6 +156,8 @@ struct saved_tcp_state
 	u32 ts_recent;
 	u32 ts_recent_stamp;
 
+	struct tcp_options_received rx_opt;
+
 	u32 sk_sndbuf;
 
 	u32 nonagle;

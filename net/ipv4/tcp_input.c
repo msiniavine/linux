@@ -2585,7 +2585,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 				    (tcp_fackets_out(tp) > tp->reordering));
 	int fast_rexmit = 0, mib_idx;
 
-	sprint("fastretnas_alert is_dup %s\n", is_dupack ? "yes" : "no");
+	sprint("fastretnas_alert is_dup %s state %u\n", is_dupack ? "yes" : "no", icsk->icsk_ca_state);
 
 	if (WARN_ON(!tp->packets_out && tp->sacked_out))
 		tp->sacked_out = 0;
@@ -2630,7 +2630,10 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 		case TCP_CA_Loss:
 			icsk->icsk_retransmits = 0;
 			if (tcp_try_undo_recovery(sk))
+			{
+				sprint("Try to undo recovery state\n");
 				return;
+			}
 			break;
 
 		case TCP_CA_CWR:
@@ -2639,6 +2642,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			if (tp->snd_una != tp->high_seq) {
 				tcp_complete_cwr(sk);
 				tcp_set_ca_state(sk, TCP_CA_Open);
+				sprint("switching from cwr to open\n");
 			}
 			break;
 
@@ -2650,6 +2654,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			    tcp_is_reno(tp) || tp->snd_una != tp->high_seq) {
 				tp->undo_marker = 0;
 				tcp_set_ca_state(sk, TCP_CA_Open);
+				sprint("switching from disorder to open\n");
 			}
 			break;
 
@@ -2657,7 +2662,10 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			if (tcp_is_reno(tp))
 				tcp_reset_reno_sack(tp);
 			if (tcp_try_undo_recovery(sk))
+			{
+				sprint("Switching form recovery to open\n");
 				return;
+			}
 			tcp_complete_cwr(sk);
 			break;
 		}

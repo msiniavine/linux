@@ -1510,6 +1510,8 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->rx_opt.ts_recent = saved_socket->tcp->ts_recent;
 	tp->rx_opt.ts_recent_stamp = saved_socket->tcp->ts_recent_stamp;
 
+	tp->rx_opt = saved_socket->tcp->rx_opt;
+
 	tp->nonagle = saved_socket->tcp->nonagle;
 	tlprintf("Forcing sndbuf to %d\n", saved_socket->tcp->sk_sndbuf );
 	sk->sk_sndbuf = saved_socket->tcp->sk_sndbuf;
