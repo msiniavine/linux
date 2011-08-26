@@ -2167,6 +2167,7 @@ static int tcp_time_to_recover(struct sock *sk)
 	}
 
 	/* Not-A-Trick#2 : Classic rule... */
+	sprint("is_fack %s facket_out %u sacked_out %u reordering %u\n", tcp_is_fack(tp) ? "yes":"no", tp->fackets_out, tp->sacked_out, tp->reordering);
 	if (tcp_dupack_heurestics(tp) > tp->reordering)
 	{
 		sprint("heurestics %u reordering %u\n", tcp_dupack_heurestics(tp),  tp->reordering);
