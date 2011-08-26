@@ -2829,9 +2829,15 @@ static void tcp_ack_saw_tstamp(struct sock *sk, int flag)
 	 * in window is lost... Voila.	 			--ANK (010210)
 	 */
 	struct tcp_sock *tp = tcp_sk(sk);
-	const __u32 seq_rtt = tcp_time_stamp - tp->rx_opt.rcv_tsecr;
+	__u32 seq_rtt = tcp_time_stamp - tp->rx_opt.rcv_tsecr;
 	if(seq_rtt > 100000)
 		csprint("time_stamp %u, rcv_tsecr %u seq_rtt %u\n", tcp_time_stamp, tp->rx_opt.rcv_tsecr, seq_rtt);
+	if(tp->rx_opt.rcv_tsecr > tcp_time_stamp)
+	{
+		seq_rtt = 10;
+		sprint("reseting seq_rtt %u\n", seq_rtt);
+		
+	}
 	tcp_rtt_estimator(sk, seq_rtt);
 	tcp_set_rto(sk);
 	inet_csk(sk)->icsk_backoff = 0;
