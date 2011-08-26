@@ -2831,7 +2831,10 @@ static void tcp_ack_saw_tstamp(struct sock *sk, int flag)
 	struct tcp_sock *tp = tcp_sk(sk);
 	__u32 seq_rtt = tcp_time_stamp - tp->rx_opt.rcv_tsecr;
 	if(seq_rtt > 100000)
+	{
 		csprint("time_stamp %u, rcv_tsecr %u seq_rtt %u\n", tcp_time_stamp, tp->rx_opt.rcv_tsecr, seq_rtt);
+		seq_rtt = 10;
+	}
 	if(tp->rx_opt.rcv_tsecr > tcp_time_stamp)
 	{
 		seq_rtt = 10;
