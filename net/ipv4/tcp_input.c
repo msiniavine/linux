@@ -2169,7 +2169,7 @@ static int tcp_time_to_recover(struct sock *sk)
 	/* Not-A-Trick#2 : Classic rule... */
 	if (tcp_dupack_heurestics(tp) > tp->reordering)
 	{
-		sprint("heurestics %u reordering %u\n", tcp_dupack_heurestics(tp) > tp->reordering);
+		sprint("heurestics %u reordering %u\n", tcp_dupack_heurestics(tp),  tp->reordering);
 		return 1;
 	}
 
