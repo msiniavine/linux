@@ -2154,21 +2154,33 @@ static int tcp_time_to_recover(struct sock *sk)
 
 	/* Do not perform any recovery during F-RTO algorithm */
 	if (tp->frto_counter)
+	{
+		sprint("tp->frto_counter %u\n", tp->frto_counter);
 		return 0;
+	}
 
 	/* Trick#1: The loss is proven. */
 	if (tp->lost_out)
+	{
+		sprint("tp->lost_out %u\n", tp->lost_out);
 		return 1;
+	}
 
 	/* Not-A-Trick#2 : Classic rule... */
 	if (tcp_dupack_heurestics(tp) > tp->reordering)
+	{
+		sprint("heurestics %u reordering %u\n", tcp_dupack_heurestics(tp) > tp->reordering);
 		return 1;
+	}
 
 	/* Trick#3 : when we use RFC2988 timer restart, fast
 	 * retransmit can be triggered by timeout of queue head.
 	 */
 	if (tcp_is_fack(tp) && tcp_head_timedout(sk))
+	{
+		sprint("head time out\n");
 		return 1;
+	}
 
 	/* Trick#4: It is still not OK... But will it be useful to delay
 	 * recovery more?
@@ -2180,9 +2192,11 @@ static int tcp_time_to_recover(struct sock *sk)
 		/* We have nothing to send. This connection is limited
 		 * either by receiver window or by application.
 		 */
+		sprint("Nothing to send\n");
 		return 1;
 	}
-
+	
+	sprint("All recover tests failed\n");
 	return 0;
 }
 
