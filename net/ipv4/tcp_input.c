@@ -3046,7 +3046,6 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 				tp->lost_cnt_hint -= prior_sacked - tp->sacked_out;
 		}
 
-		sprint("decrementing fackets_out in clear queue\n");
 		tp->fackets_out -= min(pkts_acked, tp->fackets_out);
 
 		if (ca_ops->pkts_acked) {
@@ -3386,7 +3385,10 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 		flag |= tcp_ack_update_window(sk, skb, ack, ack_seq);
 
 		if (TCP_SKB_CB(skb)->sacked)
+		{
+			sprint("skb sacked\n");
 			flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una);
+		}
 
 		if (TCP_ECN_rcv_ecn_echo(tp, tcp_hdr(skb)))
 			flag |= FLAG_ECE;
