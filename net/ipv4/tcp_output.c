@@ -1164,10 +1164,10 @@ static inline unsigned int tcp_cwnd_test(struct tcp_sock *tp,
 
 	in_flight = tcp_packets_in_flight(tp);
 	cwnd = tp->snd_cwnd;
-	//csprint("in_flight %u cwnd %u\n", in_flight, cwnd);
 	if (in_flight < cwnd)
 		return (cwnd - in_flight);
 
+	csprint("in_flight %u cwnd %u\n", in_flight, cwnd);
 	return 0;
 }
 
