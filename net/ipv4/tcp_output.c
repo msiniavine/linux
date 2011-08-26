@@ -1573,7 +1573,7 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle)
 		cwnd_quota = tcp_cwnd_test(tp, skb);
 		if (!cwnd_quota)
 		{
-			//csprint("Congestion test failed\n");
+			csprint("Congestion test failed\n");
 			break;
 		}
 
