@@ -761,7 +761,10 @@ static void tcp_adjust_fackets_out(struct sock *sk, struct sk_buff *skb,
 		return;
 
 	if (after(tcp_highest_sack_seq(tp), TCP_SKB_CB(skb)->seq))
+	{
+		sprint("adjust fackets out decrementing fackets\n");
 		tp->fackets_out -= decr;
+	}
 }
 
 /* Function to create two new TCP segments.  Shrinks the given segment

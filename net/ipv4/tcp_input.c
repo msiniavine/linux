@@ -1338,7 +1338,10 @@ static int tcp_sacktag_one(struct sk_buff *skb, struct sock *sk,
 			tp->lost_cnt_hint += tcp_skb_pcount(skb);
 
 		if (fack_count > tp->fackets_out)
+		{
+			sprint("sacktag_one setting fackets_out %u\n", fack_count);
 			tp->fackets_out = fack_count;
+		}
 
 		if (!before(TCP_SKB_CB(skb)->seq, tcp_highest_sack_seq(tp)))
 			tcp_advance_highest_sack(sk, skb);
@@ -1463,7 +1466,10 @@ tcp_sacktag_write_queue(struct sock *sk, struct sk_buff *ack_skb,
 
 	if (!tp->sacked_out) {
 		if (WARN_ON(tp->fackets_out))
+		{
+			sprint("WARNING fackets_out reset\n");
 			tp->fackets_out = 0;
+		}
 		tcp_highest_sack_reset(sk);
 	}
 
@@ -1928,6 +1934,7 @@ void tcp_clear_retrans(struct tcp_sock *tp)
 {
 	tcp_clear_retrans_partial(tp);
 
+	sprint("clear retrans reset fackets_out\n");
 	tp->fackets_out = 0;
 	tp->sacked_out = 0;
 }
@@ -1964,6 +1971,7 @@ void tcp_enter_loss(struct sock *sk, int how)
 		 * was retransmitted. */
 		tp->undo_marker = tp->snd_una;
 	} else {
+		sprint("Enter loss reset fackets_out\n");
 		tp->sacked_out = 0;
 		tp->fackets_out = 0;
 	}
@@ -2605,7 +2613,10 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	if (WARN_ON(!tp->packets_out && tp->sacked_out))
 		tp->sacked_out = 0;
 	if (WARN_ON(!tp->sacked_out && tp->fackets_out))
+	{
+		sprint("WARNING fastretrans_alert resets fackets_out\n");
 		tp->fackets_out = 0;
+	}
 
 	/* Now state machine starts.
 	 * A. ECE, hence prohibit cwnd undoing, the reduction is required. */
@@ -3035,6 +3046,7 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 				tp->lost_cnt_hint -= prior_sacked - tp->sacked_out;
 		}
 
+		sprint("decrementing fackets_out in clear queue\n");
 		tp->fackets_out -= min(pkts_acked, tp->fackets_out);
 
 		if (ca_ops->pkts_acked) {
@@ -3331,7 +3343,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 
 	if (before(ack, prior_snd_una))
 	{
-//		csprint("Old ack\n");
+		sprint("Old ack\n");
 		goto old_ack;
 	}
 
