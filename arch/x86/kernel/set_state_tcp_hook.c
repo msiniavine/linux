@@ -40,6 +40,7 @@ static unsigned int set_state_tcp_rx_hook(unsigned int hook, struct sk_buff* skb
 	{
 		if(pe->port == port)
 		{
+			sprint("BLOCK: seq %u ack %u port %u\n", ntohl(th->seq), ntohl(th->ack), port);
 			spin_unlock_irqrestore(&ports_lock, flags);
 			return NF_DROP;
 		}
@@ -61,11 +62,11 @@ void block_port(u16 port)
 {
 	struct port_entry* pe;
 	unsigned long flags;
-	sprint("Blocking port %u\n", port);
+	sprint("BLOCK: Blocking port %u\n", port);
 	pe = kmalloc(sizeof(*pe), GFP_KERNEL);
 	if(!pe)
 	{
-		sprint("Out of memory when blocking port\n");
+		sprint("BLOCK: Out of memory when blocking port\n");
 		return; 
 	}
 	pe->port = port;
@@ -89,6 +90,8 @@ void unblock_port(u16 port)
 	}
 	spin_unlock_irqrestore(&ports_lock, flags);
 	kfree(pe);
+
+	sprint("BLOCK: unblock %u\n", port);
 }
 
 int blocking_ports(void)
@@ -106,7 +109,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 	struct saved_task_struct* child;
 	struct saved_file* file;
 
-	sprint("blocking ports for task %s[%d]\n", tsk->name, tsk->pid);
+	sprint("BLOCK: blocking ports for task %s[%d]\n", tsk->name, tsk->pid);
 	list_for_each_entry(file, &tsk->open_files, next)
 	{
 		struct saved_socket* socket;
@@ -155,7 +158,7 @@ void set_state_tcp_hook(void)
 	{
 		panic("set_state nf_register_hook failed\n");
 	}
-	sprint("Registered set_state netfilter hook\n");
+	sprint("BLOCK: Registered set_state netfilter hook\n");
 }
 
 void unregister_set_state_hook(void)
@@ -170,5 +173,5 @@ void unregister_set_state_hook(void)
 		kfree(pe);
 	}
 	
-	sprint("Un registered set_state netfilter hook\n");
+	sprint("BLOCK: Un registered set_state netfilter hook\n");
 }
