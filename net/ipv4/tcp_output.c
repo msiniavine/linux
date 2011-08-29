@@ -1167,7 +1167,7 @@ static inline unsigned int tcp_cwnd_test(struct tcp_sock *tp,
 	if (in_flight < cwnd)
 		return (cwnd - in_flight);
 
-	csprint("in_flight %u cwnd %u\n", in_flight, cwnd);
+	sprint("in_flight %u cwnd %u p_out %u - s_out %u - l_out %u + r_out %u\n", in_flight, cwnd, tp->packets_out, tp->sacked_out, tp->lost_out, tp->retrans_out);
 	return 0;
 }
 
@@ -1573,7 +1573,7 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle)
 		cwnd_quota = tcp_cwnd_test(tp, skb);
 		if (!cwnd_quota)
 		{
-			csprint("Congestion test failed\n");
+//			csprint("Congestion test failed\n");
 			break;
 		}
 

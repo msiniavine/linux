@@ -4853,6 +4853,7 @@ static int tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		if (!th->rst) {
 			NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_PAWSESTABREJECTED);
 			tcp_send_dupack(sk, skb);
+			sprint("PAWS test failed\n");
 			goto discard;
 		}
 		/* Reset is accepted even if it did not pass PAWS. */
@@ -4868,12 +4869,14 @@ static int tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		 */
 		if (!th->rst)
 			tcp_send_dupack(sk, skb);
+		sprint("Sequence number invalid\n");
 		goto discard;
 	}
 
 	/* Step 2: check RST bit */
 	if (th->rst) {
 		tcp_reset(sk);
+		sprint("Reset\n");
 		goto discard;
 	}
 
@@ -4890,6 +4893,7 @@ static int tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 			TCP_INC_STATS_BH(sock_net(sk), TCP_MIB_INERRS);
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPABORTONSYN);
 		tcp_reset(sk);
+		sprint("SYN error\n");
 		return -1;
 	}
 
@@ -5058,7 +5062,10 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			}
 			if (!eaten) {
 				if (tcp_checksum_complete_user(sk, skb))
+				{
+					sprint("checksum error %u\n", ntohl(th->seq));
 					goto csum_error;
+				}
 
 				/* Predicted packet is in window by definition.
 				 * seq == rcv_nxt and rcv_wup <= rcv_nxt.
@@ -5114,7 +5121,10 @@ no_ack:
 slow_path:
 //	//csprint("Slow path\n");
 	if (len < (th->doff << 2) || tcp_checksum_complete_user(sk, skb))
+	{
+		sprint("Checksum error %u\n", ntohl(th->seq));
 		goto csum_error;
+	}
 
 	/*
 	 *	Standard slow path.
