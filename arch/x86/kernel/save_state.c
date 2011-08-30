@@ -486,6 +486,7 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->mdev_max = tp->mdev_max;
 	saved_tcp->rttvar = tp->rttvar;
 	saved_tcp->rtt_seq = tp->rtt_seq;
+	saved_tcp->tcp_tstamp_offset = tcp_time_stamp(tp);
 
 	saved_tcp->timestamp_ok = tp->rx_opt.tstamp_ok;
 	saved_tcp->tsval = tp->rx_opt.rcv_tsval;
@@ -546,6 +547,7 @@ static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* sav
 			s_buff->csum = sk_pos->csum;
 			s_buff->seq = tcb->seq;
 			s_buff->ip_summed = sk_pos->ip_summed;
+			s_buff->tstamp = tcb->when;
 
 			if(sk_pos->len > 0)
 			{

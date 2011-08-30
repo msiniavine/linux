@@ -377,7 +377,7 @@ static void tcp_init_buffer_space(struct sock *sk)
 		tp->window_clamp = max(2 * tp->advmss, maxwin - tp->advmss);
 
 	tp->rcv_ssthresh = min(tp->rcv_ssthresh, tp->window_clamp);
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 }
 
 /* 5. Recalculate window clamp after socket hit its memory bounds. */
@@ -472,7 +472,7 @@ static inline void tcp_rcv_rtt_measure(struct tcp_sock *tp)
 
 new_measure:
 	tp->rcv_rtt_est.seq = tp->rcv_nxt + tp->rcv_wnd;
-	tp->rcv_rtt_est.time = tcp_time_stamp;
+	tp->rcv_rtt_est.time = tcp_time_stamp(tp);
 }
 
 static inline void tcp_rcv_rtt_measure_ts(struct sock *sk,
@@ -482,7 +482,7 @@ static inline void tcp_rcv_rtt_measure_ts(struct sock *sk,
 	if (tp->rx_opt.rcv_tsecr &&
 	    (TCP_SKB_CB(skb)->end_seq -
 	     TCP_SKB_CB(skb)->seq >= inet_csk(sk)->icsk_ack.rcv_mss))
-		tcp_rcv_rtt_update(tp, tcp_time_stamp - tp->rx_opt.rcv_tsecr, 0);
+		tcp_rcv_rtt_update(tp, tcp_time_stamp(tp) - tp->rx_opt.rcv_tsecr, 0);
 }
 
 /*
@@ -498,7 +498,7 @@ void tcp_rcv_space_adjust(struct sock *sk)
 	if (tp->rcvq_space.time == 0)
 		goto new_measure;
 
-	time = tcp_time_stamp - tp->rcvq_space.time;
+	time = tcp_time_stamp(tp) - tp->rcvq_space.time;
 	if (time < (tp->rcv_rtt_est.rtt >> 3) || tp->rcv_rtt_est.rtt == 0)
 		return;
 
@@ -539,7 +539,7 @@ void tcp_rcv_space_adjust(struct sock *sk)
 
 new_measure:
 	tp->rcvq_space.seq = tp->copied_seq;
-	tp->rcvq_space.time = tcp_time_stamp;
+	tp->rcvq_space.time = tcp_time_stamp(tp);
 }
 
 /* There is something which you must keep in mind when you analyze the
@@ -564,7 +564,7 @@ static void tcp_event_data_recv(struct sock *sk, struct sk_buff *skb)
 
 	tcp_rcv_rtt_measure(tp);
 
-	now = tcp_time_stamp;
+	now = tcp_time_stamp(tp);
 
 	if (!icsk->icsk_ack.ato) {
 		/* The _first_ data packet received, initialize
@@ -855,7 +855,7 @@ void tcp_enter_cwr(struct sock *sk, const int set_ssthresh)
 				   tcp_packets_in_flight(tp) + 1U);
 		tp->snd_cwnd_cnt = 0;
 		tp->high_seq = tp->snd_nxt;
-		tp->snd_cwnd_stamp = tcp_time_stamp;
+		tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 		TCP_ECN_queue_cwr(tp);
 
 		tcp_set_ca_state(sk, TCP_CA_CWR);
@@ -938,7 +938,7 @@ static void tcp_init_metrics(struct sock *sk)
 	if (inet_csk(sk)->icsk_rto < TCP_TIMEOUT_INIT && !tp->rx_opt.saw_tstamp)
 		goto reset;
 	tp->snd_cwnd = tcp_init_cwnd(tp, dst);
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 	return;
 
 reset:
@@ -1908,7 +1908,7 @@ static void tcp_enter_frto_loss(struct sock *sk, int allowed_segments, int flag)
 
 	tp->snd_cwnd = tcp_packets_in_flight(tp) + allowed_segments;
 	tp->snd_cwnd_cnt = 0;
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 	tp->frto_counter = 0;
 	tp->bytes_acked = 0;
 
@@ -1958,7 +1958,7 @@ void tcp_enter_loss(struct sock *sk, int how)
 	}
 	tp->snd_cwnd	   = 1;
 	tp->snd_cwnd_cnt   = 0;
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 
 	tp->bytes_acked = 0;
 	tcp_clear_retrans_partial(tp);
@@ -2051,7 +2051,7 @@ static inline int tcp_dupack_heurestics(struct tcp_sock *tp)
 
 static inline int tcp_skb_timedout(struct sock *sk, struct sk_buff *skb)
 {
-	return (tcp_time_stamp - TCP_SKB_CB(skb)->when > inet_csk(sk)->icsk_rto);
+	return (tcp_time_stamp(tcp_sk(sk)) - TCP_SKB_CB(skb)->when > inet_csk(sk)->icsk_rto);
 }
 
 static inline int tcp_head_timedout(struct sock *sk)
@@ -2314,7 +2314,7 @@ static inline void tcp_moderate_cwnd(struct tcp_sock *tp)
 {
 	tp->snd_cwnd = min(tp->snd_cwnd,
 			   tcp_packets_in_flight(tp) + tcp_max_burst(tp));
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 }
 
 /* Lower bound on congestion window is slow start threshold
@@ -2342,7 +2342,7 @@ static void tcp_cwnd_down(struct sock *sk, int flag)
 			tp->snd_cwnd -= decr;
 
 		tp->snd_cwnd = min(tp->snd_cwnd, tcp_packets_in_flight(tp) + 1);
-		tp->snd_cwnd_stamp = tcp_time_stamp;
+		tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 	}
 }
 
@@ -2408,7 +2408,7 @@ static void tcp_undo_cwr(struct sock *sk, const int undo)
 		tp->snd_cwnd = max(tp->snd_cwnd, tp->snd_ssthresh);
 	}
 	tcp_moderate_cwnd(tp);
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 }
 
 static inline int tcp_may_undo(struct tcp_sock *tp)
@@ -2523,7 +2523,7 @@ static inline void tcp_complete_cwr(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	tp->snd_cwnd = min(tp->snd_cwnd, tp->snd_ssthresh);
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 	tcp_ca_event(sk, CA_EVENT_COMPLETE_CWR);
 }
 
@@ -2580,7 +2580,7 @@ static void tcp_mtup_probe_success(struct sock *sk, struct sk_buff *skb)
 		       tcp_mss_to_mtu(sk, tp->mss_cache) /
 		       icsk->icsk_mtup.probe_size;
 	tp->snd_cwnd_cnt = 0;
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 	tp->rcv_ssthresh = tcp_current_ssthresh(sk);
 
 	icsk->icsk_mtup.search_low = icsk->icsk_mtup.probe_size;
@@ -2829,18 +2829,18 @@ static void tcp_ack_saw_tstamp(struct sock *sk, int flag)
 	 * in window is lost... Voila.	 			--ANK (010210)
 	 */
 	struct tcp_sock *tp = tcp_sk(sk);
-	__u32 seq_rtt = tcp_time_stamp - tp->rx_opt.rcv_tsecr;
-	if(seq_rtt > 100000)
-	{
-		csprint("time_stamp %u, rcv_tsecr %u seq_rtt %u\n", tcp_time_stamp, tp->rx_opt.rcv_tsecr, seq_rtt);
-		seq_rtt = 10;
-	}
-	if(tp->rx_opt.rcv_tsecr > tcp_time_stamp)
-	{
-		seq_rtt = 10;
-		sprint("reseting seq_rtt %u\n", seq_rtt);
+	const __u32 seq_rtt = tcp_time_stamp(tp) - tp->rx_opt.rcv_tsecr;
+	/* if(seq_rtt > 100000) */
+	/* { */
+	/* 	csprint("time_stamp %u, rcv_tsecr %u seq_rtt %u\n", tcp_time_stamp, tp->rx_opt.rcv_tsecr, seq_rtt); */
+	/* 	seq_rtt = 10; */
+	/* } */
+	/* if(tp->rx_opt.rcv_tsecr > tcp_time_stamp) */
+	/* { */
+	/* 	seq_rtt = 10; */
+	/* 	sprint("reseting seq_rtt %u\n", seq_rtt); */
 		
-	}
+	/* } */
 	tcp_rtt_estimator(sk, seq_rtt);
 	tcp_set_rto(sk);
 	inet_csk(sk)->icsk_backoff = 0;
@@ -2882,7 +2882,7 @@ static void tcp_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	icsk->icsk_ca_ops->cong_avoid(sk, ack, in_flight);
-	tcp_sk(sk)->snd_cwnd_stamp = tcp_time_stamp;
+	tcp_sk(sk)->snd_cwnd_stamp = tcp_time_stamp(tcp_sk(sk));
 }
 
 /* Restart timer after forward progress on connection.
@@ -2933,7 +2933,7 @@ static int tcp_clean_rtx_queue(struct sock *sk, int prior_fackets,
 	struct tcp_sock *tp = tcp_sk(sk);
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	struct sk_buff *skb;
-	u32 now = tcp_time_stamp;
+	u32 now = tcp_time_stamp(tp);
 	int fully_acked = 1;
 	int flag = 0;
 	u32 pkts_acked = 0;
@@ -3410,7 +3410,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 	 */
 	sk->sk_err_soft = 0;
 	icsk->icsk_probes_out = 0;
-	tp->rcv_tstamp = tcp_time_stamp;
+	tp->rcv_tstamp = tcp_time_stamp(tp);
 	prior_packets = tp->packets_out;
 	if (!prior_packets)
 		goto no_queue;
@@ -4541,7 +4541,7 @@ void tcp_cwnd_application_limited(struct sock *sk)
 		}
 		tp->snd_cwnd_used = 0;
 	}
-	tp->snd_cwnd_stamp = tcp_time_stamp;
+	tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 }
 
 static int tcp_should_expand_sndbuf(struct sock *sk)
@@ -4590,7 +4590,7 @@ static void tcp_new_space(struct sock *sk)
 			tlprintf("Expanding sndbuf to %d\n", min(sndmem, sysctl_tcp_wmem[2]));
 			sk->sk_sndbuf = min(sndmem, sysctl_tcp_wmem[2]);
 		}
-		tp->snd_cwnd_stamp = tcp_time_stamp;
+		tp->snd_cwnd_stamp = tcp_time_stamp(tp);
 	}
 
 	sk->sk_write_space(sk);
@@ -5187,7 +5187,7 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 
 		if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr &&
 		    !between(tp->rx_opt.rcv_tsecr, tp->retrans_stamp,
-			     tcp_time_stamp)) {
+			     tcp_time_stamp(tp))) {
 			NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_PAWSACTIVEREJECTED);
 			goto reset_and_undo;
 		}
@@ -5280,7 +5280,7 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 		/* Prevent spurious tcp_cwnd_restart() on first data
 		 * packet.
 		 */
-		tp->lsndtime = tcp_time_stamp;
+		tp->lsndtime = tcp_time_stamp(tp);
 
 		tcp_init_buffer_space(sk);
 
@@ -5308,7 +5308,7 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 			 * to stand against the temptation 8)     --ANK
 			 */
 			inet_csk_schedule_ack(sk);
-			icsk->icsk_ack.lrcvtime = tcp_time_stamp;
+			icsk->icsk_ack.lrcvtime = tcp_time_stamp(tp);
 			icsk->icsk_ack.ato	 = TCP_ATO_MIN;
 			tcp_incr_quickack(sk);
 			tcp_enter_quickack_mode(sk);
@@ -5524,7 +5524,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 				/* Prevent spurious tcp_cwnd_restart() on
 				 * first data packet.
 				 */
-				tp->lsndtime = tcp_time_stamp;
+				tp->lsndtime = tcp_time_stamp(tp);
 
 				tcp_mtup_init(sk);
 				tcp_initialize_rcv_mss(sk);

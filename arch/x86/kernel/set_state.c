@@ -1284,6 +1284,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 			copied += copy;
 			seglen -= copy;
 
+			TCP_SKB_CB(skb)->when = buff->tstamp;
 			tcp_init_tso_segs(sk, skb, mss_now);
 
 			break;
@@ -1502,6 +1503,7 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->mdev_max = saved_socket->tcp->mdev_max;
 	tp->rttvar = saved_socket->tcp->rttvar;
 	tp->rtt_seq = saved_socket->tcp->snd_nxt;
+	tp->tstamp_offset = saved_socket->tcp->tcp_tstamp_offset;
 
 	tp->rx_opt.tstamp_ok = saved_socket->tcp->timestamp_ok;
 	tp->rx_opt.rcv_tsval = saved_socket->tcp->tsval;

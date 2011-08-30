@@ -86,6 +86,7 @@ struct saved_sk_buff
 	__wsum csum;
 	int ip_summed;
 	u32 seq;
+	u32 tstamp;
 	void* content;
 	struct list_head list;
 };
@@ -148,6 +149,7 @@ struct saved_tcp_state
 	u32 mdev_max;
 	u32 rttvar;
 	u32 rtt_seq;
+	u32 tcp_tstamp_offset;
 
 	u32 timestamp_ok; // Are we doing tcp timestamps
 	u32 tsval;

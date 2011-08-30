@@ -633,7 +633,7 @@ static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack,
 		rep.opt[0] = htonl((TCPOPT_NOP << 24) | (TCPOPT_NOP << 16) |
 				   (TCPOPT_TIMESTAMP << 8) |
 				   TCPOLEN_TIMESTAMP);
-		rep.opt[1] = htonl(tcp_time_stamp);
+		rep.opt[1] = htonl(tcp_time_stamp(tcp_sk(skb->sk)));
 		rep.opt[2] = htonl(ts);
 		arg.iov[0].iov_len += TCPOLEN_TSTAMP_ALIGNED;
 	}
