@@ -3701,9 +3701,17 @@ static inline int tcp_paws_discard(const struct sock *sk,
 				   const struct sk_buff *skb)
 {
 	const struct tcp_sock *tp = tcp_sk(sk);
-	return ((s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval) > TCP_PAWS_WINDOW &&
+        int ret = ((s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval) > TCP_PAWS_WINDOW &&
 		get_seconds() < tp->rx_opt.ts_recent_stamp + TCP_PAWS_24DAYS &&
 		!tcp_disordered_ack(sk, skb));
+	if(ret)
+	{
+		sprint("recent %u rcv_tsval %u diff %d\n", tp->rx_opt.ts_recent, tp->rx_opt.rcv_tsval, (s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval));
+		sprint("get_seconds %u recent_stamp %u sum %u\n", get_seconds(), tp->rx_opt.ts_recent_stamp,  tp->rx_opt.ts_recent_stamp + TCP_PAWS_24DAYS);
+		sprint("disordered %s\n", tcp_disordered_ack(sk, skb)?"yes":"no");
+	}
+
+	return ret;
 }
 
 /* Check segment sequence number for validity.

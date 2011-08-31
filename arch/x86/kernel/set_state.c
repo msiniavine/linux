@@ -1202,7 +1202,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 
 	list_for_each_entry(buff, saved_buffers, list)
 	{
-		tlprintf("seq %u, csum %x len %d\n", buff->seq, buff->csum, buff->len);
+		tlprintf("seq %u, tstamp %u\n", buff->seq, buff->tstamp);
 
 		/* if(buff->len !=0) */
 		/* { */

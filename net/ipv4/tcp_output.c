@@ -1167,7 +1167,7 @@ static inline unsigned int tcp_cwnd_test(struct tcp_sock *tp,
 	if (in_flight < cwnd)
 		return (cwnd - in_flight);
 
-	sprint("in_flight %u cwnd %u p_out %u - s_out %u - l_out %u + r_out %u\n", in_flight, cwnd, tp->packets_out, tp->sacked_out, tp->lost_out, tp->retrans_out);
+//	sprint("in_flight %u cwnd %u p_out %u - s_out %u - l_out %u + r_out %u\n", in_flight, cwnd, tp->packets_out, tp->sacked_out, tp->lost_out, tp->retrans_out);
 	return 0;
 }
 
@@ -2039,7 +2039,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	 */
 	TCP_SKB_CB(skb)->when = tcp_time_stamp(tp);
 
-	sprint("Retransmit %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
+	sprint("Retransmit %u-%u %u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq, TCP_SKB_CB(skb)->when);
 	err = tcp_transmit_skb(sk, skb, 1, GFP_ATOMIC);
 
 	if (err == 0) {
