@@ -1217,8 +1217,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	size_goal = tp->xmit_size_goal;
 	copied = 0;
 	timeo = sock_sndtimeo(sk, 0); // flags 0, might disable non blocking sockets
-	sprint("size_goal %d select_size %d\n", size_goal, select_size(sk));
-	sprint("tcp_time_stamp %u\n", tcp_time_stamp);
+	tlprintf("size_goal %d select_size %d\n", size_goal, select_size(sk));
 
 	list_for_each_entry(buff, saved_buffers, list)
 	{

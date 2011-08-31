@@ -337,6 +337,5 @@ ENTRY(sys_call_table)
 	.long sys_was_state_restored 	/* 335 */
 	.long sys_save_state
 	.long sys_state_present
-	.long sys_getjiffies
 
 	

@@ -486,7 +486,7 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->mdev_max = tp->mdev_max;
 	saved_tcp->rttvar = tp->rttvar;
 	saved_tcp->rtt_seq = tp->rtt_seq;
-	saved_tcp->tcp_tstamp_offset = tcp_time_stamp;
+	saved_tcp->tcp_tstamp_offset = tcp_time_stamp(tp);
 
 	saved_tcp->timestamp_ok = tp->rx_opt.tstamp_ok;
 	saved_tcp->tsval = tp->rx_opt.rcv_tsval;
@@ -1039,11 +1039,6 @@ asmlinkage int sys_was_state_restored(struct pt_regs regs)
 		sprint("State was not restored for process %d\n", task_pid_nr(current));
 	}
 	return ret;
-}
-
-asmlinkage unsigned long sys_getjiffies(void)
-{
-	return jiffies;
 }
 
 
