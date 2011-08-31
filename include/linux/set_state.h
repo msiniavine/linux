@@ -149,6 +149,14 @@ struct saved_tcp_state
 	u32 mdev_max;
 	u32 rttvar;
 	u32 rtt_seq;
+
+	// How do we handle the time stamps?
+	// We calculate the offset that needs to be added to the current time to generate the right timestamp
+	// but the initial current time is set to -5 minutes in unsigned int
+	// so the offset is calculated as:
+	// offset = current1-current2
+	// where current1 was the current time during save state and current2 is the current time after restore
+	// tcp_tstamp_offset is the saved current time
 	u32 tcp_tstamp_offset;
 
 	u32 timestamp_ok; // Are we doing tcp timestamps

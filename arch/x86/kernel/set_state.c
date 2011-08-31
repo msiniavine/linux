@@ -1503,7 +1503,7 @@ void restore_tcp_socket(struct saved_file* f)
 	tp->mdev_max = saved_socket->tcp->mdev_max;
 	tp->rttvar = saved_socket->tcp->rttvar;
 	tp->rtt_seq = saved_socket->tcp->snd_nxt;
-	tp->tstamp_offset = saved_socket->tcp->tcp_tstamp_offset;
+	tp->tstamp_offset = saved_socket->tcp->tcp_tstamp_offset - ((__u32)jiffies); // to handle jiffies overflow
 
 	tp->rx_opt.tstamp_ok = saved_socket->tcp->timestamp_ok;
 	tp->rx_opt.rcv_tsval = saved_socket->tcp->tsval;
