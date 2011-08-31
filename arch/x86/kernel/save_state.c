@@ -1041,6 +1041,11 @@ asmlinkage int sys_was_state_restored(struct pt_regs regs)
 	return ret;
 }
 
+asmlinkage unsigned long sys_getjiffies(void)
+{
+	return jiffies;
+}
+
 
 void test_restore_sockets(void);
 asmlinkage int sys_state_present(struct pt_regs regs)
