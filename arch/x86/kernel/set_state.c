@@ -2070,6 +2070,30 @@ static void restore_children(struct saved_task_struct* state, struct state_info*
 	}
 }
 
+static void restore_threads(struct saved_task_struct* state, struct state_info* p_info)
+{
+	struct state_info* info;
+	struct saved_task_struct* thread;
+	struct task_struct* kthread;
+	list_for_each_entry(thread, &state->thread_group, thread_group)
+	{
+		sprint("Restoring thread %d\n", thread->pid);
+		info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
+		info->head = p_info->head;
+		info->state = thread;
+		info->parent = p_info->parent;
+		info->global_state = p_info->global_state;
+
+		kthread = kthread_create(do_restore, info, "thread_restore");
+		if(IS_ERR(kthread))
+		{
+			panic("Error restoring threads\n");
+		}
+
+		wake_up_process(kthread);
+	}
+}
+
 int count_processes(struct saved_task_struct* state)
 {
 	int count = 1;
@@ -2077,6 +2101,14 @@ int count_processes(struct saved_task_struct* state)
 	list_for_each_entry(child, &state->children, sibling)
 	{
 		count += count_processes(child);
+	}
+	if(state->group_leader)
+	{
+		struct saved_task_struct* thread;
+		list_for_each_entry(thread, &state->thread_group, thread_group)
+		{
+			count++;
+		}
 	}
 	return count;
 }
@@ -2235,6 +2267,10 @@ int do_set_state(struct state_info* info)
 		add_to_restored_list(current);
 
 		restore_children(state, info);
+		if(state->group_leader)
+		{
+			restore_threads(state, info);
+		}
 
 		if(info->parent)
 		{

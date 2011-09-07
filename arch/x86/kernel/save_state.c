@@ -95,15 +95,19 @@ void reserve_saved_memory(void)
 	struct saved_task_struct* task;
 	struct saved_state* state = (struct saved_state*)get_reserved_region();
 
-	if(state->processes == NULL)
+	if(state->processes.next == NULL)
+	{
+		INIT_LIST_HEAD(&state->processes);
+	}
+
+	if(list_empty(&state->processes))
 	{
 		sprint( "No state saved\n");
 		return;
 	}
-	for(task = state->processes; task != NULL; task = task->next)
+	list_for_each_entry(task, &state->processes, next)
 	{
 		reserve_process_memory(task);
-
 	}
 }
 
@@ -615,6 +619,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	spin_lock(&files->file_lock);
 	fdt = files_fdtable(files);
 	
+	sprint("files %p\n", files);
 	sprint("max_fds: %d\n", fdt->max_fds);
 	for(fd=0; fd<fdt->max_fds; fd++)
 	{
@@ -769,6 +774,8 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	
 	INIT_LIST_HEAD(&current_task->children);
 	INIT_LIST_HEAD(&current_task->sibling);
+	INIT_LIST_HEAD(&current_task->next);
+	INIT_LIST_HEAD(&current_task->thread_group);
 
 	sprint( "Target task %s pid: %d will be saved at %p\n", task->comm, task->pid, current_task);
 	strcpy(current_task->name, task->comm);
@@ -865,32 +872,45 @@ static void save_running_processes(void)
 	struct map_entry* head;
 	
 	read_lock(&tasklist_lock);
-	task = find_task_by_vpid(1);
-	
-	if(task == NULL)
-	{
-		sprint( "Could not find the init process\n");
-		read_unlock(&tasklist_lock);
-		return;
-	}
 	
 	head = new_map();
 	state = (struct saved_state*)alloc(sizeof(*state));
-	state->processes = NULL;
+	INIT_LIST_HEAD(&state->processes);
 
 	//sprint( "State is at: %p\n", state);
 	//sprint( "Processes are at: %p\n", state->processes);
+
+	for_each_process(task)
+	{
+		struct task_struct* thread;
+		sprint("pid %d group leader pid %d\n", task->pid, task->group_leader->pid);
+		list_for_each_entry_rcu(thread, &task->thread_group, thread_group)
+		{
+			sprint("thread tid %d\n", thread->pid);
+		}
+	}
 	
 	
+	sprint("head prev %p next %p\n", state->processes.prev, state->processes.next);
 	for_each_process(task)
 	{
 		struct saved_task_struct* current_task = NULL;
+		struct task_struct* thread;
 	     
 		if(!is_save_enabled(task)) continue;
 		
 		current_task = save_process(task, head);
-		current_task->next = state->processes;
-		state->processes = current_task;
+		current_task->group_leader = 1;
+		list_add_tail(&current_task->next, &state->processes);
+		sprint("head prev %p next %p\n", state->processes.prev, state->processes.next);
+		sprint("current prev %p next %p\n", current_task->next.prev, current_task->next.next);
+		list_for_each_entry(thread, &task->thread_group, thread_group)
+		{
+			struct saved_task_struct* saved_thread;
+			saved_thread = save_process(thread, head);
+			list_add_tail(&saved_thread->thread_group, &current_task->thread_group);
+			
+		}
 	}
 	
 	//sprint( "\n");
@@ -906,7 +926,7 @@ static void print_saved_process(struct saved_task_struct* task)
 	sprint( "%s %s\n", task->name, task->exe_file);
 	
 	print_regs(&task->registers);
-	sprint("Memory:\n");
+	sprint("Memory: %p\n", task->mm);
 	for(elem=task->mm->pages; elem != NULL;elem=elem->next)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
@@ -934,7 +954,8 @@ static void print_saved_processes(void)
 	struct saved_task_struct* task;
 	state = (struct saved_state*)get_reserved_region();
 	sprint( "State is at: %p\n", state);
-	for(task=state->processes; task!=NULL; task = task->next)
+	sprint("head prev %p next %p\n", state->processes.prev, state->processes.next);
+	list_for_each_entry(task, &state->processes, next)
 	{
 		print_saved_process(task);
 	}
@@ -951,6 +972,7 @@ static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, v
 asmlinkage void sys_save_state(void)
 {
 	save_running_processes();
+	print_saved_processes();
 }
 
 static int set_load_state(char* arg)
@@ -1047,15 +1069,15 @@ asmlinkage int sys_state_present(struct pt_regs regs)
 {
 	struct saved_state* state;
 	state = (struct saved_state*)get_reserved_region();
-	return state->processes != NULL;
+	return !list_empty(&state->processes); 
 }
 
 extern struct resource crashk_res;
 asmlinkage int sys_load_saved_state(struct pt_regs regs)
 {
-  int ret;
+	int ret;
 
-  struct saved_state* state;
+	struct saved_state* state;
 /*   unsigned long i; */
 /*   unsigned long start = FASTREBOOT_REGION_START; */
 /*   unsigned long end = FASTREBOOT_REGION_START + FASTREBOOT_REGION_SIZE; */
@@ -1073,21 +1095,21 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 /* 	  } */
 /*   } */
 
-  state = (struct saved_state*)get_reserved_region();
+	state = (struct saved_state*)get_reserved_region();
 
-  if(state->processes == NULL)
-  {
-	  sprint( "No more saved state\n");
-	  return -1;
-  }
+	if(list_empty(&state->processes))
+	{
+		sprint( "No more saved state\n");
+		return -1;
+	}
  
-  print_saved_processes();
-  ret = set_state(&regs, state->processes);
-  sprint( "set_state returned %d\n", ret);
+	print_saved_processes();
+	ret = set_state(&regs, list_first_entry(&state->processes, struct saved_task_struct, next));
+	sprint( "set_state returned %d\n", ret);
 /*   if(ret == 0) */
 /*   { */
 /* 	  state->processes = state->processes->next; */
 /* 	  add_to_restored_list(current); */
 /*   } */
-  return regs.ax;
+	return regs.ax;
 }

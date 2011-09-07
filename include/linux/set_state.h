@@ -310,9 +310,12 @@ struct saved_mm_struct
 
 struct saved_task_struct
 {
-	struct saved_task_struct* next;
+	struct list_head next;
 	
 	struct list_head children, sibling;
+
+	int group_leader;
+	struct list_head thread_group;
 	
 	struct saved_mm_struct* mm;
 
@@ -347,7 +350,7 @@ struct saved_task_struct
 
 struct saved_state
 {
-  struct saved_task_struct* processes;
+	struct list_head processes;
 };
 
 struct global_state_info

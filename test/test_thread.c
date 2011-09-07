@@ -15,14 +15,7 @@ int main()
 	int err;
 	pid_t child;
 	enable_save_state();
-	child = fork();
-	if(child == 0)
-	{
-		err = pthread_create(&thread, NULL, thread_func, NULL);
-		if(err)
-			return 1;
-	}
+	err = pthread_create(&thread, NULL, thread_func, NULL);
 	while(1);
 	return 0;
-	
 }

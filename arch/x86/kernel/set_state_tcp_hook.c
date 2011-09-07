@@ -139,9 +139,9 @@ static void find_blocked_ports(void)
 
 	state = (struct saved_state*)get_reserved_region();
 
-	if(state->processes == NULL) return;
+	if(list_empty(&state->processes)) return;
 
-	for(tsk = state->processes; tsk != NULL; tsk=tsk->next)
+	list_for_each_entry(tsk, &state->processes, next)
 	{
 		find_blocked_ports_tsk(tsk);
 	}
