@@ -613,8 +613,22 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 {
 	struct fdtable* fdt;
 	unsigned int fd;
+	struct saved_files* shared_files;
 
-	INIT_LIST_HEAD(&task->open_files);
+	// Check if the file descriptor table is shared between tasks
+	if((shared_files = find_by_first(head, files)) != NULL)
+	{
+		sprint("Already saved shared files\n");
+		task->open_files = shared_files;
+		return;
+	}
+
+	// They are not shared or this is the first time files are saved
+	shared_files = alloc(sizeof(*shared_files));
+	insert_entry(head, files, shared_files);
+	task->open_files = shared_files;
+
+	INIT_LIST_HEAD(&shared_files->files);
 
 	spin_lock(&files->file_lock);
 	fdt = files_fdtable(files);
@@ -666,7 +680,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		  	save_socket_info(task, f, file, head);
 		}
 
-		list_add_tail(&file->next, &task->open_files);
+		list_add_tail(&file->next, &shared_files->files);
 		
 	}
 	spin_unlock(&files->file_lock);
@@ -935,7 +949,7 @@ static void print_saved_process(struct saved_task_struct* task)
 		       p->flags, PageReserved(p) ? "yes" : "no");
 	}
 
-	list_for_each_entry(file, &task->open_files, next);
+	list_for_each_entry(file, &task->open_files->files, next);
 	{
 		sprint("fd: %u - %s\n", file->fd, file->name);
 	}

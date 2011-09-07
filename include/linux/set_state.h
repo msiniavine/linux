@@ -307,6 +307,11 @@ struct saved_mm_struct
 	pgd_t pgd[SAVED_PGD_SIZE];  // leave the upper 256 out of 1024 entries unchanged because they are used by the kernel
 };
 
+struct saved_files
+{
+	struct list_head files;
+};
+
 
 struct saved_task_struct
 {
@@ -331,7 +336,7 @@ struct saved_task_struct
 
 
 	char exe_file[PATH_LENGTH];         // name of the executable file
-	struct list_head open_files;
+	struct saved_files* open_files;
 
 	pid_t pid;
 

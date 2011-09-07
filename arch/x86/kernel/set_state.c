@@ -56,6 +56,15 @@
 
 int debug_was_state_restored = 0;
 
+struct state_info
+{
+	struct map_entry* head;
+	struct saved_task_struct* state;
+	struct task_struct* parent;
+	struct global_state_info *global_state;
+};
+
+
 static bool valid_arg_len(struct linux_binprm *bprm, long len)
 {
 	return len <= MAX_ARG_STRLEN;
@@ -705,7 +714,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 				sprint("Did not need to change fd of read end %d\n", pipe_fd[0]);
 
 			// Scan the saved fd table for other pipe end
-			list_for_each_entry(sfile, &state->open_files, next)
+			list_for_each_entry(sfile, &state->open_files->files, next)
 			{
 				if ((sfile->type == WRITE_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
 				{
@@ -760,7 +769,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 				sprint("Did not need to change fd of write end %d\n", pipe_fd[1]);
 
 			// Scan the saved fd table for other pipe end
-			list_for_each_entry(sfile, &state->open_files, next)
+			list_for_each_entry(sfile, &state->open_files->files, next)
 			{
 				if ((sfile->type == READ_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
 				{
@@ -811,7 +820,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 		pipe_fd[0] = pipe_fd[1] = 0;
 
 		// Scan the saved fd table and restore open pipe ends
-		list_for_each_entry(sfile, &state->open_files, next)
+		list_for_each_entry(sfile, &state->open_files->files, next)
 		{
 			if ((sfile->type == READ_PIPE_FILE)  && (sfile->pipe.inode = f->pipe.inode))
 			{
@@ -1717,18 +1726,33 @@ void restore_socket(struct saved_file* f)
 	}
 }
 
-void restore_files(struct saved_task_struct* state, struct global_state_info* global_state)
+void restore_files(struct saved_task_struct* state, struct state_info* info)
 {
+	struct global_state_info* global_state = info->global_state;
 	struct saved_file* f;
 	unsigned int max_fd = 0;
+	struct files_struct* files;
+	
+	// check if the files struct is shared and it was already restored
+	if((files = find_by_first(info->head, state->open_files)) != NULL)
+	{
+		sprint("Restoring shared files %p\n", files);
+		exit_files(current);
+		task_lock(current);
+		atomic_inc(&files->count);
+		current->files = files;
+		task_unlock(current);
+		return;
+	}
 
-	list_for_each_entry(f, &state->open_files, next)
+	sprint("Creating new fd table\n");
+	list_for_each_entry(f, &state->open_files->files, next)
 	{
 		if (f->fd > max_fd)
 			max_fd = f->fd;
 	}
 
-	list_for_each_entry(f, &state->open_files, next)
+	list_for_each_entry(f, &state->open_files->files, next)
 	{
 		sprint("Restoring fd %u with path %s of file type %u\n", f->fd, f->name, f->type);
 		switch (f->type)
@@ -1749,6 +1773,8 @@ void restore_files(struct saved_task_struct* state, struct global_state_info* gl
 				break;
 		}
 	}
+	
+	insert_entry(info->head, state->open_files, current->files);
 }
 
 void close_unused_pipes(struct saved_task_struct* state, struct global_state_info* global_state)
@@ -2012,13 +2038,6 @@ void restore_registers(struct saved_task_struct* state)
 	print_regs(task_pt_regs(current));
 }
 
-struct state_info
-{
-	struct map_entry* head;
-	struct saved_task_struct* state;
-	struct task_struct* parent;
-	struct global_state_info *global_state;
-};
 
 static struct global_state_info global_state;
 static struct pipe_restore_temp pipe_restore_head;
@@ -2257,7 +2276,7 @@ int do_set_state(struct state_info* info)
 			put_files_struct(displaced);
 
 		debug_was_state_restored = 1;
-		restore_files(state, info->global_state);
+		restore_files(state, info);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
 		restore_creds(state);
