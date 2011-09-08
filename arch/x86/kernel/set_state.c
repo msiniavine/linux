@@ -716,7 +716,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 			// Scan the saved fd table for other pipe end
 			list_for_each_entry(sfile, &state->open_files->files, next)
 			{
-				if ((sfile->type == WRITE_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
+				if ((sfile->type == WRITE_PIPE_FILE) && (sfile->pipe.inode == f->pipe.inode))
 				{
 					if (sfile->fd != pipe_fd[1])
 					{
@@ -771,7 +771,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 			// Scan the saved fd table for other pipe end
 			list_for_each_entry(sfile, &state->open_files->files, next)
 			{
-				if ((sfile->type == READ_PIPE_FILE) && (sfile->pipe.inode = f->pipe.inode))
+				if ((sfile->type == READ_PIPE_FILE) && (sfile->pipe.inode == f->pipe.inode))
 				{
 					if (pipe_fd[0] != sfile->fd)
 					{
@@ -822,7 +822,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 		// Scan the saved fd table and restore open pipe ends
 		list_for_each_entry(sfile, &state->open_files->files, next)
 		{
-			if ((sfile->type == READ_PIPE_FILE)  && (sfile->pipe.inode = f->pipe.inode))
+			if ((sfile->type == READ_PIPE_FILE)  && (sfile->pipe.inode == f->pipe.inode))
 			{
 				if (alloc_fd(sfile->fd, 0) != sfile->fd)
 				{
@@ -835,7 +835,7 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 				sprint("Copied read pipe end to fd %d.\n", pipe_fd[0]);
 			}
 
-			if ((sfile->type == WRITE_PIPE_FILE)  && (sfile->pipe.inode = f->pipe.inode))
+			if ((sfile->type == WRITE_PIPE_FILE)  && (sfile->pipe.inode == f->pipe.inode))
 			{
 				if (alloc_fd(sfile->fd, 0) != sfile->fd)
 				{
@@ -1623,8 +1623,8 @@ static void restore_listen_socket ( struct saved_file *saved_file )
 	}
 	saved_socket.type &= SOCK_TYPE_MASK;
 
-	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
-		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
+	if(saved_file->flags & O_NONBLOCK)
+		flags |=O_NONBLOCK;
 
 	retval = sock_create(	saved_socket.sock_family, 
 				saved_socket.type, 
@@ -1648,10 +1648,6 @@ static void restore_listen_socket ( struct saved_file *saved_file )
 	}
 
 	file = get_empty_filp();
-	if ( saved_file->flags == O_NONBLOCK )
-	{
-		flags |= O_NONBLOCK;
-	}
 	
 	err = sock_attach_fd( socket, file, flags );
 	if ( err < 0 )
@@ -2025,6 +2021,7 @@ void restore_registers(struct saved_task_struct* state)
 	case 7:    // waitpid
 	case 114:  // wait4
 	case 142:  // select
+	case 168:  // poll
 	restart:
 		sprint("Restarting system call %d\n", state->syscall_restart);
 		state->registers.ax = state->registers.orig_ax;
@@ -2181,6 +2178,7 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	sprint("parent waiting for children\n");
 	wait_event(global_state.wq, atomic_read(&global_state.processes_left) == 0);
 	sprint("parent finishes waiting for children\n");
+	unregister_set_state_hook();
 	complete_all(&global_state.all_done);
 	return 0;
 }
@@ -2311,7 +2309,7 @@ int do_set_state(struct state_info* info)
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
-		unregister_set_state_hook();
+
 		resume_saved_state();
 		return 0;
 	}

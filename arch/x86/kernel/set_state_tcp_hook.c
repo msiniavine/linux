@@ -7,12 +7,27 @@
 
 static LIST_HEAD(blocked_ports);
 static spinlock_t ports_lock = SPIN_LOCK_UNLOCKED;
+static int hook_installed = 0;
 
 struct port_entry
 {
 	u16 port;
-	struct list_head next;
+	struct list_head lh;
 };
+
+// checks if the port is being blocked
+// caller mush hold the lock
+static int is_blocked(u16 port)
+{
+	struct port_entry* pe;
+	list_for_each_entry(pe, &blocked_ports, lh)
+	{
+		if(port == pe->port)
+			return 1;
+	}
+
+	return 0;
+}
 
 static unsigned int set_state_tcp_rx_hook(unsigned int hook, struct sk_buff* skb, const struct net_device* in, const struct net_device* out, 
 					  int (*okfn)(struct sk_buff*))
@@ -20,8 +35,6 @@ static unsigned int set_state_tcp_rx_hook(unsigned int hook, struct sk_buff* skb
 	struct tcphdr* th;
 	struct iphdr* ih;
 	u16 port;
-	struct port_entry* pe;
-	unsigned long flags;
 	
 	if(!skb) return NF_ACCEPT;
 
@@ -35,17 +48,12 @@ static unsigned int set_state_tcp_rx_hook(unsigned int hook, struct sk_buff* skb
 	th = (struct tcphdr*)((u32*)ih + ih->ihl);
 	port = ntohs(th->dest);
 
-	spin_lock_irqsave(&ports_lock, flags);
-	list_for_each_entry(pe, &blocked_ports, next)
+	if(is_blocked(port))
 	{
-		if(pe->port == port)
-		{
-			sprint("BLOCK: seq %u ack %u port %u\n", ntohl(th->seq), ntohl(th->ack), port);
-			spin_unlock_irqrestore(&ports_lock, flags);
-			return NF_DROP;
-		}
+		sprint("BLOCK: seq %u ack %u port %u\n", ntohl(th->seq), ntohl(th->ack), port);
+		return NF_DROP;
+	
 	}
-	spin_unlock_irqrestore(&ports_lock, flags);
 	return NF_ACCEPT;
 }
 
@@ -61,34 +69,27 @@ static struct nf_hook_ops set_state_ops =
 void block_port(u16 port)
 {
 	struct port_entry* pe;
-	unsigned long flags;
 	sprint("BLOCK: Blocking port %u\n", port);
 	pe = kmalloc(sizeof(*pe), GFP_KERNEL);
 	if(!pe)
 	{
-		sprint("BLOCK: Out of memory when blocking port\n");
 		return; 
 	}
 	pe->port = port;
-	spin_lock_irqsave(&ports_lock, flags);
-	list_add_tail(&pe->next, &blocked_ports);
-	spin_unlock_irqrestore(&ports_lock, flags);
+	list_add_tail(&pe->lh, &blocked_ports);
 }
 
 void unblock_port(u16 port)
 {
 	struct port_entry* pe = NULL;
-	unsigned long flags;
-	spin_lock_irqsave(&ports_lock, flags);
-	list_for_each_entry(pe, &blocked_ports, next)
+	list_for_each_entry(pe, &blocked_ports, lh)
 	{
 		if(pe->port == port)
 		{
-			list_del(&pe->next);
+			list_del(&pe->lh);
 			break;
 		}
 	}
-	spin_unlock_irqrestore(&ports_lock, flags);
 	kfree(pe);
 
 	sprint("BLOCK: unblock %u\n", port);
@@ -97,10 +98,7 @@ void unblock_port(u16 port)
 int blocking_ports(void)
 {
 	int empty;
-	unsigned long flags;
-	spin_lock_irqsave(&ports_lock, flags);
 	empty = list_empty(&blocked_ports);
-	spin_unlock_irqrestore(&ports_lock, flags);
 	return !empty;
 }
 
@@ -121,6 +119,7 @@ static void find_blocked_ports_tsk(struct saved_task_struct* tsk)
 		tcp = socket->tcp;
 
 		if(tcp == NULL) continue;
+		if(is_blocked(tcp->sport)) continue;
 
 		block_port(tcp->sport);
 
@@ -154,6 +153,7 @@ void set_state_tcp_hook(void)
 	if(!blocking_ports()) return;
 
 	err = nf_register_hook(&set_state_ops);
+	hook_installed = 1;
 	if(err < 0)
 	{
 		panic("set_state nf_register_hook failed\n");
@@ -164,12 +164,19 @@ void set_state_tcp_hook(void)
 void unregister_set_state_hook(void)
 {
 	struct port_entry* pe, *n;
+	sprint("BLOCK unregistering hook\n");
 	if(!blocking_ports()) return;
-	nf_unregister_hook(&set_state_ops);
+	if(!hook_installed) return;
 
-	list_for_each_entry_safe(pe, n, &blocked_ports, next)
+	sprint("BLOCK unregistering hook 2\n");
+
+	nf_unregister_hook(&set_state_ops);
+	hook_installed = 0;
+
+	list_for_each_entry_safe(pe, n, &blocked_ports, lh)
 	{
-		list_del(&pe->next);
+		sprint("BLOCK pe %p n %p blocked_ports %p next %p\n", pe, n, &blocked_ports, pe->lh.next);
+		list_del(&pe->lh);
 		kfree(pe);
 	}
 	
