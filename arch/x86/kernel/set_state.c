@@ -679,13 +679,20 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
 	struct pipes_to_close* pipe_close_head = global_state->pipe_close_head;
 	struct pipe_restore_temp* other_end = find_other_pipe_end(pipe_restore_head, f->pipe.inode);
+	int flags = 0;
+
+	if(f->flags & O_NONBLOCK)
+	{
+		sprint("Non blocking pipe\n");
+		flags |= O_NONBLOCK;
+	}
 
 	// If pipes have not been created yet, create a pair of pipes even if the process doesn't use both pipes.
 	// Extraneous pipes will be closed later
 	if (other_end == NULL)
 	{
 		int pipe_fd[2];
-		if (do_pipe(pipe_fd) < 0)
+		if (do_pipe_flags(pipe_fd, flags) < 0)
 		{
 			sprint("Unable to restore pipe at fd: %u\n", f->fd);
 			panic("Unable to restore pipe");

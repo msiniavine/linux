@@ -665,6 +665,12 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		{
 			file->flags = O_RDWR;
 		}
+		
+		if(f->f_flags & O_NONBLOCK)
+		{
+			sprint("Setting O_NONBLOCK bit\n");
+			file->flags |= O_NONBLOCK;
+		}
 
 		if(file_is_vc_terminal(f))
 		{
