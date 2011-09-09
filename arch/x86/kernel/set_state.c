@@ -1112,12 +1112,12 @@ static u32 tcp_checksum(u32 csum, void* from, int len)
 	return sum;
 }
 
-static int add_data_to_skb(struct sk_buff* skb, void* from, int copy)
+static int add_data_to_skb(struct sk_buff* skb, void* from, int copy, u32 orig_csum)
 {
 	// orginal code used to calculate checksum here
 	// but i am using the original saved csum
 	memcpy(skb_put(skb, copy), from, copy);
-	skb->csum = tcp_checksum(skb->csum, from, copy);
+	skb->csum = orig_csum ;// tcp_checksum(skb->csum, from, copy);
 	return 0;
 }
 
@@ -1280,7 +1280,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 			{
 				if(copy > skb_tailroom(skb))
 					copy = skb_tailroom(skb);
-				if(add_data_to_skb(skb, from, copy) !=0)
+				if(add_data_to_skb(skb, from, copy, buff->csum) !=0)
 					panic("Failed to copy data to socket buffer\n");
 
 			}
