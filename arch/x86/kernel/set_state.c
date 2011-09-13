@@ -244,7 +244,7 @@ static void print_mm(struct mm_struct* mm)
 static void allocate_saved_pages(struct saved_task_struct* state)
 {
 	struct shared_resource* elem;
-	for(elem=state->mm->pages;elem!=NULL;elem=elem->next)
+	list_for_each_entry(elem, &state->mm->pages, list)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
 		alloc_specific_page(page->pfn, page->mapcount);
@@ -424,8 +424,7 @@ static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* stat
 		return err;
 	sprint("Created stack\n");
 
-
-	for(elem=state->memory; elem!=NULL; elem=elem->next)
+	list_for_each_entry(elem, &state->vm_areas, list)
 	{ 
 		struct saved_vm_area* saved_area = (struct saved_vm_area*)elem->data;
 		sprint("Restoring area: %08lx-%08lx\n", saved_area->begin, saved_area->end);
@@ -673,9 +672,10 @@ void restore_pipe_data(struct saved_pipe* saved_pipe, unsigned int fd)
 }
 
 // Restore unnamed pipes
-void restore_pipe(struct saved_file* f, struct global_state_info* global_state, struct saved_task_struct* state, unsigned int* max_fd)
+void restore_pipe(struct saved_file* f, struct state_info* info, struct saved_task_struct* state, unsigned int* max_fd)
 {
 	struct saved_file* sfile;
+	struct global_state_info* global_state = info->global_state;
 	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
 	struct pipes_to_close* pipe_close_head = global_state->pipe_close_head;
 	struct pipe_restore_temp* other_end = find_other_pipe_end(pipe_restore_head, f->pipe.inode);
@@ -868,9 +868,10 @@ void restore_pipe(struct saved_file* f, struct global_state_info* global_state, 
 }
 
 // Restore named pipes
-void restore_fifo(struct saved_file* f, struct global_state_info* global_state, struct saved_task_struct* state, unsigned int* max_fd)
+void restore_fifo(struct saved_file* f, struct state_info* info, struct saved_task_struct* state, unsigned int* max_fd)
 {
 	int fd;
+	struct global_state_info* global_state = info->global_state;
 	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
 
 	if (f->type == WRITE_FIFO_FILE)
@@ -948,7 +949,7 @@ void restore_fifo(struct saved_file* f, struct global_state_info* global_state, 
 
 
 // Restore a regular file
-void restore_file(struct saved_file* f);
+void restore_file(struct saved_file* f, struct state_info* info);
 void redraw_screen(struct vc_data*, int);
 
 struct file* restore_vc_terminal(struct saved_file* f)
@@ -989,7 +990,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	return file;
 }
 
-void restore_file(struct saved_file* f)
+void restore_file(struct saved_file* f, struct state_info* info)
 {
 	unsigned int fd;
 	struct file* file;
@@ -1000,6 +1001,13 @@ void restore_file(struct saved_file* f)
 		sprint("Could not get original fd %u, got %u\n", f->fd, fd);
 		panic("Could not get original fd");
 	}
+
+	if((file = find_by_first(info->head, f)) != NULL)
+	{
+		sprint("File %u %s already restored\n", fd, f->name);
+		goto install_fd;
+	}
+
 	switch (f->type)
 	{
 	        case VC_TTY:
@@ -1025,6 +1033,9 @@ void restore_file(struct saved_file* f)
 	}
 	atomic_long_set(&(file->f_count), f->count);
 	sprint("Set file count value to %ld\n", f->count);
+
+	insert_entry(info->head, f, file);
+install_fd:
 	fd_install(fd, file);
 }
 
@@ -1348,7 +1359,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 }
 
 extern struct inet_timewait_death_row tcp_death_row;
-void restore_tcp_socket(struct saved_file* f)
+void restore_tcp_socket(struct saved_file* f, struct state_info* info)
 {
 	int retval;
 
@@ -1368,18 +1379,24 @@ void restore_tcp_socket(struct saved_file* f)
 	tlprintf("Restoring TCP socket\n");
 	tlprintf("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
 	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
-	
-	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock);
-	if(retval < 0)
-	{
-		panic("Socket create failed: %d", retval);
-	}
 
 	fd=alloc_fd(f->fd, 0); // need real flags
 	if(fd != f->fd)
 	{
 		tlprintf("Could not get original fd %u got %u\n", f->fd, fd);
 		panic("Could not get original fd");
+	}
+
+	if((file = find_by_first(info->head, f)) != NULL)
+	{
+		sprint("Socket already restored\n");
+		goto install_fd;
+	}
+	
+	retval = sock_create(saved_socket->sock_family, saved_socket->sock_type, saved_socket->sock_protocol, &sock);
+	if(retval < 0)
+	{
+		panic("Socket create failed: %d", retval);
 	}
 	
 	file = get_empty_filp();
@@ -1392,7 +1409,7 @@ void restore_tcp_socket(struct saved_file* f)
 		put_unused_fd(fd);
 		panic("socket attach failed\n");
 	}
-	fd_install(fd, file);
+
 
 	sk=sock->sk;
 	inet = inet_sk(sk);
@@ -1536,6 +1553,10 @@ void restore_tcp_socket(struct saved_file* f)
 	restore_queued_socket_buffers(sk, saved_socket->tcp);
 
 	release_sock(sk);
+
+	insert_entry(info->head, f, file);
+install_fd:
+	fd_install(fd, file);
 }
 
 void restore_udp_socket(struct saved_file* f){
@@ -1547,7 +1568,6 @@ void restore_udp_socket(struct saved_file* f){
 	struct file* file;
 	int err;
 	int flags = sock.flags;
-	
 
 	//create a socket using the original spec
 
@@ -1599,7 +1619,7 @@ void restore_udp_socket(struct saved_file* f){
 	return;
 }
 
-static void restore_listen_socket ( struct saved_file *saved_file )
+static void restore_listen_socket(struct saved_file *saved_file, struct state_info* info )
 {
 	//
 	int retval;
@@ -1623,6 +1643,19 @@ static void restore_listen_socket ( struct saved_file *saved_file )
 	BUILD_BUG_ON(SOCK_CLOEXEC & SOCK_TYPE_MASK);
 	BUILD_BUG_ON(SOCK_NONBLOCK & SOCK_TYPE_MASK);
 
+	fd = alloc_fd( saved_file->fd, 0 );
+	if ( fd != saved_file->fd )
+	{
+		panic( "Unable obtain original socket file descriptor, %d\n", saved_file->fd );
+	}
+
+	if((file = find_by_first(info->head, saved_file)) != NULL)
+	{
+		sprint("Shared socket %p restored previously\n", file);
+		goto install_fd;
+	}
+
+
 	flags = saved_socket.type & ~SOCK_TYPE_MASK;
 	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
 	{
@@ -1642,17 +1675,7 @@ static void restore_listen_socket ( struct saved_file *saved_file )
 		panic( "Unable to create socket.\n" );
 	}
 
-	/*retval = sock_map_fd(socket, flags & (O_CLOEXEC | O_NONBLOCK));
-	  if (retval < 0)
-	  {
-	  panic( "Function sock_map_fd() failed.\n" );
-	  }*/
 	
-	fd = alloc_fd( saved_file->fd, 0 );
-	if ( fd != saved_file->fd )
-	{
-		panic( "Unable obtain original socket file descriptor, %d\n", saved_file->fd );
-	}
 
 	file = get_empty_filp();
 	
@@ -1662,10 +1685,6 @@ static void restore_listen_socket ( struct saved_file *saved_file )
 		panic( "Unable to attach socket to file.\n" );
 	}
 	
-	fd_install( fd, file );
-	//
-	
-	//
 	memset( &address, 0, sizeof( address ) );
 	address.sin_family = AF_INET;
 	address.sin_port = htons( saved_socket.inet.num );
@@ -1707,9 +1726,14 @@ static void restore_listen_socket ( struct saved_file *saved_file )
 		panic( "Unable to put socket into listening state.\n" );
 	}
 	//
+
+	insert_entry(info->head, saved_file, file);
+
+install_fd:
+	fd_install( fd, file );
 }
 
-void restore_socket(struct saved_file* f)
+void restore_socket(struct saved_file* f, struct state_info* info)
 {
 	struct saved_socket* sock = &f->socket;
 	if(sock->sock_family == PF_INET && sock->sock_type == SOCK_DGRAM)
@@ -1720,19 +1744,18 @@ void restore_socket(struct saved_file* f)
 	{
 		if(sock->tcp->state == TCP_LISTEN)
 		{
-			restore_listen_socket(f);
+			restore_listen_socket(f, info);
 		}
 		else
 		{
-			restore_tcp_socket(f);
+			restore_tcp_socket(f, info);
 		}
 	}
 }
 
 void restore_files(struct saved_task_struct* state, struct state_info* info)
 {
-	struct global_state_info* global_state = info->global_state;
-	struct saved_file* f;
+	struct shared_resource* f;
 	unsigned int max_fd = 0;
 	struct files_struct* files;
 	
@@ -1749,30 +1772,32 @@ void restore_files(struct saved_task_struct* state, struct state_info* info)
 	}
 
 	sprint("Creating new fd table\n");
-	list_for_each_entry(f, &state->open_files->files, next)
+	list_for_each_entry(f, &state->open_files->files, list)
 	{
-		if (f->fd > max_fd)
-			max_fd = f->fd;
+		struct saved_file* sfile = f->data;
+		if (sfile->fd > max_fd)
+			max_fd = sfile->fd;
 	}
 
-	list_for_each_entry(f, &state->open_files->files, next)
+	list_for_each_entry(f, &state->open_files->files, list)
 	{
-		sprint("Restoring fd %u with path %s of file type %u\n", f->fd, f->name, f->type);
-		switch (f->type)
+		struct saved_file* sfile = f->data;
+		sprint("Restoring fd %u with path %s of file type %u\n", sfile->fd, sfile->name, sfile->type);
+		switch (sfile->type)
 		{
 			case READ_PIPE_FILE:
 			case WRITE_PIPE_FILE:
-				restore_pipe(f, global_state, state, &max_fd);
+				restore_pipe(sfile, info, state, &max_fd);
 				break;
 			case READ_FIFO_FILE:
 			case WRITE_FIFO_FILE:
-				restore_fifo(f, global_state, state, &max_fd);
+				restore_fifo(sfile, info, state, &max_fd);
 				break;
 		        case SOCKET:
-			        restore_socket(f);
+			        restore_socket(sfile, info);
 				break;
 			default:
-				restore_file(f);
+				restore_file(sfile, info);
 				break;
 		}
 	}

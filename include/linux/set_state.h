@@ -274,7 +274,7 @@ struct saved_page
 struct shared_resource
 {
 	void* data;  
-	struct shared_resource* next;
+	struct list_head list;
 };
 
 struct saved_vm_area
@@ -303,7 +303,7 @@ struct saved_mm_struct
 {
 	unsigned long start_brk, brk;
 	unsigned long nr_ptes;
-	struct shared_resource* pages;
+	struct list_head pages;
 	pgd_t pgd[SAVED_PGD_SIZE];  // leave the upper 256 out of 1024 entries unchanged because they are used by the kernel
 };
 
@@ -324,7 +324,7 @@ struct saved_task_struct
 	
 	struct saved_mm_struct* mm;
 
-	struct shared_resource* memory;
+	struct list_head vm_areas;
 	struct saved_vm_area* stack;
 
 	char name[16];

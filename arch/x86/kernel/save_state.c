@@ -69,7 +69,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 {
 	struct shared_resource* elem;
 	struct saved_task_struct* child;
-	for(elem=task->mm->pages; elem!=NULL; elem=elem->next)
+	list_for_each_entry(elem, &task->mm->pages, list)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
 		int err;
@@ -197,8 +197,8 @@ static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, 
 
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		elem->data = page;
-		elem->next = mm->pages;
-		mm->pages = elem;
+		INIT_LIST_HEAD(&elem->list);
+		list_add_tail(&elem->list, &mm->pages);
 	}
 }
 
@@ -226,6 +226,7 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 			continue;
 		
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
+		INIT_LIST_HEAD(&elem->list);
 		p = pfn_to_page(pgd.pgd >> 12);
 
 		page = find_by_first(head, p);
@@ -244,9 +245,7 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 			elem->data = page;
 		}
 
-		elem->next = saved_mm->pages;
-		saved_mm->pages = elem;
-
+		list_add_tail(&elem->list, &saved_mm->pages);
 
      	}
 	sprint( "Saved pgd\n");
@@ -356,9 +355,9 @@ static void save_pipe_info(struct saved_task_struct* task, struct file* f, struc
 				insert_entry(head, p, page_to_save);
 
 				elem = (struct shared_resource*)alloc(sizeof(*elem));
+				INIT_LIST_HEAD(&elem->list);
 				elem->data = page_to_save;
-				elem->next = task->mm->pages;
-				task->mm->pages = elem;
+				list_add_tail(&elem->list, &task->mm->pages);
 			}
 		}
 	}
@@ -440,6 +439,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->dport = ntohs(inet->dport);
 	saved_tcp->saddr = inet->saddr;
 	saved_tcp->sport = ntohs(inet->sport);
+
+	sprint("state %d sport %u dport %u\n", saved_tcp->state, saved_tcp->sport, saved_tcp->dport);
 
 	saved_tcp->backlog = sk->sk_ack_backlog;
 
@@ -625,6 +626,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 
 	// They are not shared or this is the first time files are saved
 	shared_files = alloc(sizeof(*shared_files));
+	sprint("shared_files %p\n", shared_files);
 	insert_entry(head, files, shared_files);
 	task->open_files = shared_files;
 
@@ -639,16 +641,27 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	{
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);
+		struct shared_resource* file_res;
 
 //		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
 
 		if(f == NULL)
 			continue;
+		
+		if((file = find_by_first(head, f)) != NULL)
+		{
+			sprint("file %u %s is shared and was saved already\n", fd, file->name);
+			file_res = alloc(sizeof(*file_res));
+			INIT_LIST_HEAD(&file_res->list);
+			file_res->data = file;
+			list_add_tail(&file_res->list, &shared_files->files);
+			continue;
+		}
 
 		file = (struct saved_file*)alloc(sizeof(*file));
 		INIT_LIST_HEAD(&file->next);
 		get_path_absolute(f, file->name);
-		sprint("fd %d points to %s\n", fd, file->name);
+		sprint("fd %d points to %s %p\n", fd, file->name, f);
 		file->fd = fd;
 		file->count = file_count(f);
 		
@@ -686,7 +699,11 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		  	save_socket_info(task, f, file, head);
 		}
 
-		list_add_tail(&file->next, &shared_files->files);
+		file_res = alloc(sizeof(*file_res));
+		INIT_LIST_HEAD(&file_res->list);
+		file_res->data = file;
+		list_add_tail(&file_res->list, &shared_files->files);
+		insert_entry(head, f, file);
 		
 	}
 	spin_unlock(&files->file_lock);
@@ -796,6 +813,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	INIT_LIST_HEAD(&current_task->sibling);
 	INIT_LIST_HEAD(&current_task->next);
 	INIT_LIST_HEAD(&current_task->thread_group);
+	INIT_LIST_HEAD(&current_task->vm_areas);
 
 	sprint( "Target task %s pid: %d will be saved at %p\n", task->comm, task->pid, current_task);
 	strcpy(current_task->name, task->comm);
@@ -809,6 +827,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	{
 		sprint("mm %p not seen previously\n", task->mm);
 		mm = (struct saved_mm_struct*)alloc(sizeof(*mm));
+		INIT_LIST_HEAD(&mm->pages);
 		insert_entry(head, task->mm, mm);
 		save_pgd(task->mm, mm, head);
 	}
@@ -842,11 +861,10 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 
 		cur_area = (struct saved_vm_area*)alloc(sizeof(*cur_area));
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
+		INIT_LIST_HEAD(&elem->list);
 		elem->data = cur_area;
 
-		elem->next = current_task->memory;
-		current_task->memory = elem;
-
+		list_add_tail(&elem->list, &current_task->vm_areas);
 
 		cur_area->begin = area->vm_start;
 		cur_area->end = area->vm_end;
@@ -940,14 +958,13 @@ static void save_running_processes(void)
 static void print_saved_process(struct saved_task_struct* task)
 {
 	struct shared_resource* elem;
-	struct saved_file* file;
 	struct saved_task_struct* child;
 	sprint( "Next process is at: %p\n", task);
 	sprint( "%s %s\n", task->name, task->exe_file);
 	
 	print_regs(&task->registers);
 	sprint("Memory: %p\n", task->mm);
-	for(elem=task->mm->pages; elem != NULL;elem=elem->next)
+	list_for_each_entry(elem, &task->mm->pages, list)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
 		struct page* p = pfn_to_page(page->pfn);
@@ -955,8 +972,10 @@ static void print_saved_process(struct saved_task_struct* task)
 		       p->flags, PageReserved(p) ? "yes" : "no");
 	}
 
-	list_for_each_entry(file, &task->open_files->files, next);
+	sprint("Files: %p\n", &task->open_files->files);
+	list_for_each_entry(elem, &task->open_files->files, list)
 	{
+		struct saved_file* file = elem->data;
 		sprint("fd: %u - %s\n", file->fd, file->name);
 	}
 
