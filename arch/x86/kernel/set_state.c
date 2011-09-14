@@ -672,9 +672,9 @@ void restore_pipe_data(struct saved_pipe* saved_pipe, unsigned int fd)
 }
 
 // Restore unnamed pipes
-void restore_pipe(struct saved_file* f, struct state_info* info, struct saved_task_struct* state, unsigned int* max_fd)
+void restore_pipe(int fd, struct saved_file* f, struct state_info* info, struct saved_task_struct* state, unsigned int* max_fd)
 {
-	struct saved_file* sfile;
+	struct shared_resource* file_iter;
 	struct global_state_info* global_state = info->global_state;
 	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
 	struct pipes_to_close* pipe_close_head = global_state->pipe_close_head;
@@ -694,7 +694,7 @@ void restore_pipe(struct saved_file* f, struct state_info* info, struct saved_ta
 		int pipe_fd[2];
 		if (do_pipe_flags(pipe_fd, flags) < 0)
 		{
-			sprint("Unable to restore pipe at fd: %u\n", f->fd);
+			sprint("Unable to restore pipe at fd: %d\n", fd);
 			panic("Unable to restore pipe");
 		}
 		sprint("Created pipe pair with read end at fd %d and write end at fd %d.\n", pipe_fd[0], pipe_fd[1]);
@@ -706,36 +706,37 @@ void restore_pipe(struct saved_file* f, struct state_info* info, struct saved_ta
 			int use_maxfd = 1;
 
 			sprint("Restoring read pipe end\n");
-			if (f->fd != pipe_fd[0])
+			if (fd != pipe_fd[0])
 			{
-				if (sys_dup2(pipe_fd[0], f->fd) != f->fd)
+				if (sys_dup2(pipe_fd[0], fd) != fd)
 				{
-					sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[0], f->fd);
+					sprint("Unable to change fd of read end from %d to %d\n", pipe_fd[0], fd);
 					panic("Unable to change fd of read end");
 				}
-				sprint("Duped read pipe from %d to %u\n", pipe_fd[0], f->fd);
+				sprint("Duped read pipe from %d to %d\n", pipe_fd[0], fd);
 				sys_close(pipe_fd[0]);
-				pipe_fd[0] = f->fd;
+				pipe_fd[0] = fd;
 			}
 			else
 				sprint("Did not need to change fd of read end %d\n", pipe_fd[0]);
 
 			// Scan the saved fd table for other pipe end
-			list_for_each_entry(sfile, &state->open_files->files, next)
+			list_for_each_entry(file_iter, &state->open_files->files, list)
 			{
+				struct saved_file* sfile = file_iter->data;
 				if ((sfile->type == WRITE_PIPE_FILE) && (sfile->pipe.inode == f->pipe.inode))
 				{
-					if (sfile->fd != pipe_fd[1])
+					if (file_iter->fd != pipe_fd[1])
 					{
-						if (sys_dup2(pipe_fd[1], sfile->fd) != sfile->fd)
+						if (sys_dup2(pipe_fd[1], file_iter->fd) != file_iter->fd)
 						{
-							sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[1], sfile->fd);
+							sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[1], file_iter->fd);
 							panic("Unable to change fd of read end");
 						}
 						use_maxfd = 0;
-						sprint("Duped write pipe from %d to %u\n", pipe_fd[1], sfile->fd);
+						sprint("Duped write pipe from %d to %u\n", pipe_fd[1], file_iter->fd);
 						sys_close(pipe_fd[1]);
-						pipe_fd[1] = sfile->fd;
+						pipe_fd[1] = file_iter->fd;
 					}
 					else
 					{
@@ -761,36 +762,37 @@ void restore_pipe(struct saved_file* f, struct state_info* info, struct saved_ta
 			int use_maxfd = 1;
 
 			sprint("Restoring write pipe end\n");
-			if (f->fd != pipe_fd[1])
+			if (fd != pipe_fd[1])
 			{
-				if (sys_dup2(pipe_fd[1], f->fd) != f->fd)
+				if (sys_dup2(pipe_fd[1], fd) != fd)
 				{
-					sprint("Unable to change fd of write end from %d to %u\n", pipe_fd[1], f->fd);
+					sprint("Unable to change fd of write end from %d to %u\n", pipe_fd[1], fd);
 					panic("Unable to change fd of write end");
 				}
-				sprint("Duped write pipe from %d to %u\n", pipe_fd[1], f->fd);
+				sprint("Duped write pipe from %d to %u\n", pipe_fd[1], fd);
 				sys_close(pipe_fd[1]);
-				pipe_fd[1] = f->fd;
+				pipe_fd[1] = fd;
 			}
 			else
 				sprint("Did not need to change fd of write end %d\n", pipe_fd[1]);
 
 			// Scan the saved fd table for other pipe end
-			list_for_each_entry(sfile, &state->open_files->files, next)
+			list_for_each_entry(file_iter, &state->open_files->files, list)
 			{
+				struct saved_file* sfile = file_iter->data;
 				if ((sfile->type == READ_PIPE_FILE) && (sfile->pipe.inode == f->pipe.inode))
 				{
-					if (pipe_fd[0] != sfile->fd)
+					if (pipe_fd[0] != file_iter->fd)
 					{
-						if (sys_dup2(pipe_fd[0], sfile->fd) != sfile->fd)
+						if (sys_dup2(pipe_fd[0], file_iter->fd) != file_iter->fd)
 						{
-							sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[0], sfile->fd);
+							sprint("Unable to change fd of read end from %d to %u\n", pipe_fd[0], file_iter->fd);
 							panic("Unable to change fd of read end");
 						}
 						use_maxfd = 0;
-						sprint("Duped read pipe from %d to %u\n", pipe_fd[0], sfile->fd);
+						sprint("Duped read pipe from %d to %u\n", pipe_fd[0], file_iter->fd);
 						sys_close(pipe_fd[0]);
-						pipe_fd[0] = sfile->fd;
+						pipe_fd[0] = file_iter->fd;
 					}
 					else
 					{
@@ -827,31 +829,32 @@ void restore_pipe(struct saved_file* f, struct state_info* info, struct saved_ta
 		pipe_fd[0] = pipe_fd[1] = 0;
 
 		// Scan the saved fd table and restore open pipe ends
-		list_for_each_entry(sfile, &state->open_files->files, next)
+		list_for_each_entry(file_iter, &state->open_files->files, list)
 		{
+			struct saved_file* sfile = file_iter->data;
 			if ((sfile->type == READ_PIPE_FILE)  && (sfile->pipe.inode == f->pipe.inode))
 			{
-				if (alloc_fd(sfile->fd, 0) != sfile->fd)
+				if (alloc_fd(file_iter->fd, 0) != file_iter->fd)
 				{
-					sprint("Unable to allocate fd %u for pipe read end\n", sfile->fd);
+					sprint("Unable to allocate fd %u for pipe read end\n", file_iter->fd);
 					panic("Unable to allocate fd for pipe read end");
 				}
-				fd_install(sfile->fd, other_end->read_file);
+				fd_install(file_iter->fd, other_end->read_file);
 				get_file(other_end->read_file);
-				pipe_fd[0] = sfile->fd;
+				pipe_fd[0] = file_iter->fd;
 				sprint("Copied read pipe end to fd %d.\n", pipe_fd[0]);
 			}
 
 			if ((sfile->type == WRITE_PIPE_FILE)  && (sfile->pipe.inode == f->pipe.inode))
 			{
-				if (alloc_fd(sfile->fd, 0) != sfile->fd)
+				if (alloc_fd(file_iter->fd, 0) != file_iter->fd)
 				{
-					sprint("Unable to allocate fd %u for pipe write end\n", sfile->fd);
+					sprint("Unable to allocate fd %u for pipe write end\n", file_iter->fd);
 					panic("Unable to allocate fd for pipe write end");
 				}
-				fd_install(sfile->fd, other_end->write_file);
+				fd_install(file_iter->fd, other_end->write_file);
 				get_file(other_end->write_file);
-				pipe_fd[1] = sfile->fd;
+				pipe_fd[1] = file_iter->fd;
 				sprint("Copied write pipe end to fd %d.\n", pipe_fd[1]);
 			}
 		}
@@ -868,9 +871,9 @@ void restore_pipe(struct saved_file* f, struct state_info* info, struct saved_ta
 }
 
 // Restore named pipes
-void restore_fifo(struct saved_file* f, struct state_info* info, struct saved_task_struct* state, unsigned int* max_fd)
+void restore_fifo(int fd, struct saved_file* f, struct state_info* info, struct saved_task_struct* state, unsigned int* max_fd)
 {
-	int fd;
+	int pipe_fd;
 	struct global_state_info* global_state = info->global_state;
 	struct pipe_restore_temp* pipe_restore_head = global_state->pipe_restore_head;
 
@@ -885,7 +888,7 @@ void restore_fifo(struct saved_file* f, struct state_info* info, struct saved_ta
 		if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) == NULL)
 		{
 			sprint("Creating false read end to allow write end to be created\n");
-			fd = sys_open(f->name, O_RDONLY | O_NONBLOCK, 777);
+			pipe_fd = sys_open(f->name, O_RDONLY | O_NONBLOCK, 777);
 			*max_fd = *max_fd + 1;
 			if (sys_dup2(fd, *max_fd) != *max_fd)
 			{
@@ -895,12 +898,12 @@ void restore_fifo(struct saved_file* f, struct state_info* info, struct saved_ta
 			temp_fd = *max_fd;
 		}
 
-		fd = sys_open(f->name, O_WRONLY | O_NONBLOCK, 777);
+		pipe_fd = sys_open(f->name, O_WRONLY | O_NONBLOCK, 777);
 	
 		// If not already done, restore data and add pipe to global table
 		if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) == NULL)
 		{
-			restore_pipe_data(&(f->pipe), fd);
+			restore_pipe_data(&(f->pipe), pipe_fd);
 			add_to_pipe_restore(pipe_restore_head, f->pipe.inode, state->pid, 0, 0, NULL, NULL);
 		}
 
@@ -912,7 +915,7 @@ void restore_fifo(struct saved_file* f, struct state_info* info, struct saved_ta
 	{
 		sprint("Restoring named pipe: read end\n");
 
-		fd = sys_open(f->name, O_RDONLY | O_NONBLOCK, 777);
+		pipe_fd = sys_open(f->name, O_RDONLY | O_NONBLOCK, 777);
 		
 		// If pipe has not been written to yet, create a write end and write to it first
 		if (find_other_pipe_end(pipe_restore_head, f->pipe.inode) == NULL)
@@ -935,21 +938,21 @@ void restore_fifo(struct saved_file* f, struct state_info* info, struct saved_ta
 	}
 
 	// Dup the fd to the right one
-	if (fd != f->fd)
+	if (pipe_fd != fd)
 	{
-		if (sys_dup2(fd, f->fd) != f->fd)
+		if (sys_dup2(pipe_fd, fd) != fd)
 		{
-			sprint("Could not dup fd of fifo from %d to %u\n", fd, f->fd);
+			sprint("Could not dup fd of fifo from %d to %u\n", pipe_fd, fd);
 			panic("Could not dup fd of fifo\n");
 		}
-		sys_close(fd);
+		sys_close(pipe_fd);
 	}
-	sprint("Duped fd of fifo from %d to %u\n", fd, f->fd);
+	sprint("Duped fd of fifo from %d to %u\n", pipe_fd, fd);
 }
 
 
 // Restore a regular file
-void restore_file(struct saved_file* f, struct state_info* info);
+void restore_file(int fd, struct saved_file* f, struct state_info* info);
 void redraw_screen(struct vc_data*, int);
 
 struct file* restore_vc_terminal(struct saved_file* f)
@@ -990,15 +993,15 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	return file;
 }
 
-void restore_file(struct saved_file* f, struct state_info* info)
+void restore_file(int fd, struct saved_file* f, struct state_info* info)
 {
-	unsigned int fd;
+	unsigned int got_fd;
 	struct file* file;
 	sprint("flags: %d\n", f->flags);
-	fd = alloc_fd(f->fd, 0); // need real flags
-	if(fd != f->fd)
+	got_fd = alloc_fd(fd, 0); // need real flags
+	if(got_fd != fd)
 	{
-		sprint("Could not get original fd %u, got %u\n", f->fd, fd);
+		sprint("Could not get original fd %u, got %u\n", fd, got_fd);
 		panic("Could not get original fd");
 	}
 
@@ -1359,11 +1362,11 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 }
 
 extern struct inet_timewait_death_row tcp_death_row;
-void restore_tcp_socket(struct saved_file* f, struct state_info* info)
+void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 {
 	int retval;
 
-	unsigned int fd;
+	int got_fd;
 	struct file* file;
 	struct saved_socket* saved_socket = &f->socket;
 	int flags = saved_socket->flags;
@@ -1380,10 +1383,10 @@ void restore_tcp_socket(struct saved_file* f, struct state_info* info)
 	tlprintf("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
 	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
 
-	fd=alloc_fd(f->fd, 0); // need real flags
-	if(fd != f->fd)
+	got_fd=alloc_fd(fd, 0); // need real flags
+	if(got_fd != fd)
 	{
-		tlprintf("Could not get original fd %u got %u\n", f->fd, fd);
+		tlprintf("Could not get original fd %u got %u\n", fd, got_fd);
 		panic("Could not get original fd");
 	}
 
@@ -1559,9 +1562,9 @@ install_fd:
 	fd_install(fd, file);
 }
 
-void restore_udp_socket(struct saved_file* f){
+void restore_udp_socket(int fd, struct saved_file* f){
 	struct saved_socket sock = f->socket;
-	unsigned int fd;
+	int got_fd;
 	struct socket* socket;
 	struct sockaddr_in servaddr;
 	int retval;
@@ -1576,10 +1579,10 @@ void restore_udp_socket(struct saved_file* f){
 		panic("socket create failed\n");
 		return;
 	}
-	fd = alloc_fd(f->fd, 0); // need real flags
-	if(fd != f->fd)
+	got_fd = alloc_fd(fd, 0); // need real flags
+	if(got_fd != fd)
 	{
-		sprint("Could not get original fd %u, got %u\n", f->fd, fd);
+		sprint("Could not get original fd %u, got %u\n", fd, got_fd);
 		panic("Could not get original fd");
 	}
 	file = get_empty_filp();
@@ -1619,14 +1622,14 @@ void restore_udp_socket(struct saved_file* f){
 	return;
 }
 
-static void restore_listen_socket(struct saved_file *saved_file, struct state_info* info )
+static void restore_listen_socket(int fd, struct saved_file *saved_file, struct state_info* info )
 {
 	//
 	int retval;
 	struct socket *socket;
 	struct saved_socket saved_socket = saved_file->socket;
 	int flags;
-	unsigned int fd;
+	int got_fd;
 	struct file *file;
 	
 	struct sockaddr_in address;
@@ -1643,10 +1646,10 @@ static void restore_listen_socket(struct saved_file *saved_file, struct state_in
 	BUILD_BUG_ON(SOCK_CLOEXEC & SOCK_TYPE_MASK);
 	BUILD_BUG_ON(SOCK_NONBLOCK & SOCK_TYPE_MASK);
 
-	fd = alloc_fd( saved_file->fd, 0 );
-	if ( fd != saved_file->fd )
+	got_fd = alloc_fd(fd, 0 );
+	if ( got_fd != fd )
 	{
-		panic( "Unable obtain original socket file descriptor, %d\n", saved_file->fd );
+		panic( "Unable obtain original socket file descriptor %d, got %d\n", fd, got_fd);
 	}
 
 	if((file = find_by_first(info->head, saved_file)) != NULL)
@@ -1733,22 +1736,22 @@ install_fd:
 	fd_install( fd, file );
 }
 
-void restore_socket(struct saved_file* f, struct state_info* info)
+void restore_socket(int fd, struct saved_file* f, struct state_info* info)
 {
 	struct saved_socket* sock = &f->socket;
 	if(sock->sock_family == PF_INET && sock->sock_type == SOCK_DGRAM)
 	{
-		restore_udp_socket(f);
+		restore_udp_socket(fd, f);
 	}
 	else if(sock->sock_family == PF_INET && sock->sock_type == SOCK_STREAM)
 	{
 		if(sock->tcp->state == TCP_LISTEN)
 		{
-			restore_listen_socket(f, info);
+			restore_listen_socket(fd, f, info);
 		}
 		else
 		{
-			restore_tcp_socket(f, info);
+			restore_tcp_socket(fd, f, info);
 		}
 	}
 }
@@ -1774,30 +1777,29 @@ void restore_files(struct saved_task_struct* state, struct state_info* info)
 	sprint("Creating new fd table\n");
 	list_for_each_entry(f, &state->open_files->files, list)
 	{
-		struct saved_file* sfile = f->data;
-		if (sfile->fd > max_fd)
-			max_fd = sfile->fd;
+		if (f->fd > max_fd)
+			max_fd = f->fd;
 	}
 
 	list_for_each_entry(f, &state->open_files->files, list)
 	{
 		struct saved_file* sfile = f->data;
-		sprint("Restoring fd %u with path %s of file type %u\n", sfile->fd, sfile->name, sfile->type);
+		sprint("Restoring fd %u with path %s of file type %u\n", f->fd, sfile->name, sfile->type);
 		switch (sfile->type)
 		{
 			case READ_PIPE_FILE:
 			case WRITE_PIPE_FILE:
-				restore_pipe(sfile, info, state, &max_fd);
+				restore_pipe(f->fd, sfile, info, state, &max_fd);
 				break;
 			case READ_FIFO_FILE:
 			case WRITE_FIFO_FILE:
-				restore_fifo(sfile, info, state, &max_fd);
+				restore_fifo(f->fd, sfile, info, state, &max_fd);
 				break;
 		        case SOCKET:
-			        restore_socket(sfile, info);
+			        restore_socket(f->fd, sfile, info);
 				break;
 			default:
-				restore_file(sfile, info);
+				restore_file(f->fd, sfile, info);
 				break;
 		}
 	}

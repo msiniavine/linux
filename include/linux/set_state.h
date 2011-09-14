@@ -256,13 +256,11 @@ struct saved_file
 {
 	unsigned int type;
 	char name[PATH_LENGTH];
-	unsigned int fd;
 	long count;
 	int flags;
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_socket socket;
-	struct list_head next;
 };
 
 struct saved_page
@@ -274,6 +272,7 @@ struct saved_page
 struct shared_resource
 {
 	void* data;  
+	int fd;               // file descriptor if pointing to a shared file
 	struct list_head list;
 };
 

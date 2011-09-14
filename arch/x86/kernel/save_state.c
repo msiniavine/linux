@@ -654,15 +654,17 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 			file_res = alloc(sizeof(*file_res));
 			INIT_LIST_HEAD(&file_res->list);
 			file_res->data = file;
+			file_res->fd = fd;
 			list_add_tail(&file_res->list, &shared_files->files);
 			continue;
 		}
 
 		file = (struct saved_file*)alloc(sizeof(*file));
-		INIT_LIST_HEAD(&file->next);
+		file_res = alloc(sizeof(*file_res));
+		INIT_LIST_HEAD(&file_res->list);
 		get_path_absolute(f, file->name);
 		sprint("fd %d points to %s %p\n", fd, file->name, f);
-		file->fd = fd;
+		file_res->fd = fd;
 		file->count = file_count(f);
 		
 		if(f->f_mode & FMODE_READ)
@@ -699,8 +701,6 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		  	save_socket_info(task, f, file, head);
 		}
 
-		file_res = alloc(sizeof(*file_res));
-		INIT_LIST_HEAD(&file_res->list);
 		file_res->data = file;
 		list_add_tail(&file_res->list, &shared_files->files);
 		insert_entry(head, f, file);
@@ -976,7 +976,7 @@ static void print_saved_process(struct saved_task_struct* task)
 	list_for_each_entry(elem, &task->open_files->files, list)
 	{
 		struct saved_file* file = elem->data;
-		sprint("fd: %u - %s\n", file->fd, file->name);
+		sprint("fd: %u - %s\n", elem->fd, file->name);
 	}
 
 	list_for_each_entry(child, &task->children, sibling)
