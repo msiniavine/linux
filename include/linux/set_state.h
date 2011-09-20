@@ -283,6 +283,10 @@ struct saved_vm_area
 	pgprot_t protection_flags;
 	unsigned long vm_flags;
 	unsigned long vm_pgoff;
+
+	// true if this vma needs an anon_vma structure
+	// for anonymous rmap
+	int anon_vma;
 };
 
 struct saved_sighand

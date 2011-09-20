@@ -876,6 +876,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		cur_area->protection_flags = area->vm_page_prot;
 		cur_area->vm_flags = area->vm_flags;
 		cur_area->vm_pgoff = area->vm_pgoff;
+		cur_area->anon_vma = area->anon_vma ? 1 : 0;
 		
 		if(need_to_save_pages)
 		{

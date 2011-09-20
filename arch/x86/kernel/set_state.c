@@ -45,6 +45,7 @@
 #include <linux/tty.h>
 #include <linux/kd.h>
 #include <linux/console_struct.h>
+#include <linux/rmap.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -237,7 +238,7 @@ static void print_mm(struct mm_struct* mm)
 	struct vm_area_struct* vma;
 	for(vma = mm->mmap; vma != NULL; vma=vma->vm_next)
 	{
-		sprint( "vma: %08lx-%08lx\n", vma->vm_start, vma->vm_end);
+		sprint( "vma: %08lx-%08lx anon_vma: %p\n", vma->vm_start, vma->vm_end, vma->anon_vma);
 	}
 }
 
@@ -462,6 +463,15 @@ static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* stat
 		sprint("Linking vma\n");
 		vma_link(bprm->mm,vma, prev, rb_link, parent);
 		sprint("Vma linked\n");
+		if(saved_area->anon_vma)
+		{
+			sprint("Preparing anon_vma\n");
+			if(anon_vma_prepare(vma))
+			{
+				panic("anon_vma prepare failed\n");
+			}
+		}
+
 		bprm->mm->total_vm = (vma->vm_end - vma->vm_start)/PAGE_SIZE;
 		up_write(&bprm->mm->mmap_sem);
 	}
