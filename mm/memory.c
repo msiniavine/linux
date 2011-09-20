@@ -64,6 +64,9 @@
 
 #include "internal.h"
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 #ifndef CONFIG_NEED_MULTIPLE_NODES
 /* use the per-pgdat data instead for discontigmem - mbligh */
 unsigned long max_mapnr;
@@ -663,7 +666,10 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 */
 	if (!(vma->vm_flags & (VM_HUGETLB|VM_NONLINEAR|VM_PFNMAP|VM_INSERTPAGE))) {
 		if (!vma->anon_vma)
+		{
+			tlprintf("Skip copy due to flags\n");
 			return 0;
+		}
 	}
 
 	if (is_vm_hugetlb_page(vma))
@@ -676,7 +682,10 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 * is_cow_mapping() returns true.
 	 */
 	if (is_cow_mapping(vma->vm_flags))
+	{
+		tlprintf("Pre copy cow mapping\n");
 		mmu_notifier_invalidate_range_start(src_mm, addr, end);
+	}
 
 	ret = 0;
 	dst_pgd = pgd_offset(dst_mm, addr);
@@ -693,8 +702,11 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	} while (dst_pgd++, src_pgd++, addr = next, addr != end);
 
 	if (is_cow_mapping(vma->vm_flags))
+	{
+		tlprintf("post copy cow mapping\n");
 		mmu_notifier_invalidate_range_end(src_mm,
 						  vma->vm_start, end);
+	}
 	return ret;
 }
 

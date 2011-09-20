@@ -6,6 +6,8 @@ all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighan
 
 syscalls.o: syscalls.S
 	as syscalls.S -o syscalls.o
+clone.o: clone.S
+	as clone.S -o clone.o
 
 test_syscall.o: test_syscall.S
 
@@ -79,7 +81,8 @@ test_cli: test_cli.o syscalls.o
 	gcc -nostdlib -g test_cli.o syscalls.o -o test_cli
 test_sockserver: test_sockserver.o test.o
 test_sockload: test_sockload.o test.o
-test_fork: test_fork.o test.o
+test_fork: test_fork.o test.o clone.o
+#	gcc -static -o test_fork test_fork.o test.o #-lpthread
 
 #file_test.o: file_test.c
 #gcc -c -nostdlibc file_test.c -o file_test.o
