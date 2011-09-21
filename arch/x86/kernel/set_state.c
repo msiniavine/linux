@@ -329,6 +329,17 @@ static int create_stack(struct linux_binprm *bprm, struct saved_vm_area* stack)
 	}
 
 	mm->stack_vm = mm->total_vm = (vma->vm_end - vma->vm_start)/PAGE_SIZE;
+
+	if(stack->anon_vma)
+	{
+		sprint("Preparing anon_vma\n");
+		if(anon_vma_prepare(vma))
+		{
+			panic("anon_vma prepare failed\n");
+		}
+	}
+
+	
 	up_write(&mm->mmap_sem);
 
 	bprm->p = vma->vm_end - sizeof(void *);

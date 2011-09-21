@@ -40,7 +40,7 @@ extern int debug_was_state_restored;
 #define tlprintf(format, ...) {		       \
 		struct task_struct* __tsk = current;		\
 		if(!strcmp("test_fork", __tsk->comm))		\
-			printk(KERN_EMERG format, ##__VA_ARGS__); }
+			printk(KERN_INFO format, ##__VA_ARGS__); }
 
 static void inline busy_wait(unsigned long timeout)
 {
