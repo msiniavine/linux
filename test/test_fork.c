@@ -15,6 +15,14 @@ void* thread_func(void* args)
 	pthread_exit(NULL);
 }
 
+int recursive_call(int n)
+{
+	char bump[1024];
+	if(n == 0) return 0;
+	
+	return recursive_call(n-1)+1;
+}
+
 
 int main()
 {
@@ -23,9 +31,10 @@ int main()
 	int forked_again = 0;
 	pthread_t thread;
 	int childtid;
-	err = my_clone(CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
+//	err = my_clone(CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
+	err = fork();
 	printf("It works\n");
-	if(!err)
+	if(err == 0)
 	{
 		exit(0);
 	}
@@ -54,9 +63,15 @@ int main()
 			// clone(0, CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0xb7efb6f8)
 			// syscall(120, CLONE_STOPPED|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
 //			ret = syscall(120, CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
-			ret = my_clone(CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
+//			ret = my_clone(CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
+			ret = fork();
 			if (ret == 0)
-				while(1); 
+			{
+				int r;
+				r = recursive_call(100);
+				printf("Recurcive call done %d\n", r);
+				execl("/bin/ls", "/bin/ls", "/home/maxim", NULL);
+			}
 
 
 		}
