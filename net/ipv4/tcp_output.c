@@ -633,13 +633,6 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	tcb = TCP_SKB_CB(skb);
 	memset(&opts, 0, sizeof(opts));
 
-	if(tp->expected_seq != TCP_SKB_CB(skb)->seq)
-	{
-		sprint("WARNING: expected seq %u, got %u\n", tp->expected_seq, TCP_SKB_CB(skb)->seq);
-	}
-	tp->expected_seq = TCP_SKB_CB(skb)->end_seq;
-
-
 	if (unlikely(tcb->flags & TCPCB_FLAG_SYN))
 		tcp_options_size = tcp_syn_options(sk, skb, &opts, &md5);
 	else

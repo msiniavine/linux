@@ -986,7 +986,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	char full_name[PATH_LENGTH];
 	strncpy(full_name, f->name, PATH_LENGTH);
 	full_name[PATH_LENGTH-1] = '\0';
-	file = do_filp_open(-100, full_name, f->flags, -1074763960);
+	file = do_filp_open(-100, full_name, f->flags, 0);
 	if(IS_ERR(file))
 	{
 		panic("Could not open terminal file with error: %ld\n", PTR_ERR(file));
@@ -1018,6 +1018,7 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 {
 	unsigned int got_fd;
 	struct file* file;
+	loff_t seek_res;
 	sprint("flags: %d\n", f->flags);
 	got_fd = alloc_fd(fd, 0); // need real flags
 	if(got_fd != fd)
@@ -1038,17 +1039,25 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 			file = restore_vc_terminal(f);
 			break;
 		default:
-			file = do_filp_open(-100, f->name, f->flags, -1074763960); 
+			file = do_filp_open(-100, f->name, f->flags, 0); 
 			if(IS_ERR(file))
 			{
-				panic("Could not open file %s\n", f->name);
+				panic("Could not open file %s error: %ld\n", f->name, PTR_ERR(file));
 			}
 			sprint("Restoring some normal file.\n");
+
+			seek_res = vfs_llseek(file, f->pos, 0);
+			if(seek_res != f->pos)
+			{
+				sprint("Seek result %lld expected %lld\n", seek_res, f->pos);
+			}
+
 			break;
 	}
 
 	atomic_long_set(&(file->f_count), f->count);
 	sprint("Set file count value to %ld\n", f->count);
+
 
 	if(IS_ERR(file))
 	{
@@ -2281,7 +2290,7 @@ int do_set_state(struct state_info* info)
 	if(retval)
 		goto out_file;
 	sprint( "Allocated new mm_struct\n");
-	print_mm(bprm->mm);
+//	print_mm(bprm->mm);
 
 	sprint( "Allocated security\n");
 

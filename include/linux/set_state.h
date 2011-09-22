@@ -258,6 +258,7 @@ struct saved_file
 	char name[PATH_LENGTH];
 	long count;
 	int flags;
+	loff_t pos;
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_socket socket;

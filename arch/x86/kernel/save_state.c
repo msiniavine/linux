@@ -76,7 +76,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 		err = reserve(page->pfn << PAGE_SHIFT, PAGE_SIZE);
 		if(err < 0)
 		{
-			sprint("Failed to reserve pfn: %ld, err: %d\n", page->pfn, err);
+//			sprint("Failed to reserve pfn: %ld, err: %d\n", page->pfn, err);
 		}
 		else
 		{
@@ -686,6 +686,14 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 			sprint("Setting O_NONBLOCK bit\n");
 			file->flags |= O_NONBLOCK;
 		}
+		
+		if(f->f_flags & O_LARGEFILE)
+		{
+			sprint("Saving large file\n");
+			file->flags |= O_LARGEFILE;
+		}
+
+		file->pos = f->f_pos;
 
 		if(file_is_vc_terminal(f))
 		{
@@ -964,14 +972,14 @@ static void print_saved_process(struct saved_task_struct* task)
 	sprint( "%s %s\n", task->name, task->exe_file);
 	
 	print_regs(&task->registers);
-	sprint("Memory: %p\n", task->mm);
-	list_for_each_entry(elem, &task->mm->pages, list)
-	{
-		struct saved_page* page = (struct saved_page*)elem->data;
-		struct page* p = pfn_to_page(page->pfn);
-		sprint("pfn: %lx, count: %d, flags: %08lx, reserved: %s\n", page->pfn, atomic_read(&p->_count), 
-		       p->flags, PageReserved(p) ? "yes" : "no");
-	}
+	/* sprint("Memory: %p\n", task->mm); */
+	/* list_for_each_entry(elem, &task->mm->pages, list) */
+	/* { */
+	/* 	struct saved_page* page = (struct saved_page*)elem->data; */
+	/* 	struct page* p = pfn_to_page(page->pfn); */
+	/* 	sprint("pfn: %lx, count: %d, flags: %08lx, reserved: %s\n", page->pfn, atomic_read(&p->_count),  */
+	/* 	       p->flags, PageReserved(p) ? "yes" : "no"); */
+	/* } */
 
 	sprint("Files: %p\n", &task->open_files->files);
 	list_for_each_entry(elem, &task->open_files->files, list)
