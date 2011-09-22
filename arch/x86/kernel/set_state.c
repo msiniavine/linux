@@ -1257,19 +1257,19 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 
 	if(list_empty(saved_buffers))
 	{
-		tlprintf("No socket buffers were saved\n");
+		sprint("No socket buffers were saved\n");
 	}
 
 	list_for_each_entry(buff, saved_buffers, list)
 	{
-		tlprintf("seq %u, tstamp %u\n", buff->seq, buff->tstamp);
+		sprint("seq %u, tstamp %u\n", buff->seq, buff->tstamp);
 
 		/* if(buff->len !=0) */
 		/* { */
 		/* 	void** data = buff->content; // first 5 */
-		/* 	tlprintf("%p %p %p %p %p ...\n", data[0], data[1], data[2], data[3], data[4]); */
+		/* 	sprint("%p %p %p %p %p ...\n", data[0], data[1], data[2], data[3], data[4]); */
 		/* 	data = data + buff->len/sizeof(void*) - 5;  // last 5 */
-		/* 	tlprintf("%p %p %p %p %p\n", data[0], data[1], data[2],  data[3], data[4]); */
+		/* 	sprint("%p %p %p %p %p\n", data[0], data[1], data[2],  data[3], data[4]); */
 		/* } */
 	}
 
@@ -1277,12 +1277,13 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	size_goal = tp->xmit_size_goal;
 	copied = 0;
 	timeo = sock_sndtimeo(sk, 0); // flags 0, might disable non blocking sockets
-	tlprintf("size_goal %d select_size %d\n", size_goal, select_size(sk));
+	sprint("size_goal %d select_size %d\n", size_goal, select_size(sk));
 
 	list_for_each_entry(buff, saved_buffers, list)
 	{
 		int seglen = buff->len;
 		unsigned char* from = buff->content;
+		sprint("copy saved buffer %u len %u\n", buff->seq, buff->len);
 
 		while(seglen > 0)
 		{
@@ -1290,17 +1291,17 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 			skb = tcp_write_queue_tail(sk);
 
 
-			tlprintf("%d total queued %d free %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, sk_stream_wspace(sk));
+			sprint("%d total queued %d free %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, sk_stream_wspace(sk));
 			if(!sk_stream_memory_free(sk))
 			{
-				tlprintf("No free memory wait for sndbuf total %d queued %d segments %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, segment_count);
+				sprint("No free memory wait for sndbuf total %d queued %d segments %d\n", sk->sk_sndbuf, sk->sk_wmem_queued, segment_count);
 				goto wait_for_sndbuf;
 			}
 			
 			skb = sk_stream_alloc_skb(sk, select_size(sk), sk->sk_allocation);
 			if(!skb)
 			{
-				tlprintf("stream alloc failed, wait for memory\n");
+				sprint("stream alloc failed, wait for memory\n");
 				goto wait_for_memory;
 			}
 			
@@ -1309,7 +1310,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 			
 			if(skb->ip_summed != buff->ip_summed)
 			{
-				tlprintf("ip_summed not set was %u expect %u\n", skb->ip_summed, buff->ip_summed);
+				sprint("ip_summed not set was %u expect %u\n", skb->ip_summed, buff->ip_summed);
 				skb->ip_summed = buff->ip_summed;
 			}
 			
@@ -1323,7 +1324,10 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 			if(skb_tailroom(skb) > 0)
 			{
 				if(copy > skb_tailroom(skb))
+				{
+					sprint("Copy > tailroom copy %u tailroom %u\n", copy, skb_tailroom(skb));
 					copy = skb_tailroom(skb);
+				}
 				if(add_data_to_skb(skb, from, copy, buff->csum) !=0)
 					panic("Failed to copy data to socket buffer\n");
 
@@ -1344,6 +1348,8 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 			copied += copy;
 			seglen -= copy;
 
+			sprint("copy %u copied %u seglen %u\n", copy, copied, seglen);
+
 			TCP_SKB_CB(skb)->when = buff->tstamp;
 			tcp_init_tso_segs(sk, skb, mss_now);
 
@@ -1355,7 +1361,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 
 		wait_for_memory:
 
-			tlprintf("timeout %ld\n", timeo);
+			sprint("timeout %ld\n", timeo);
 			if((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 				panic("Wait for memory returned error %d\n", err);
 
@@ -1369,6 +1375,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	{
 		tcp_for_write_queue(skb, sk)
 		{
+			sprint("resume search: %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 			if(TCP_SKB_CB(skb)->end_seq == stcp->snd_nxt)
 			{
 				resume_point = skb;
@@ -1409,14 +1416,14 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 	__be32 daddr, nexthop;
 	struct sock* sk;
 
-	tlprintf("Restoring TCP socket\n");
-	tlprintf("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
+	sprint("Restoring TCP socket\n");
+	sprint("saddr %u, sport %u, daddr %u, dport %u\n", saved_socket->tcp->saddr, saved_socket->tcp->sport,
 	       saved_socket->tcp->daddr, saved_socket->tcp->dport);
 
 	got_fd=alloc_fd(fd, 0); // need real flags
 	if(got_fd != fd)
 	{
-		tlprintf("Could not get original fd %u got %u\n", fd, got_fd);
+		sprint("Could not get original fd %u got %u\n", fd, got_fd);
 		panic("Could not get original fd");
 	}
 
@@ -1449,10 +1456,10 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 	icsk = inet_csk(sk);
 	tp = tcp_sk(sk);
 
-	tlprintf("Setting state %d\n", saved_socket->tcp->state);
+	sprint("Setting state %d\n", saved_socket->tcp->state);
 	tcp_set_state(sk, saved_socket->tcp->state);
 
-	tlprintf("Setting routing information\n");
+	sprint("Setting routing information\n");
 	nexthop = daddr = saved_socket->tcp->daddr;
 	retval = ip_route_connect(&rt, nexthop, inet->saddr, RT_CONN_FLAGS(sk), sk->sk_bound_dev_if, IPPROTO_TCP,
 				  inet->sport, htons(saved_socket->tcp->dport), sk, 1);
@@ -1494,7 +1501,7 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 	{
 		panic("inet_hash_connect failed %d\n", retval);
 	}
-	tlprintf("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport));
+	sprint("assigned socket to port %u (%u)\n", inet->sport, ntohs(inet->sport));
 
 	retval = ip_route_newports(&rt, IPPROTO_TCP, inet->sport, inet->dport, sk);
 	if(retval)
@@ -1543,7 +1550,7 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 	tp->mss_cache = saved_socket->tcp->mss_cache;
 	tp->xmit_size_goal = saved_socket->tcp->xmit_size_goal;
 	tp->rx_opt.mss_clamp = saved_socket->tcp->rx_opt_mss_clamp;
-	tlprintf("restore mss %d size_goal %d dst %d mss_clamp %d\n", 
+	sprint("restore mss %d size_goal %d dst %d mss_clamp %d\n", 
 		 tp->mss_cache, tp->xmit_size_goal, saved_socket->tcp->dst_mtu, tp->rx_opt.mss_clamp);
 	if(saved_socket->tcp->dst_mtu)
 	{
@@ -1551,7 +1558,7 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 		dst->metrics[RTAX_MTU-1] = saved_socket->tcp->dst_mtu;
 		if (saved_socket->tcp->dst_mtu != inet_csk(sk)->icsk_pmtu_cookie)
 		{
-			tlprintf("tcp_sync_mss\n");
+			sprint("tcp_sync_mss\n");
 			tcp_sync_mss(sk, saved_socket->tcp->dst_mtu);
 		}
 
@@ -1581,7 +1588,7 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 	tp->rx_opt = saved_socket->tcp->rx_opt;
 
 	tp->nonagle = saved_socket->tcp->nonagle;
-	tlprintf("Forcing sndbuf to %d\n", saved_socket->tcp->sk_sndbuf );
+	sprint("Forcing sndbuf to %d\n", saved_socket->tcp->sk_sndbuf );
 	sk->sk_sndbuf = saved_socket->tcp->sk_sndbuf;
 	restore_queued_socket_buffers(sk, saved_socket->tcp);
 
@@ -2065,6 +2072,7 @@ void restore_registers(struct saved_task_struct* state)
 	switch(state->syscall_restart)
 	{
 	case 102:  // socketcall
+		sprint("socket call number %lu\n", state->registers.bx);
 		if((state->registers.bx == SYS_SEND || state->registers.bx == SYS_RECV) && state->syscall_data != NULL)
 		{
 			struct tcp_io_progress* iop = state->syscall_data;

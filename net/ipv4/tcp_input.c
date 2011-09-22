@@ -673,7 +673,7 @@ static void tcp_rtt_estimator(struct sock *sk, const __u32 mrtt)
 		}
 	} else {
 		/* no previous measure. */
-		csprint("No previous measure\n");
+//		csprint("No previous measure\n");
 		tp->srtt = m << 3;	/* take the measured time to be rtt */
 		tp->mdev = m << 1;	/* make sure rto = 3*rtt */
 		tp->mdev_max = tp->rttvar = max(tp->mdev, tcp_rto_min(sk));
@@ -698,8 +698,6 @@ static inline void tcp_set_rto(struct sock *sk)
 	 *    ACKs in some circumstances.
 	 */
 	inet_csk(sk)->icsk_rto = (tp->srtt >> 3) + tp->rttvar;
-	if(inet_csk(sk)->icsk_rto > 10000)
-		csprint("srtt %u srtt>>3 %u rttvar %u rto %u\n", tp->srtt, tp->srtt>>3, tp->rttvar, inet_csk(sk)->icsk_rto);
 
 
 	/* 2. Fixups made earlier cannot be right.
@@ -1339,7 +1337,7 @@ static int tcp_sacktag_one(struct sk_buff *skb, struct sock *sk,
 
 		if (fack_count > tp->fackets_out)
 		{
-			sprint("sacktag_one setting fackets_out %u\n", fack_count);
+			// sprint("sacktag_one setting fackets_out %u\n", fack_count);
 			tp->fackets_out = fack_count;
 		}
 
@@ -1467,7 +1465,7 @@ tcp_sacktag_write_queue(struct sock *sk, struct sk_buff *ack_skb,
 	if (!tp->sacked_out) {
 		if (WARN_ON(tp->fackets_out))
 		{
-			sprint("WARNING fackets_out reset\n");
+			// sprint("WARNING fackets_out reset\n");
 			tp->fackets_out = 0;
 		}
 		tcp_highest_sack_reset(sk);
@@ -1934,7 +1932,7 @@ void tcp_clear_retrans(struct tcp_sock *tp)
 {
 	tcp_clear_retrans_partial(tp);
 
-	sprint("clear retrans reset fackets_out\n");
+	// sprint("clear retrans reset fackets_out\n");
 	tp->fackets_out = 0;
 	tp->sacked_out = 0;
 }
@@ -1971,7 +1969,7 @@ void tcp_enter_loss(struct sock *sk, int how)
 		 * was retransmitted. */
 		tp->undo_marker = tp->snd_una;
 	} else {
-		sprint("Enter loss reset fackets_out\n");
+		// sprint("Enter loss reset fackets_out\n");
 		tp->sacked_out = 0;
 		tp->fackets_out = 0;
 	}
@@ -2163,22 +2161,22 @@ static int tcp_time_to_recover(struct sock *sk)
 	/* Do not perform any recovery during F-RTO algorithm */
 	if (tp->frto_counter)
 	{
-		sprint("tp->frto_counter %u\n", tp->frto_counter);
+		// sprint("tp->frto_counter %u\n", tp->frto_counter);
 		return 0;
 	}
 
 	/* Trick#1: The loss is proven. */
 	if (tp->lost_out)
 	{
-		sprint("tp->lost_out %u\n", tp->lost_out);
+		// sprint("tp->lost_out %u\n", tp->lost_out);
 		return 1;
 	}
 
 	/* Not-A-Trick#2 : Classic rule... */
-	sprint("is_fack %s facket_out %u sacked_out %u reordering %u\n", tcp_is_fack(tp) ? "yes":"no", tp->fackets_out, tp->sacked_out, tp->reordering);
+	// sprint("is_fack %s facket_out %u sacked_out %u reordering %u\n", tcp_is_fack(tp) ? "yes":"no", tp->fackets_out, tp->sacked_out, tp->reordering);
 	if (tcp_dupack_heurestics(tp) > tp->reordering)
 	{
-		sprint("heurestics %u reordering %u\n", tcp_dupack_heurestics(tp),  tp->reordering);
+		// sprint("heurestics %u reordering %u\n", tcp_dupack_heurestics(tp),  tp->reordering);
 		return 1;
 	}
 
@@ -2187,7 +2185,7 @@ static int tcp_time_to_recover(struct sock *sk)
 	 */
 	if (tcp_is_fack(tp) && tcp_head_timedout(sk))
 	{
-		sprint("head time out\n");
+		// sprint("head time out\n");
 		return 1;
 	}
 
@@ -2201,11 +2199,11 @@ static int tcp_time_to_recover(struct sock *sk)
 		/* We have nothing to send. This connection is limited
 		 * either by receiver window or by application.
 		 */
-		sprint("Nothing to send\n");
+		// sprint("Nothing to send\n");
 		return 1;
 	}
 	
-	sprint("All recover tests failed\n");
+	// sprint("All recover tests failed\n");
 	return 0;
 }
 
@@ -2608,13 +2606,13 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 				    (tcp_fackets_out(tp) > tp->reordering));
 	int fast_rexmit = 0, mib_idx;
 
-	sprint("fastretnas_alert is_dup %s state %u\n", is_dupack ? "yes" : "no", icsk->icsk_ca_state);
+	// sprint("fastretnas_alert is_dup %s state %u\n", is_dupack ? "yes" : "no", icsk->icsk_ca_state);
 
 	if (WARN_ON(!tp->packets_out && tp->sacked_out))
 		tp->sacked_out = 0;
 	if (WARN_ON(!tp->sacked_out && tp->fackets_out))
 	{
-		sprint("WARNING fastretrans_alert resets fackets_out\n");
+		// sprint("WARNING fastretrans_alert resets fackets_out\n");
 		tp->fackets_out = 0;
 	}
 
@@ -2622,14 +2620,14 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	 * A. ECE, hence prohibit cwnd undoing, the reduction is required. */
 	if (flag & FLAG_ECE)
 	{
-		sprint("ECE flag\n");
+		// sprint("ECE flag\n");
 		tp->prior_ssthresh = 0;
 	}
 
 	/* B. In all the states check for reneging SACKs. */
 	if (tcp_check_sack_reneging(sk, flag))
 	{
-		sprint("reneging acks\n");
+		// sprint("reneging acks\n");
 		return;
 	}
 
@@ -2640,7 +2638,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	    tp->fackets_out > tp->reordering) {
 		tcp_mark_head_lost(sk, tp->fackets_out - tp->reordering);
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPLOSS);
-		sprint("marked head lost\n");
+		// sprint("marked head lost\n");
 	}
 
 	/* D. Check consistency of the current state. */
@@ -2657,7 +2655,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			icsk->icsk_retransmits = 0;
 			if (tcp_try_undo_recovery(sk))
 			{
-				sprint("Try to undo recovery state\n");
+				// sprint("Try to undo recovery state\n");
 				return;
 			}
 			break;
@@ -2668,7 +2666,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			if (tp->snd_una != tp->high_seq) {
 				tcp_complete_cwr(sk);
 				tcp_set_ca_state(sk, TCP_CA_Open);
-				sprint("switching from cwr to open\n");
+				// sprint("switching from cwr to open\n");
 			}
 			break;
 
@@ -2680,7 +2678,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			    tcp_is_reno(tp) || tp->snd_una != tp->high_seq) {
 				tp->undo_marker = 0;
 				tcp_set_ca_state(sk, TCP_CA_Open);
-				sprint("switching from disorder to open\n");
+				// sprint("switching from disorder to open\n");
 			}
 			break;
 
@@ -2689,7 +2687,7 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 				tcp_reset_reno_sack(tp);
 			if (tcp_try_undo_recovery(sk))
 			{
-				sprint("Switching form recovery to open\n");
+				// sprint("Switching form recovery to open\n");
 				return;
 			}
 			tcp_complete_cwr(sk);
@@ -2704,29 +2702,29 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			if (tcp_is_reno(tp) && is_dupack)
 			{
 				tcp_add_reno_sack(sk);
-				sprint("Recovery: add reno sack\n");
+				// sprint("Recovery: add reno sack\n");
 			}
 		} else
 		{
 			do_lost = tcp_try_undo_partial(sk, pkts_acked);
-			sprint("Recovery: try_undo_partial\n");
+			// sprint("Recovery: try_undo_partial\n");
 		}
 		break;
 	case TCP_CA_Loss:
 		if (flag & FLAG_DATA_ACKED)
 		{
 			icsk->icsk_retransmits = 0;
-			sprint("Loss data acked\n");
+			// sprint("Loss data acked\n");
 		}
 		if (tcp_is_reno(tp) && flag & FLAG_SND_UNA_ADVANCED)
 		{
 			tcp_reset_reno_sack(tp);
-			sprint("Loss: reset reno sack\n");
+			// sprint("Loss: reset reno sack\n");
 		}
 		if (!tcp_try_undo_loss(sk)) {
 			tcp_moderate_cwnd(tp);
 			tcp_xmit_retransmit_queue(sk);
-			sprint("Loss xmit_retransmit_queue\n");
+			// sprint("Loss xmit_retransmit_queue\n");
 			return;
 		}
 		if (icsk->icsk_ca_state != TCP_CA_Open)
@@ -2737,24 +2735,24 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			if (flag & FLAG_SND_UNA_ADVANCED)
 			{
 				tcp_reset_reno_sack(tp);
-				sprint("default: reset reno sack\n");
+				// sprint("default: reset reno sack\n");
 			}
 			if (is_dupack)
 			{
 				tcp_add_reno_sack(sk);
-				sprint("default add reno sack\n");
+				// sprint("default add reno sack\n");
 			}
 		}
 
 		if (icsk->icsk_ca_state == TCP_CA_Disorder)
 		{
 			tcp_try_undo_dsack(sk);
-			sprint("Disorder: undo dsack\n");
+			// sprint("Disorder: undo dsack\n");
 		}
 
 		if (!tcp_time_to_recover(sk)) {
 			tcp_try_to_open(sk, flag);
-			sprint("Default: try_to_open\n");
+			// sprint("Default: try_to_open\n");
 			return;
 		}
 
@@ -2766,12 +2764,12 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 			/* Restores the reduction we did in tcp_mtup_probe() */
 			tp->snd_cwnd++;
 			tcp_simple_retransmit(sk);
-			sprint("MTU probe failed\n");
+			// sprint("MTU probe failed\n");
 			return;
 		}
 
 		/* Otherwise enter Recovery state */
-		sprint("Enter recovery state\n");
+		// sprint("Enter recovery state\n");
 
 		if (tcp_is_reno(tp))
 			mib_idx = LINUX_MIB_TCPRENORECOVERY;
@@ -2801,11 +2799,11 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked, int flag)
 	if (do_lost || (tcp_is_fack(tp) && tcp_head_timedout(sk)))
 	{
 		tcp_update_scoreboard(sk, fast_rexmit);
-		sprint("Update score board\n");
+		// sprint("Update score board\n");
 	}
 	tcp_cwnd_down(sk, flag);
 	tcp_xmit_retransmit_queue(sk);
-	sprint("xmit_retransmit_queue\n");
+	// sprint("xmit_retransmit_queue\n");
 }
 
 /* Read draft-ietf-tcplw-high-performance before mucking
@@ -3351,7 +3349,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 
 	if (before(ack, prior_snd_una))
 	{
-		sprint("Old ack\n");
+		// sprint("Old ack\n");
 		goto old_ack;
 	}
 
@@ -3395,7 +3393,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 
 		if (TCP_SKB_CB(skb)->sacked)
 		{
-			sprint("skb sacked\n");
+			// sprint("skb sacked\n");
 			flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una);
 		}
 
@@ -3706,9 +3704,9 @@ static inline int tcp_paws_discard(const struct sock *sk,
 		!tcp_disordered_ack(sk, skb));
 	if(ret)
 	{
-		sprint("recent %u rcv_tsval %u diff %d\n", tp->rx_opt.ts_recent, tp->rx_opt.rcv_tsval, (s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval));
-		sprint("get_seconds %u recent_stamp %u sum %u\n", get_seconds(), tp->rx_opt.ts_recent_stamp,  tp->rx_opt.ts_recent_stamp + TCP_PAWS_24DAYS);
-		sprint("disordered %s\n", tcp_disordered_ack(sk, skb)?"yes":"no");
+		// sprint("recent %u rcv_tsval %u diff %d\n", tp->rx_opt.ts_recent, tp->rx_opt.rcv_tsval, (s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval));
+		// sprint("get_seconds %u recent_stamp %u sum %u\n", get_seconds(), tp->rx_opt.ts_recent_stamp,  tp->rx_opt.ts_recent_stamp + TCP_PAWS_24DAYS);
+		// sprint("disordered %s\n", tcp_disordered_ack(sk, skb)?"yes":"no");
 	}
 
 	return ret;
@@ -4861,7 +4859,7 @@ static int tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		if (!th->rst) {
 			NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_PAWSESTABREJECTED);
 			tcp_send_dupack(sk, skb);
-			sprint("PAWS test failed\n");
+			// sprint("PAWS test failed\n");
 			goto discard;
 		}
 		/* Reset is accepted even if it did not pass PAWS. */
@@ -4884,7 +4882,7 @@ static int tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 	/* Step 2: check RST bit */
 	if (th->rst) {
 		tcp_reset(sk);
-		sprint("Reset\n");
+		// sprint("Reset\n");
 		goto discard;
 	}
 
@@ -4901,7 +4899,7 @@ static int tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 			TCP_INC_STATS_BH(sock_net(sk), TCP_MIB_INERRS);
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPABORTONSYN);
 		tcp_reset(sk);
-		sprint("SYN error\n");
+		// sprint("SYN error\n");
 		return -1;
 	}
 
@@ -5130,7 +5128,7 @@ slow_path:
 //	//csprint("Slow path\n");
 	if (len < (th->doff << 2) || tcp_checksum_complete_user(sk, skb))
 	{
-		sprint("Checksum error %u\n", ntohl(th->seq));
+		// sprint("Checksum error %u\n", ntohl(th->seq));
 		goto csum_error;
 	}
 

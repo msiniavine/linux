@@ -97,7 +97,8 @@
 #include <net/sock.h>
 #include <linux/netfilter.h>
 
-//#include <linux/set_state.h>
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
 
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);
 static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
@@ -1446,10 +1447,13 @@ asmlinkage long sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 	if (!sock)
 		goto out;
 
+	tlprintf("Accept lookup fd %p\n", sock);
+
 	err = -ENFILE;
 	if (!(newsock = sock_alloc()))
 		goto out_put;
 
+	tlprintf("sock_alloc %p\n", newsock);
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
 
@@ -1465,6 +1469,7 @@ asmlinkage long sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 		sock_release(newsock);
 		goto out_put;
 	}
+	tlprintf("Got new fd %d\n", newfd);
 
 	err = sock_attach_fd(newsock, newfile, flags & O_NONBLOCK);
 	if (err < 0)
@@ -1474,6 +1479,7 @@ asmlinkage long sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 	if (err)
 		goto out_fd;
 
+	tlprintf("Doing accept\n");
 	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_fd;

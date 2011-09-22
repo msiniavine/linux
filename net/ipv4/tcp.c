@@ -1407,7 +1407,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 
 			if (sk->sk_err) {
 				copied = sock_error(sk);
-				csprint("error %d\n", copied);
+				// csprint("error %d\n", copied);
 				break;
 			}
 
@@ -1419,7 +1419,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 					/* This occurs when user tries to read
 					 * from never connected socket.
 					 */
-					csprint("Socket never connected\n");
+					// csprint("Socket never connected\n");
 					copied = -ENOTCONN;
 					break;
 				}
@@ -1427,14 +1427,14 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			}
 
 			if (!timeo) {
-				csprint("timeo\n");
+				// csprint("timeo\n");
 				copied = -EAGAIN;
 				break;
 			}
 
 			if (signal_pending(current)) {
 				copied = sock_intr_errno(timeo);
-				csprint("Signal pending error\n");
+				// csprint("Signal pending error\n");
 				break;
 			}
 		}
