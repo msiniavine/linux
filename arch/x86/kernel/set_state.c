@@ -1236,8 +1236,23 @@ static inline void tcp_push(struct sock *sk, int flags, int mss_now,
 }
 
 
+void print_saved_buffer(struct saved_sk_buff* buff)
+{
+	char* flag_string = "fsrpauec";
+	int i;
+	printk(KERN_EMERG "saved sk_buff: %u len %u ", buff->seq, buff->len);
+	for(i = 0; i<8; i++)
+	{
+		u8 flag = 1 << i;
+		printk("%c", (buff->flags & flag) ? flag_string[i] : '-');
+	}
+	printk("\n");
+	
+}
 int tcp_init_tso_segs(struct sock *sk, struct sk_buff *skb,
 		      unsigned int mss_now);
+void tcp_init_nondata_skb(struct sk_buff *skb, u32 seq, u8 flags);
+void tcp_queue_skb(struct sock *sk, struct sk_buff *skb);
 
 
 // fills the socket queue with data that was queued previously
@@ -1277,13 +1292,39 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	size_goal = tp->xmit_size_goal;
 	copied = 0;
 	timeo = sock_sndtimeo(sk, 0); // flags 0, might disable non blocking sockets
-	sprint("size_goal %d select_size %d\n", size_goal, select_size(sk));
+	sprint("size_goal %d select_size %d state %d\n", size_goal, select_size(sk), sk->sk_state);
 
 	list_for_each_entry(buff, saved_buffers, list)
 	{
 		int seglen = buff->len;
 		unsigned char* from = buff->content;
-		sprint("copy saved buffer %u len %u\n", buff->seq, buff->len);
+		print_saved_buffer(buff);
+
+		if(buff->flags & TCPCB_FLAG_FIN && buff->len == 0)  // FIN packets need special treatment
+		{
+			sprint("Got FIN packet\n");
+			if(buff->len != 0)
+				panic("Non 0 length FIN packet\n");
+
+			// taken from tcp_send_fin
+			for(;;)
+			{
+				skb = alloc_skb_fclone(MAX_TCP_HEADER, GFP_KERNEL);
+				if(skb)
+					break;
+
+				sprint("WARNING: Could not allocate FIN packet\n");
+				yield();
+			}
+
+			skb_reserve(skb, MAX_TCP_HEADER);
+			tcp_init_nondata_skb(skb, tp->write_seq, TCPCB_FLAG_ACK | TCPCB_FLAG_FIN);
+			tcp_queue_skb(sk, skb);
+			
+			tcp_advance_send_head(sk, skb);
+			tp->snd_nxt = stcp->snd_nxt;
+			return;
+		}
 
 		while(seglen > 0)
 		{
@@ -1352,6 +1393,14 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 
 			TCP_SKB_CB(skb)->when = buff->tstamp;
 			tcp_init_tso_segs(sk, skb, mss_now);
+
+			if(buff->flags & TCPCB_FLAG_FIN)
+			{
+				sprint("Got data with FIN packet\n");
+				TCP_SKB_CB(skb)->flags |= TCPCB_FLAG_FIN;
+				TCP_SKB_CB(skb)->end_seq++;
+				tp->write_seq++;
+			}
 
 			break;
 

@@ -82,12 +82,13 @@ struct saved_inet_sock
 
 struct saved_sk_buff
 {
-	unsigned int len;
-	__wsum csum;
-	int ip_summed;
-	u32 seq;
-	u32 tstamp;
-	void* content;
+	unsigned int len;   // length of the data in the buffer
+	__wsum csum;        // partial tcp checksum of this buffer
+	int ip_summed;     
+	u32 seq;            // sequence number of the first byte of this packet 
+	u32 tstamp;         // timestamp of this packet
+	u8 flags;           // tcp flags
+	void* content;      // data in this packet
 	struct list_head list;
 };
 

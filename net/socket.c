@@ -1447,13 +1447,13 @@ asmlinkage long sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 	if (!sock)
 		goto out;
 
-	tlprintf("Accept lookup fd %p\n", sock);
+//	tlprintf("Accept lookup fd %p\n", sock);
 
 	err = -ENFILE;
 	if (!(newsock = sock_alloc()))
 		goto out_put;
 
-	tlprintf("sock_alloc %p\n", newsock);
+//	tlprintf("sock_alloc %p\n", newsock);
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
 
@@ -1469,7 +1469,7 @@ asmlinkage long sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 		sock_release(newsock);
 		goto out_put;
 	}
-	tlprintf("Got new fd %d\n", newfd);
+//	tlprintf("Got new fd %d\n", newfd);
 
 	err = sock_attach_fd(newsock, newfile, flags & O_NONBLOCK);
 	if (err < 0)
@@ -1479,7 +1479,7 @@ asmlinkage long sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 	if (err)
 		goto out_fd;
 
-	tlprintf("Doing accept\n");
+//	tlprintf("Doing accept\n");
 	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_fd;

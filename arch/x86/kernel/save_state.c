@@ -553,6 +553,7 @@ static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* sav
 			s_buff->seq = tcb->seq;
 			s_buff->ip_summed = sk_pos->ip_summed;
 			s_buff->tstamp = tcb->when;
+			s_buff->flags = tcb->flags;
 
 			if(sk_pos->len > 0)
 			{
