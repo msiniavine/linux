@@ -21,6 +21,7 @@
 #include <linux/tcp.h>
 #include <net/tcp.h>
 #include <linux/fs.h>
+#include <linux/namei.h>
 #include <linux/dcache.h>
 #include <linux/mount.h>
 #include <linux/vmalloc.h>
@@ -610,6 +611,58 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
 
 }
 
+int do_path_lookup(int dfd, const char *name,
+		   unsigned int flags, struct nameidata *nd);
+
+static void hardlink_temp_file(struct saved_task_struct* task, struct file* f, struct saved_file* file)
+{
+	struct nameidata nd;
+	int err;
+	struct dentry* new_dentry;
+	
+	char* temp_name = alloc(PATH_LENGTH);
+	file->temporary = 0;
+	
+	strcpy(temp_name, file->name);
+	strcat(temp_name, task->name);
+	file->temp_name = temp_name;
+
+	sprint("Hardlinking to %s\n", file->temp_name);
+	busy_wait(5);
+	err = path_lookup(file->temp_name, LOOKUP_PARENT, &nd);
+	if(err)
+		panic("Failed to lookup path for new file");
+
+	if(mutex_is_locked(&nd.path.dentry->d_inode->i_mutex))
+	{
+		sprint("Mutex locked already\n");
+	}
+
+	sprint("got dentry %p %s, inode %p %lu mutex %p\n", nd.path.dentry, nd.path.dentry->d_name.name, nd.path.dentry->d_inode, nd.path.dentry->d_inode->i_ino, &(nd.path.dentry->d_inode->i_mutex));
+	sprint("Creating new dentry\n");
+	new_dentry = lookup_create(&nd, 0);
+	err = PTR_ERR(new_dentry);
+	if(IS_ERR(new_dentry))
+	{
+		panic("Failed to create new dentry");
+	}
+
+	sprint("Getting write access\n");
+	err = mnt_want_write(nd.path.mnt);
+	if(err)
+		panic("Write not permitted");
+
+	sprint("Doing link\n");
+	err = vfs_link(f->f_dentry, nd.path.dentry->d_inode, new_dentry);
+	if(err)
+		panic("Hardlink failed");
+	mnt_drop_write(nd.path.mnt);
+
+	dput(new_dentry);
+
+	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	path_put(&nd.path);
+}
 
 static void save_files(struct files_struct* files, struct saved_task_struct* task, struct map_entry* head)
 {
@@ -667,6 +720,11 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		sprint("fd %d points to %s %p\n", fd, file->name, f);
 		file_res->fd = fd;
 		file->count = file_count(f);
+		sprint("link count %d\n", f->f_dentry->d_inode->i_nlink);
+		if(f->f_dentry->d_inode->i_nlink == 0)
+		{
+			hardlink_temp_file(task, f, file);
+		}
 		
 		if(f->f_mode & FMODE_READ)
 		{

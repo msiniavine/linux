@@ -19,7 +19,7 @@
 
 //#include <linux/set_state.h>
 
-static unsigned long  page_pool[10];
+static unsigned long  page_pool[40];
 static int page_pool_index = -1;
 static int page_offset = PAGE_SIZE;
 static int map_count = 0;
@@ -37,7 +37,7 @@ static void* alloc_map(size_t size)
 	if(page_offset + size > PAGE_SIZE)
 	{
 		page_pool_index++;
-		if(page_pool_index >= 10)
+		if(page_pool_index >= 40)
 		{
 			panic("no more memory\n");
 		}

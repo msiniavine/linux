@@ -33,6 +33,9 @@
 #include <linux/device_cgroup.h>
 #include <asm/uaccess.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 #define ACC_MODE(x) ("\000\004\002\006"[(x)&O_ACCMODE])
 
 /* [Feb-1997 T. Schoebel-Theuer]
@@ -1886,6 +1889,8 @@ struct dentry *lookup_create(struct nameidata *nd, int is_dir)
 	struct dentry *dentry = ERR_PTR(-EEXIST);
 
 	mutex_lock_nested(&nd->path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
+
+	sprint("Got mutex\n");
 	/*
 	 * Yucky last component or no last component at all?
 	 * (foo/., foo/.., /////)

@@ -256,10 +256,12 @@ struct saved_vc_data
 struct saved_file
 {
 	unsigned int type;
-	char name[PATH_LENGTH];
+	char name[PATH_LENGTH];    // original true file name
 	long count;
 	int flags;
 	loff_t pos;
+	int temporary;  // true if the file is a temporary file
+	char* temp_name;  // temporary hardlink name for temporary file
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_socket socket;
