@@ -611,58 +611,10 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
 
 }
 
+int save_state_mutex_debug = 0;
 int do_path_lookup(int dfd, const char *name,
 		   unsigned int flags, struct nameidata *nd);
 
-static void hardlink_temp_file(struct saved_task_struct* task, struct file* f, struct saved_file* file)
-{
-	struct nameidata nd;
-	int err;
-	struct dentry* new_dentry;
-	
-	char* temp_name = alloc(PATH_LENGTH);
-	file->temporary = 0;
-	
-	strcpy(temp_name, file->name);
-	strcat(temp_name, task->name);
-	file->temp_name = temp_name;
-
-	sprint("Hardlinking to %s\n", file->temp_name);
-	busy_wait(5);
-	err = path_lookup(file->temp_name, LOOKUP_PARENT, &nd);
-	if(err)
-		panic("Failed to lookup path for new file");
-
-	if(mutex_is_locked(&nd.path.dentry->d_inode->i_mutex))
-	{
-		sprint("Mutex locked already\n");
-	}
-
-	sprint("got dentry %p %s, inode %p %lu mutex %p\n", nd.path.dentry, nd.path.dentry->d_name.name, nd.path.dentry->d_inode, nd.path.dentry->d_inode->i_ino, &(nd.path.dentry->d_inode->i_mutex));
-	sprint("Creating new dentry\n");
-	new_dentry = lookup_create(&nd, 0);
-	err = PTR_ERR(new_dentry);
-	if(IS_ERR(new_dentry))
-	{
-		panic("Failed to create new dentry");
-	}
-
-	sprint("Getting write access\n");
-	err = mnt_want_write(nd.path.mnt);
-	if(err)
-		panic("Write not permitted");
-
-	sprint("Doing link\n");
-	err = vfs_link(f->f_dentry, nd.path.dentry->d_inode, new_dentry);
-	if(err)
-		panic("Hardlink failed");
-	mnt_drop_write(nd.path.mnt);
-
-	dput(new_dentry);
-
-	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
-	path_put(&nd.path);
-}
 
 static void save_files(struct files_struct* files, struct saved_task_struct* task, struct map_entry* head)
 {
@@ -720,10 +672,11 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		sprint("fd %d points to %s %p\n", fd, file->name, f);
 		file_res->fd = fd;
 		file->count = file_count(f);
+		file->ino = f->f_dentry->d_inode->i_ino;
 		sprint("link count %d\n", f->f_dentry->d_inode->i_nlink);
 		if(f->f_dentry->d_inode->i_nlink == 0)
 		{
-			hardlink_temp_file(task, f, file);
+			file->temporary = 1;
 		}
 		
 		if(f->f_mode & FMODE_READ)
@@ -1068,9 +1021,17 @@ static void print_saved_processes(void)
 	}
 }
 
+static void prepare_shutdown(void)
+{
+	device_shutdown();
+	sysdev_shutdown();
+	machine_shutdown();
+}
+
 static int load_state = 0;
 static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x)
 {
+//	prepare_shutdown();
 	save_running_processes();
 	sprint( "State saved\n");
 	return 0;
@@ -1170,13 +1131,17 @@ asmlinkage int sys_was_state_restored(struct pt_regs regs)
 	return ret;
 }
 
+int set_state_present()
+{
+	struct saved_state* state;
+	state = (struct saved_state*)get_reserved_region();
+	return !list_empty(&state->processes);
+}
 
 void test_restore_sockets(void);
 asmlinkage int sys_state_present(struct pt_regs regs)
 {
-	struct saved_state* state;
-	state = (struct saved_state*)get_reserved_region();
-	return !list_empty(&state->processes); 
+	return set_state_present();
 }
 
 extern struct resource crashk_res;

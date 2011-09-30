@@ -1014,6 +1014,69 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	return file;
 }
 
+#include <linux/fs.h>
+#include <linux/jbd.h>
+#include <linux/buffer_head.h>
+#include <linux/ext3_fs.h>
+
+struct inode *ext3_iget(struct super_block *sb, unsigned long ino);
+static void restore_temp_file(struct saved_file* file)
+{
+	struct nameidata nd;
+	int err;
+	struct dentry* new_dentry;
+	struct dentry fake_dentry;
+	struct super_block *sb;
+	struct inode* inode;
+
+	sprint("Hardlinking to %s\n", file->name);
+	err = path_lookup(file->name, LOOKUP_PARENT, &nd);
+	if(err)
+		panic("Failed to lookup path for new file");
+
+	if(mutex_is_locked(&nd.path.dentry->d_inode->i_mutex))
+	{
+		sprint("Mutex locked already\n");
+	}
+
+	sprint("got dentry %p %s, inode %p %lu mutex %p\n", nd.path.dentry, nd.path.dentry->d_name.name, nd.path.dentry->d_inode, nd.path.dentry->d_inode->i_ino, &(nd.path.dentry->d_inode->i_mutex));
+	sprint("Creating new dentry\n");
+	new_dentry = lookup_create(&nd, 0);	
+	err = PTR_ERR(new_dentry);
+	if(IS_ERR(new_dentry))
+	{
+		panic("Failed to create new dentry");
+	}
+
+	sb = nd.path.dentry->d_sb;
+	EXT3_SB(sb)->s_mount_state |= EXT3_ORPHAN_FS;
+	inode = ext3_iget(sb, file->ino);
+	EXT3_SB(sb)->s_mount_state &= ~EXT3_ORPHAN_FS;
+
+	if(IS_ERR(inode))
+		panic("Could not get inode = %lu err %ld", file->ino, PTR_ERR(inode));
+	fake_dentry.d_inode = inode;
+
+	sprint("Getting write access\n");
+	err = mnt_want_write(nd.path.mnt);
+	if(err)
+		panic("Write not permitted");
+
+	sprint("Doing link\n");
+	err = vfs_link(&fake_dentry, nd.path.dentry->d_inode, new_dentry);
+	if(err)
+		panic("Hardlink failed %d", err);
+	mnt_drop_write(nd.path.mnt);
+
+	dput(new_dentry);
+
+	iput(inode);
+
+	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	path_put(&nd.path);
+}
+
+
 void restore_file(int fd, struct saved_file* f, struct state_info* info)
 {
 	unsigned int got_fd;
@@ -1039,7 +1102,11 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 			file = restore_vc_terminal(f);
 			break;
 		default:
-			file = do_filp_open(-100, f->name, f->flags, 0); 
+			if(f->temporary)
+				restore_temp_file(f);
+			
+			file = do_filp_open(AT_FDCWD, f->name, f->flags, 0); 
+
 			if(IS_ERR(file))
 			{
 				panic("Could not open file %s error: %ld\n", f->name, PTR_ERR(file));
@@ -1052,7 +1119,21 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 				sprint("Seek result %lld expected %lld\n", seek_res, f->pos);
 			}
 
+
+			if(f->temporary)
+			{
+				mm_segment_t fs;
+				int err;
+				fs = get_fs();     /* save previous value */
+				set_fs (get_ds()); /* use kernel limit */
+				err = sys_unlink(f->name);
+				set_fs(fs); /* restore before returning to user space */
+
+				if(err < 0)
+					panic("sys_unlink failed %d", err);
+			}
 			break;
+			
 	}
 
 	atomic_long_set(&(file->f_count), f->count);

@@ -10,8 +10,6 @@ cd test
 #sudo -u maxim /home/maxim/apache/bin/apachectl start
 #./launcher `pidof httpd | awk '{ print $NF }'`
 
-sudo -u maxim /home/maxim/mysql/bin/mysqld_safe &
-sleep 2
 ./launcher `pidof mysqld`
 
 #kexec -l /boot/vmlinuz-`uname -r` --initrd=/boot/initrd.img-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state debug early_printk bootmem_debug"

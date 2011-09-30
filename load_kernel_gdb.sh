@@ -9,7 +9,8 @@ cd test
 
 #./test_sockerver &
 
-./test_sockload -h 192.168.122.1 -p 5000 -t
+#./test_sockload -h 192.168.122.1 -p 5000 -t
+./test_tempfile
 
 #echo "All test started, rebooting kernel"
 #sleep 1

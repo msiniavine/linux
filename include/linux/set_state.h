@@ -18,6 +18,7 @@ int was_state_restored(struct task_struct*);
 void add_to_restored_list(struct task_struct*);
 int sock_attach_fd(struct socket *sock, struct file *file, int flags);
 struct page* alloc_specific_page(unsigned long pfn, int mapcount);
+int set_state_present(void);
 
 // TCP hook used to drop some incoming tcp packets until the state is restored
 void set_state_tcp_hook(void);
@@ -261,7 +262,7 @@ struct saved_file
 	int flags;
 	loff_t pos;
 	int temporary;  // true if the file is a temporary file
-	char* temp_name;  // temporary hardlink name for temporary file
+	unsigned long ino;  // inode number
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_socket socket;
