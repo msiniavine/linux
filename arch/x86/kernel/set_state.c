@@ -1861,10 +1861,10 @@ static void restore_listen_socket(int fd, struct saved_file *saved_file, struct 
 	address.sin_addr.s_addr = htonl( INADDR_ANY );
 	if ( saved_socket.inet.rcv_saddr )
 	{
-		address.sin_addr.s_addr = htonl( saved_socket.inet.rcv_saddr );
+		address.sin_addr.s_addr = saved_socket.inet.rcv_saddr;
 	}
 	
-	sprint( "##### IP Address N: %d\tPort N: %d\n", address.sin_addr.s_addr, address.sin_port );
+	sprint( "##### IP Address N: %08lx  Port N: %d\n", address.sin_addr.s_addr, address.sin_port );
 
 	err = security_socket_bind ( socket, ( struct sockaddr * ) &address, sizeof( address ) );
 	if ( !err )
