@@ -67,6 +67,9 @@
 #include <linux/percpu.h>
 #include <linux/crash_dump.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 #include <video/edid.h>
 
 #include <asm/mtrr.h>
@@ -638,6 +641,22 @@ static struct dmi_system_id __initdata bad_bios_dmi_table[] = {
 	{}
 };
 
+
+static void __init reserve_fast_reboot_region(void)
+{
+	if(reserve_bootmem(FASTREBOOT_REGION_START, FASTREBOOT_REGION_SIZE,
+			   BOOTMEM_EXCLUSIVE) < 0)
+	{
+		printk("Failed to reserve memory for fast reboot\n");
+	}
+	else
+	{
+		printk("Reserved memory for fast reboot\n");
+	}
+	reserve_saved_memory();
+}
+
+
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -900,6 +919,8 @@ void __init setup_arch(char **cmdline_p)
 	find_smp_config();
 #endif
 	reserve_crashkernel();
+
+	reserve_fast_reboot_region();
 
 #ifdef CONFIG_X86_64
 	/*

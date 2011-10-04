@@ -47,6 +47,9 @@
 #include <linux/page_cgroup.h>
 #include <linux/debugobjects.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
 #include "internal.h"
@@ -1458,6 +1461,33 @@ try_next_zone:
 		goto zonelist_scan;
 	}
 	return page;
+}
+
+struct page* alloc_specific_page(unsigned long pfn, int mapcount)
+{
+	//struct page* allocated_page;
+	struct page* page = pfn_to_page(pfn);
+//     	sprint("Allocating page %p, pfn: %lx, expected mapcount %d\n", page, pfn, mapcount);
+	//sprint("Flags: %08lx, count: %d, mapcount: %d\n", 
+//	       page->flags, page_count(page), page_mapcount(page));
+//	sprint("Reserved: %s, Free: %s\n", PageReserved(page) ? "yes" : "no", PageBuddy(page) ? "yes" : "no");
+	if(mapcount && page_mapcount(page) < mapcount)
+	{
+		atomic_inc(&page->_mapcount);
+	}
+	page->flags = 0x40000000;
+	get_page(page);
+//	page->mapping = NULL;
+
+//	if(page->flags & PAGE_FLAGS_CHECK_AT_FREE)
+	//	sprint(KERN_EMERG "Page has bad flags: %08lx\n", page->flags);
+	//allocated_page = alloc_pages(GFP_HIGHUSER, 0);
+	//if(allocated_page != NULL)
+	//{
+	//	sprint(KERN_EMERG "Proper flags: %08lx\n", allocated_page->flags);
+	//	__free_pages(allocated_page, 0);
+	//}
+	return NULL;
 }
 
 /*

@@ -287,6 +287,16 @@ void prepare_to_copy(struct task_struct *tsk)
 	unlazy_fpu(tsk);
 }
 
+
+
+struct pt_regs* my_task_get_pt_regs(int pid)
+{
+	struct task_struct* task = find_task_by_vpid(pid);
+	if (!task)
+		return (struct pt_regs*)-1;
+	return task_pt_regs(task);
+}
+
 int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
 	unsigned long unused,
 	struct task_struct *p, struct pt_regs *regs)
@@ -294,6 +304,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
 	struct pt_regs *childregs;
 	struct task_struct *tsk;
 	int err;
+	struct task_struct* parent = current;
 
 	childregs = task_pt_regs(p);
 	*childregs = *regs;

@@ -39,8 +39,8 @@
 
 #define pid_hashfn(nr, ns)	\
 	hash_long((unsigned long)nr + (unsigned long)ns, pidhash_shift)
-static struct hlist_head *pid_hash;
-static int pidhash_shift;
+struct hlist_head *pid_hash;
+int pidhash_shift;
 struct pid init_struct_pid = INIT_STRUCT_PID;
 
 int pid_max = PID_MAX_DEFAULT;
@@ -53,7 +53,7 @@ int pid_max_max = PID_MAX_LIMIT;
 #define BITS_PER_PAGE		(PAGE_SIZE*8)
 #define BITS_PER_PAGE_MASK	(BITS_PER_PAGE-1)
 
-static inline int mk_pid(struct pid_namespace *pid_ns,
+inline int mk_pid(struct pid_namespace *pid_ns,
 		struct pidmap *map, int off)
 {
 	return (map - pid_ns->pidmap)*BITS_PER_PAGE + off;
@@ -110,9 +110,9 @@ EXPORT_SYMBOL(is_container_init);
  * For now it is easier to be safe than to prove it can't happen.
  */
 
-static  __cacheline_aligned_in_smp DEFINE_SPINLOCK(pidmap_lock);
+__cacheline_aligned_in_smp DEFINE_SPINLOCK(pidmap_lock);
 
-static void free_pidmap(struct upid *upid)
+void free_pidmap(struct upid *upid)
 {
 	int nr = upid->nr;
 	struct pidmap *map = upid->ns->pidmap + nr / BITS_PER_PAGE;

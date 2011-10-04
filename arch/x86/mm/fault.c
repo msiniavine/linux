@@ -37,6 +37,9 @@
 #include <asm-generic/sections.h>
 #include <asm/traps.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 /*
  * Page fault error code bits
  *	bit 0 == 0 means no page found, 1 means protection fault
@@ -606,6 +609,8 @@ void __kprobes do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	if (unlikely(kmmio_fault(regs, address)))
 		return;
 
+	// tlprintf("%d Got page fault %d at %p\n", tsk->pid, error_code, address);
+
 	/*
 	 * We fault-in kernel-space virtual memory on-demand. The
 	 * 'reference' page table is init_mm.pgd.
@@ -624,6 +629,7 @@ void __kprobes do_page_fault(struct pt_regs *regs, unsigned long error_code)
 #else
 	if (unlikely(address >= TASK_SIZE64)) {
 #endif
+		// tlprintf("address %p >= %p\n", address, TASK_SIZE);
 		if (!(error_code & (PF_RSVD|PF_USER|PF_PROT)) &&
 		    vmalloc_fault(address) >= 0)
 			return;
@@ -639,6 +645,7 @@ void __kprobes do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		 * Don't take the mm semaphore here. If we fixup a prefetch
 		 * fault we could otherwise deadlock.
 		 */
+		// tlprintf("goto bad area\n");
 		goto bad_area_nosemaphore;
 	}
 
@@ -696,11 +703,21 @@ void __kprobes do_page_fault(struct pt_regs *regs, unsigned long error_code)
 
 	vma = find_vma(mm, address);
 	if (!vma)
+	{
+		// tlprintf("Could not find vma: bad_area\n");
 		goto bad_area;
+	}
+	// tlprintf("Fault in %p-%p vma\n", vma->vm_start, vma->vm_end);
 	if (vma->vm_start <= address)
+	{
+		// tlprintf("goto good_area\n");
 		goto good_area;
+	}
 	if (!(vma->vm_flags & VM_GROWSDOWN))
+	{
+		// tlprintf("vma does not grow down: bad_area\n");
 		goto bad_area;
+	}
 	if (error_code & PF_USER) {
 		/*
 		 * Accessing the stack below %sp is always a bug.
@@ -709,10 +726,16 @@ void __kprobes do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		 * 32 pointers and then decrements %sp by 65535.)
 		 */
 		if (address + 65536 + 32 * sizeof(unsigned long) < regs->sp)
+		{
+			// tlprintf("Accessing stack below sp: bad_area\n");
 			goto bad_area;
+		}
 	}
 	if (expand_stack(vma, address))
+	{
+		// tlprintf("expand stack faile: bad_area\n");
 		goto bad_area;
+	}
 /*
  * Ok, we have a good vm_area for this memory access, so
  * we can handle it..
@@ -725,14 +748,21 @@ good_area:
 		/* fall through */
 	case PF_WRITE:		/* write, not present */
 		if (!(vma->vm_flags & VM_WRITE))
+		{
+			// tlprintf("write not permited: bad_area\n");
 			goto bad_area;
+		}
 		write++;
 		break;
 	case PF_PROT:		/* read, present */
+		// tlprintf("protection fault: bad_area\n");
 		goto bad_area;
 	case 0:			/* read, not present */
 		if (!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE)))
+		{
+			// tlprintf("access forbiden by vma flags: bad_area\n");
 			goto bad_area;
+		}
 	}
 
 	/*
@@ -743,9 +773,15 @@ good_area:
 	fault = handle_mm_fault(mm, vma, address, write);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
+		{
+			// tlprintf("out of memory\n");
 			goto out_of_memory;
+		}
 		else if (fault & VM_FAULT_SIGBUS)
+		{
+			// tlprintf("Bus error\n");
 			goto do_sigbus;
+		}
 		BUG();
 	}
 	if (fault & VM_FAULT_MAJOR)
@@ -776,6 +812,7 @@ bad_area:
 bad_area_nosemaphore:
 	/* User mode accesses just cause a SIGSEGV */
 	if (error_code & PF_USER) {
+		// tlprintf("bad_area fault in user context\n");
 		/*
 		 * It's possible to have interrupts off here.
 		 */
