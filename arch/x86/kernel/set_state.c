@@ -2711,7 +2711,22 @@ void restore_registers(struct saved_task_struct* state)
 			break;
 		}
 		sprint("No data for socket call, restarting\n");
-		// else fall through
+		goto restart;
+	case 3:  // read
+		if(state->syscall_data != NULL)
+		{
+			struct tcp_io_progress *iop = state->syscall_data;
+			if(iop->progress == 0)
+			{
+				sprint("Restaring read call with 0 progress\n");
+				goto restart;
+			}
+			sprint("Returning from read with %d progress\n", iop->progress);
+			state->registers.ax = iop->progress;
+			break;
+		}
+		sprint("No data for read call\n");
+		goto restart;
 	case 4:
 	case 162:  // nanosleep
 	case 240:  // futex
