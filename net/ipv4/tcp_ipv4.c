@@ -80,8 +80,6 @@
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
 
-#include <linux/set_state.h>
-
 int sysctl_tcp_tw_reuse __read_mostly;
 int sysctl_tcp_low_latency __read_mostly;
 
@@ -174,7 +172,6 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 			       RT_CONN_FLAGS(sk), sk->sk_bound_dev_if,
 			       IPPROTO_TCP,
 			       inet->sport, usin->sin_port, sk, 1);
-	sprint("ip_route_connect inet->sport %d\n", inet->sport);
 	if (tmp < 0) {
 		if (tmp == -ENETUNREACH)
 			IP_INC_STATS_BH(sock_net(sk), IPSTATS_MIB_OUTNOROUTES);

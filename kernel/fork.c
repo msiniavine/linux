@@ -68,9 +68,6 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
-#define SET_STATE_ONLY_FUNCTIONS
-#include <linux/set_state.h>
-
 /*
  * Protected counters by write_lock_irq(&tasklist_lock)
  */
@@ -266,8 +263,6 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	unsigned long charge;
 	struct mempolicy *pol;
 
-	tlprintf("Duping mmap\n");
-
 	down_write(&oldmm->mmap_sem);
 	flush_cache_dup_mm(oldmm);
 	/*
@@ -289,11 +284,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
 		struct file *file;
-		tlprintf("doing vm area %p-%p flags %p anon %p\n", mpnt->vm_start, mpnt->vm_end, mpnt->vm_flags, mpnt->anon_vma);
 
 		if (mpnt->vm_flags & VM_DONTCOPY) {
 			long pages = vma_pages(mpnt);
-			tlprintf("Dont copy flag is set\n");
 			mm->total_vm -= pages;
 			vm_stat_account(mm, mpnt->vm_flags, mpnt->vm_file,
 								-pages);
@@ -648,12 +641,10 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 	if (clone_flags & CLONE_VM) {
 		atomic_inc(&oldmm->mm_users);
 		mm = oldmm;
-		tlprintf("Shared mm\n");
 		goto good_mm;
 	}
 
 	retval = -ENOMEM;
-	tlprintf("Non shared mm duping\n");
 	mm = dup_mm(tsk);
 	if (!mm)
 		goto fail_nomem;

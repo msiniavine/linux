@@ -83,6 +83,7 @@ struct saved_inet_sock
 
 struct saved_sk_buff
 {
+	char cb[48];
 	unsigned int len;   // length of the data in the buffer
 	__wsum csum;        // partial tcp checksum of this buffer
 	int ip_summed;     
@@ -101,7 +102,6 @@ struct saved_tcp_state
 	__be16 sport;  // source port in host format
 	__be16 dport; // destination port in host format
 
-	unsigned short backlog; // listen socket backlog
 
 	//inet_connection_sock state
 	int rcv_mss;
@@ -186,6 +186,37 @@ struct tcp_io_progress
 	int progress;
 };
 
+// unix socket states
+enum {	SOCKET_NONE,
+	SOCKET_BOUND,
+	SOCKET_ACCEPTED,
+	SOCKET_CONNECTED };
+
+struct saved_unix_address
+{
+	struct sockaddr_un address;
+	int length;
+};
+
+struct saved_unix_socket
+{
+	int kind;
+	int state;
+	
+	struct saved_unix_socket *peer;
+	struct saved_unix_socket *listen;
+	
+	unsigned int shutdown;
+	struct ucred peercred;
+
+	struct saved_unix_address unix_address;
+	
+	uid_t user;
+	gid_t group;
+	
+	struct list_head sk_buffs;
+};
+
 struct saved_socket
 {
         int		        state;
@@ -195,10 +226,12 @@ struct saved_socket
         unsigned char		sock_protocol;
 	unsigned short		sock_type;
 	unsigned short		sock_family;
+	unsigned short backlog; // listen socket backlog
         struct saved_inet_sock  inet;
 	struct saved_tcp_state* tcp;
-  int userlocks;
-  int binded;
+	struct saved_unix_socket unx;
+	int userlocks;
+	int binded;
 };
 
 
@@ -375,5 +408,13 @@ struct global_state_info
 	struct pipe_restore_temp *pipe_restore_head;
 	struct pipes_to_close *pipe_close_head;
 };
+
+struct map_entry
+{
+	struct list_head list;
+	void* first;
+	void* second;
+};
+
 
 #endif

@@ -39,6 +39,7 @@
 #include <linux/compiler.h>
 #include <linux/module.h>
 
+#define SET_STATE_ONLY_FUNCTIONS 1
 #include <linux/set_state.h>
 
 /* People can turn this off for buggy TCP's found in printers etc. */
