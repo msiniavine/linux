@@ -1992,7 +1992,7 @@ void close_unused_pipes(struct saved_task_struct* state, struct global_state_inf
 
 int orig_gs, cur_gs;
 
-void check_unsafe_exec(struct linux_binprm *);
+void check_unsafe_exec(struct linux_binprm *, struct files_struct*);
 
 extern int pid_max;
 #define BITS_PER_PAGE		(PAGE_SIZE*8)
@@ -2420,6 +2420,17 @@ int do_set_state(struct state_info* info)
 	bprm = kzalloc(sizeof(*bprm), GFP_KERNEL);
 	if(!bprm)
 		goto out_files;
+
+	retval = mutex_lock_interruptible(&current->cred_exec_mutex);
+	if (retval < 0)
+		goto out_kfree;
+
+	retval = -ENOMEM;
+	bprm->cred = prepare_exec_creds();
+	if (!bprm->cred)
+		goto out_unlock;
+	check_unsafe_exec(bprm, displaced);
+
 	sprint( "Allocated bprm\n");
 
 
@@ -2429,7 +2440,7 @@ int do_set_state(struct state_info* info)
 	file = open_exec(state->exe_file);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
-	  goto out_kfree;
+	  goto out_unlock;
 
 	bprm->file = file;
 	bprm->filename = state->exe_file;
@@ -2496,6 +2507,7 @@ int do_set_state(struct state_info* info)
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
 		restore_creds(state);
+		mutex_unlock(&current->cred_exec_mutex);
 
 		restore_registers(state);
 
@@ -2541,6 +2553,8 @@ out_file:
 		allow_write_access(bprm->file);
 		fput(bprm->file);
 	}
+out_unlock:
+	mutex_unlock(&current->cred_exec_mutex);
 
 out_kfree:
 	kfree(bprm);  //used to be free_bprm(bprm)
