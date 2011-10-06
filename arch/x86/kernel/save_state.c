@@ -257,11 +257,9 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 
 
 static struct dentry* elements[PATH_MAX];
-static void get_path_absolute ( struct file *file, char *path )
+
+static void get_path_absolute_dentry (struct dentry* dentry, struct vfsmount* vfsmount, char *path )
 {
-	struct dentry *dentry = file->f_dentry;
-	struct vfsmount *vfsmount = file->f_vfsmnt;
-	
 	int index = 0;
 	do
 	{
@@ -292,6 +290,13 @@ static void get_path_absolute ( struct file *file, char *path )
 		index--;
 	}
 	return;
+}
+
+static void get_path_absolute(struct file* file, char* path)
+{
+	struct dentry *dentry = file->f_dentry;
+	struct vfsmount *vfsmount = file->f_vfsmnt;
+	get_path_absolute_dentry(dentry, vfsmount, path);
 }
 
 // This is an altered version of the function vfs_fstatat() in fs/stat.c
@@ -844,6 +849,26 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
 
 }
 
+static void save_fs(struct fs_struct* fs, struct saved_task_struct* task, struct map_entry* head)
+{
+	struct saved_fs_struct* saved_fs;
+
+	if((saved_fs = find_by_first(head, fs)) != NULL)
+	{
+		task->fs = saved_fs;
+		return;
+	}
+
+	saved_fs = alloc(sizeof(*saved_fs));
+	saved_fs->umask = fs->umask;
+	get_path_absolute_dentry(fs->pwd.dentry, fs->pwd.mnt, saved_fs->pwd);
+	get_path_absolute_dentry(fs->root.dentry, fs->root.mnt, saved_fs->root);
+	sprint("pwd %s root %s mask %08x\n", saved_fs->pwd, saved_fs->root, saved_fs->umask);
+	task->fs = saved_fs;
+	insert_entry(head, fs, saved_fs);
+	
+}
+
 int save_state_mutex_debug = 0;
 int do_path_lookup(int dfd, const char *name,
 		   unsigned int flags, struct nameidata *nd);
@@ -1096,6 +1121,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	current_task->pid = pid_vnr(task_pid(task));
 	
 	get_path_absolute(task->mm->exe_file, current_task->exe_file); 
+	save_fs(task->fs, current_task, head);
 	save_files(task->files, current_task, head);
 	
 	save_signals(task, current_task);

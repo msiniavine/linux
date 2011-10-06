@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
 #include "test.h"
 
 char* tests[] = {
@@ -50,6 +49,8 @@ int main()
 	int i;
 	int status;
 	int err;
+	int all_errs = 0;
+
 	enable_save_state();
 	for(i = 0; tests[i] != NULL; i++)
 	{
@@ -60,19 +61,34 @@ int main()
 	{
 		sleep(1);
 	}	
-	printf("Starting wait\n");
 	sleep(3);
 	for(i = 0; tests[i] != NULL; i++)
 	{
 		err = wait(&status);
-
 		if(err < 0)
 		{
-			perror("wait");
-			return 1;
+			fprintf(stderr, "wait on %s failed: %s\n", tests[i], strerror(errno));
+			exit(1);
 		}
-
-		printf("%d: Normal exit: %s, code: %d\n", err, WIFEXITED(status) ? "yes" : "no", WEXITSTATUS(status));
+		if (WIFEXITED(status)) {
+			if (WEXITSTATUS(status)) {
+				fprintf(stderr, "test = %s, pid = %d, exited status = %d\n", tests[i], err, WEXITSTATUS(status));
+				all_errs = 1;
+				// exit(1);
+			}
+		} else { /* bad exit */
+			if (WIFSIGNALED(status)) {
+				fprintf(stderr, "test = %s, pid = %d, process signal = %d\n", tests[i], err, WTERMSIG(status));
+			} else {
+				fprintf(stderr, "test = %s, pid = %d, process crashed\n", tests[i], err);
+			}
+			all_errs = 1;
+			// exit(1);
+		}
 	}
-	return 0;
+	if (!all_errs) {
+		printf("all tests passed\n");
+		exit(0);
+	}
+	exit(1);
 }

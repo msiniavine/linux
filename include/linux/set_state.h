@@ -353,6 +353,12 @@ struct saved_files
 	struct list_head files;
 };
 
+struct saved_fs_struct
+{
+	int umask;
+	char pwd[PATH_LENGTH];
+	char root[PATH_LENGTH];
+};
 
 struct saved_task_struct
 {
@@ -378,6 +384,7 @@ struct saved_task_struct
 
 	char exe_file[PATH_LENGTH];         // name of the executable file
 	struct saved_files* open_files;
+	struct saved_fs_struct* fs;
 
 	pid_t pid;
 

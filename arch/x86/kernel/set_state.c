@@ -2469,6 +2469,46 @@ void restore_files(struct saved_task_struct* state, struct state_info* info)
 	insert_entry(info->head, state->open_files, current->files);
 }
 
+static void restore_fs(struct saved_task_struct* state, struct state_info* info)
+{
+	struct fs_struct* fs;
+	struct fs_struct* copy;
+	mm_segment_t fs_seg;
+	int err;
+	
+	if((fs = find_by_first(info->head, state->fs)) != NULL)
+	{
+		sprint("Restoring shared fs %p\n", fs);
+		BUG_ON(current->fs == fs);
+		
+		atomic_inc(&fs->count);
+		exit_fs(current);
+		current->fs = fs;
+		return;
+	}
+	copy = copy_fs_struct(current->fs);
+	if(!copy)
+	{
+		panic("Could not allocate new fs struct\n");
+	}
+	exit_fs(current);
+	current->fs = copy;
+	
+	current->fs->umask = state->fs->umask;
+	
+	fs_seg = get_fs();
+	set_fs(get_ds());
+	err = sys_chdir(state->fs->pwd);
+	if(err < 0)
+		panic("Could not set current directory %s\n", state->fs->pwd);
+	err = sys_chroot(state->fs->root);
+	if(err < 0)
+		panic("Could not set root directory %s\n", state->fs->root);
+	set_fs(fs_seg);
+	insert_entry(info->head, state->fs, current->fs);
+
+}
+
 void close_unused_pipes(struct saved_task_struct* state, struct global_state_info* global_state)
 {
 	struct pipes_to_close* p;
@@ -2986,6 +3026,7 @@ int do_set_state(struct state_info* info)
 			put_files_struct(displaced);
 
 		debug_was_state_restored = 1;
+		restore_fs(state, info);
 		restore_files(state, info);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
