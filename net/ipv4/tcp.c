@@ -275,7 +275,9 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
-#include <linux/set_state.h>
+// for set_state tcp hook
+#define SET_STATE_ONLY_FUNCTIONS 1
+#include <linux/set_state.h>  
 
 int sysctl_tcp_fin_timeout __read_mostly = TCP_FIN_TIMEOUT;
 
@@ -1686,10 +1688,6 @@ skip_copy:
 
 	TCP_CHECK_TIMER(sk);
 	sk->io_in_progress = 0;
-	if(copied >= 0 && sk->io_progress != copied)
-	{
-		sprint("WARNING wrong progress expected %d got %d\n", copied, sk->io_progress);
-	}
 	sk->io_progress = 0;
 	release_sock(sk);
 	return copied;

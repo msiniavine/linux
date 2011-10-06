@@ -25,6 +25,9 @@
 #include <linux/dcache.h>
 #include <linux/mount.h>
 #include <linux/vmalloc.h>
+#include <linux/socket.h>
+#include <linux/un.h>
+#include <net/af_unix.h>
 
 #include <linux/set_state.h>
 
@@ -254,11 +257,9 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 
 
 static struct dentry* elements[PATH_MAX];
-static void get_path_absolute ( struct file *file, char *path )
+
+static void get_path_absolute_dentry (struct dentry* dentry, struct vfsmount* vfsmount, char *path )
 {
-	struct dentry *dentry = file->f_dentry;
-	struct vfsmount *vfsmount = file->f_vfsmnt;
-	
 	int index = 0;
 	do
 	{
@@ -290,6 +291,45 @@ static void get_path_absolute ( struct file *file, char *path )
 	}
 	return;
 }
+
+static void get_path_absolute(struct file* file, char* path)
+{
+	struct dentry *dentry = file->f_dentry;
+	struct vfsmount *vfsmount = file->f_vfsmnt;
+	get_path_absolute_dentry(dentry, vfsmount, path);
+}
+
+// This is an altered version of the function vfs_fstatat() in fs/stat.c
+int get_status ( char *path, struct kstat *stat )
+{
+	//
+	struct nameidata nd;
+	struct path patho;
+	
+	int error = 0;
+	//
+
+	//
+	error = path_lookup( path, LOOKUP_FOLLOW, &nd );
+	if ( error < 0 )
+	{
+		goto done;
+	}
+	
+	patho = nd.path;
+	//
+
+	//
+	error = vfs_getattr( patho.mnt, patho.dentry, stat );
+	path_put( &patho );
+	//
+	
+	//
+done:
+	return error;
+	//
+}
+
 
 static bool file_is_pipe(struct file* f)
 {
@@ -443,9 +483,6 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 
 	sprint("state %d sport %u dport %u\n", saved_tcp->state, saved_tcp->sport, saved_tcp->dport);
 
-	saved_tcp->backlog = sk->sk_ack_backlog;
-
-	
 	// Save protocol state
 	saved_tcp->rcv_mss = icsk->icsk_ack.rcv_mss;
 
@@ -577,6 +614,193 @@ static void save_socket_write_queue(struct sock* sk, struct saved_tcp_state* sav
 	saved_tcp->num_saved_buffs = sk_buff_count;
 }
 
+static void save_unix_socket ( struct file *file, struct saved_file *saved_file, struct map_entry *head )
+{
+	//
+	struct socket *socket = file->private_data;
+	struct sock *sock = socket->sk;
+	struct unix_sock *u = unix_sk( sock );
+	
+	struct saved_unix_socket *saved_unix = &saved_file->socket.unx ;
+	struct saved_unix_socket *saved_unix_other;
+	
+	struct map_entry *entry_current;
+	
+	struct sockaddr_un address;
+	struct kstat stat;
+	
+	struct sk_buff *skb;
+	struct saved_sk_buff *saved_skb;
+	
+	int status = 0;
+	//
+	
+	// This here may be temporary...
+	if ( sock->sk_type != SOCK_STREAM )
+	{
+		panic( "Unable to save UNIX socket of unsupported type %d.\n", sock->sk_type );
+	}
+	//
+
+	INIT_LIST_HEAD(&saved_unix->sk_buffs);
+	
+	unix_state_lock( sock );
+	
+	// Determines the kind of UNIX socket we have and saves the necessary information.
+	saved_unix->kind = SOCKET_NONE;
+	
+	if ( u->addr )
+	{
+		//
+		memcpy( &saved_unix->unix_address.address, u->addr->name, u->addr->len );
+		
+		saved_unix->unix_address.length = u->addr->len;
+		//
+		
+		//
+		if ( sock->sk_state == TCP_ESTABLISHED )
+		{
+			// Link to peer and link peer to self and broadcast self.
+			saved_unix->peer = NULL;
+			
+			saved_unix_other = find_by_first( head, u->peer );
+			if ( saved_unix_other )
+			{
+				saved_unix->peer = saved_unix_other;
+				
+				saved_unix_other->peer = saved_unix;
+			}
+			
+			insert_entry( head, sock, saved_unix );
+			//
+			
+			// Link to listening socket and broadcast self.
+			saved_unix->listen = NULL;
+			list_for_each_entry ( entry_current, &head->list, list )
+			{
+				saved_unix_other = entry_current->second;
+				
+				if (	entry_current->first == u->addr && 
+					saved_unix_other->state == TCP_LISTEN )
+				{
+					saved_unix->listen = saved_unix_other;
+				}
+			}
+			
+			insert_entry( head, u->addr, saved_unix );
+			//
+		
+			saved_unix->kind = SOCKET_ACCEPTED;
+		}
+		
+		else
+		{
+			if ( sock->sk_state == TCP_LISTEN )
+			{
+				// Link accept sockets to self and broadcast self.
+				list_for_each_entry ( entry_current, &head->list, list )
+				{
+					saved_unix_other = entry_current->second;
+					
+					if (	entry_current->first == u->addr && 
+						saved_unix_other->kind == SOCKET_ACCEPTED )
+					{
+						saved_unix_other->listen = saved_unix;
+					}
+				}
+				
+				insert_entry( head, u->addr, saved_unix );
+				//
+			}
+			
+			//
+			address = saved_unix->unix_address.address;
+			
+			if ( address.sun_path[0] )
+			{
+				if ( address.sun_path[0] != '/' )
+				{
+					panic( "Unable to handle UNIX socket bind address of non-absolute path \'%s\'.\n", address.sun_path );
+				}
+				
+				status = get_status( address.sun_path, &stat );
+				if ( status < 0 )
+				{
+					panic( "Unable to obtain ownership information of bounded UNIX socket file.  Error: %d\n", -status );
+				}
+		
+				saved_unix->user = stat.uid;
+				saved_unix->group = stat.gid;
+			}
+			//
+		
+			saved_unix->kind = SOCKET_BOUND;
+		}
+		//
+	}
+	
+	else if ( sock->sk_state == TCP_ESTABLISHED )
+	{
+		// Link to peer and link peer to self and broadcast self.
+		saved_unix->peer = NULL;
+	
+		saved_unix_other = find_by_first( head, u->peer );
+		if ( saved_unix_other )
+		{
+			saved_unix->peer = saved_unix_other;
+			
+			saved_unix_other->peer = saved_unix;
+		}
+		
+		insert_entry( head, sock, saved_unix );
+		//
+	
+		saved_unix->kind = SOCKET_CONNECTED;
+	}
+	//
+	
+	// ???
+	saved_unix->state = sock->sk_state;
+	
+	saved_unix->shutdown = sock->sk_shutdown;
+	
+	saved_unix->peercred = sock->sk_peercred;
+	//
+	
+	// Saves the receive queue.
+	spin_lock( &sock->sk_receive_queue.lock );
+	
+	skb_queue_walk ( &sock->sk_receive_queue, skb )
+	{
+		//
+		saved_skb = alloc( sizeof( struct saved_sk_buff ) );
+		if ( !saved_skb )
+		{
+			panic( "Out of reserved memory.\n" );
+		}
+		//
+		INIT_LIST_HEAD(&saved_skb->list);
+		
+		//
+		memcpy( saved_skb->cb, skb->cb, sizeof( skb->cb ) );
+		
+		saved_skb->len = skb->len;
+		
+		saved_skb->content = alloc( skb->len );
+		memcpy( saved_skb->content, skb->data, skb->len );
+		
+		list_add_tail(&saved_skb->list, &saved_unix->sk_buffs);
+	}
+	
+	spin_unlock( &sock->sk_receive_queue.lock );
+	//
+	
+	unix_state_unlock( sock );
+	
+	return;
+}
+
+
 static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)
 {
 	struct socket *sock = f->private_data;
@@ -590,25 +814,59 @@ static void save_socket_info(struct saved_task_struct* task, struct file* f, str
 	file->socket.sock_protocol = sk->sk_protocol; 
 	file->socket.sock_type = sk->sk_type;
 	file->socket.sock_family = sk->sk_family;
-	file->socket.inet.daddr = inet->daddr;
-	file->socket.inet.rcv_saddr = inet->rcv_saddr;
-	file->socket.inet.dport = inet->dport;
-	file->socket.inet.saddr = inet->saddr;
-	file->socket.inet.num = inet->num;
-	file->socket.inet.sport = inet->sport;
 	file->socket.userlocks = sk->sk_userlocks;
+	file->socket.backlog = sk->sk_ack_backlog;
 	file->socket.binded = 0;
 	if(f->f_flags & O_NONBLOCK)
 		file->flags |= O_NONBLOCK;
 
 	if(sk->sk_userlocks) file->socket.binded = 1;
 
-	if(file->socket.sock_family == PF_INET && file->socket.sock_type == SOCK_STREAM)
+	switch(file->socket.sock_family)
 	{
-		sprint("Saving tcp socket\n");
-		save_tcp_state(file, sock, task);
+	case AF_INET:
+			file->socket.inet.daddr = inet->daddr;
+			file->socket.inet.rcv_saddr = inet->rcv_saddr;
+			file->socket.inet.dport = inet->dport;
+			file->socket.inet.saddr = inet->saddr;
+			file->socket.inet.num = inet->num;
+			file->socket.inet.sport = inet->sport;
+			
+			if(file->socket.sock_type == SOCK_STREAM)
+			{
+				sprint("Saving tcp socket\n");
+				save_tcp_state(file, sock, task);
+			}
+			break;
+	case AF_UNIX:
+		sprint( "Saving UNIX socket.\n" );
+		
+		save_unix_socket( f, file, head );
+		
+		break;
 	}
 
+
+}
+
+static void save_fs(struct fs_struct* fs, struct saved_task_struct* task, struct map_entry* head)
+{
+	struct saved_fs_struct* saved_fs;
+
+	if((saved_fs = find_by_first(head, fs)) != NULL)
+	{
+		task->fs = saved_fs;
+		return;
+	}
+
+	saved_fs = alloc(sizeof(*saved_fs));
+	saved_fs->umask = fs->umask;
+	get_path_absolute_dentry(fs->pwd.dentry, fs->pwd.mnt, saved_fs->pwd);
+	get_path_absolute_dentry(fs->root.dentry, fs->root.mnt, saved_fs->root);
+	sprint("pwd %s root %s mask %08x\n", saved_fs->pwd, saved_fs->root, saved_fs->umask);
+	task->fs = saved_fs;
+	insert_entry(head, fs, saved_fs);
+	
 }
 
 int save_state_mutex_debug = 0;
@@ -863,6 +1121,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	current_task->pid = pid_vnr(task_pid(task));
 	
 	get_path_absolute(task->mm->exe_file, current_task->exe_file); 
+	save_fs(task->fs, current_task, head);
 	save_files(task->files, current_task, head);
 	
 	save_signals(task, current_task);
@@ -1120,14 +1379,14 @@ int was_state_restored(struct task_struct* task)
 asmlinkage int sys_was_state_restored(struct pt_regs regs)
 {
 	int ret = was_state_restored(current);
-	if(ret)
-	{
-		sprint("State was restored for process %d\n", task_pid_nr(current));
-	}
-	else
-	{
-		sprint("State was not restored for process %d\n", task_pid_nr(current));
-	}
+	/* if(ret) */
+	/* { */
+	/* 	sprint("State was restored for process %d\n", task_pid_nr(current)); */
+	/* } */
+	/* else */
+	/* { */
+	/* 	sprint("State was not restored for process %d\n", task_pid_nr(current)); */
+	/* } */
 	return ret;
 }
 

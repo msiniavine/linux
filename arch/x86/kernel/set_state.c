@@ -52,8 +52,14 @@
 #include <asm/tlb.h>
 
 #include <linux/ramfs.h>
-#include <linux/set_state.h>
 #include <linux/string.h>
+
+#include <linux/socket.h>
+#include <linux/un.h>
+#include <net/af_unix.h>
+
+#include <linux/set_state.h>
+
 
 int debug_was_state_restored = 0;
 
@@ -1076,6 +1082,18 @@ static void restore_temp_file(struct saved_file* file)
 	path_put(&nd.path);
 }
 
+static int unlink_file(const char* name)
+{
+	mm_segment_t fs;
+	int err;
+	fs = get_fs();     /* save previous value */
+	set_fs (get_ds()); /* use kernel limit */
+	err = sys_unlink(name);
+	set_fs(fs); /* restore before returning to user space */
+
+	return err;
+}
+
 
 void restore_file(int fd, struct saved_file* f, struct state_info* info)
 {
@@ -1122,13 +1140,8 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 
 			if(f->temporary)
 			{
-				mm_segment_t fs;
 				int err;
-				fs = get_fs();     /* save previous value */
-				set_fs (get_ds()); /* use kernel limit */
-				err = sys_unlink(f->name);
-				set_fs(fs); /* restore before returning to user space */
-
+				err = unlink_file(f->name);
 				if(err < 0)
 					panic("sys_unlink failed %d", err);
 			}
@@ -1803,7 +1816,7 @@ static void restore_listen_socket(int fd, struct saved_file *saved_file, struct 
 	int err;
 	
 	int somaxconn;
-	int backlog = saved_socket.tcp->backlog;
+	int backlog = saved_socket.backlog;
 	//
 
 	//
@@ -1903,23 +1916,505 @@ install_fd:
 	fd_install( fd, file );
 }
 
+// This is an altered version of the socket() system call in net/socket.c.
+struct file *create_socket ( int fd, int flags_additional, int family, int type, int protocol )
+{
+	//
+	struct socket *socket;
+	int flags;
+	
+	int file_fd;
+	struct file *file = NULL;
+	
+	int status = 0;
+	//
+
+	//
+	BUILD_BUG_ON( SOCK_CLOEXEC != O_CLOEXEC );
+	BUILD_BUG_ON( ( SOCK_MAX | SOCK_TYPE_MASK ) != SOCK_TYPE_MASK );
+	BUILD_BUG_ON( SOCK_CLOEXEC & SOCK_TYPE_MASK );
+	BUILD_BUG_ON( SOCK_NONBLOCK & SOCK_TYPE_MASK );
+	//
+
+	//
+	flags = type & ~SOCK_TYPE_MASK;
+	if ( flags & ~( SOCK_CLOEXEC | SOCK_NONBLOCK ) )
+	{
+		status = -EINVAL;
+		goto done;
+	}
+	type &= SOCK_TYPE_MASK;
+
+	if ( SOCK_NONBLOCK != O_NONBLOCK && ( flags & SOCK_NONBLOCK ) )
+	{
+		flags = ( flags & ~SOCK_NONBLOCK ) | O_NONBLOCK;
+	}
+	
+	flags |= flags_additional;
+	//
+
+	//
+	status = sock_create( family, type, protocol, &socket );
+	if ( status < 0 )
+	{
+		goto done;
+	}
+	//
+	
+	//
+	file_fd = alloc_fd( fd, 0 );
+	if ( file_fd < 0 )
+	{
+		status = file_fd;
+		goto release;
+	}
+	else if ( file_fd != fd && fd >= 0 )
+	{
+		status = -EEXIST;
+		goto put_fd;
+	}
+	
+	file = get_empty_filp();
+	
+	status = sock_attach_fd( socket, file, flags );
+	if ( status < 0 )
+	{
+		goto put_file;
+	}
+	
+	fd_install( file_fd, file );
+	//
+	
+	goto done;
+	
+put_file:
+	put_filp( file );
+	file = NULL;
+	
+put_fd:
+	put_unused_fd( file_fd );
+	
+release:
+	sock_release( socket );
+	
+done:
+	if ( status < 0 )
+	{
+		file = ERR_PTR( status );
+	}
+
+	return file;
+}
+
+// This is an altered version of the bind() system call in net/socket.c.
+int bind_socket ( struct file *file, struct sockaddr *address, int address_length )
+{
+	//
+	struct socket *socket;
+	int status = 0;
+	//
+	
+	//
+	if ( !file || !file->private_data || !address || address_length < 0 )
+	{
+		status = -EINVAL;
+		
+		goto done;
+	}
+	
+	socket = file->private_data;
+	//
+
+	//
+	status = security_socket_bind( socket, address, address_length );
+	if ( !status )
+	{
+		status = socket->ops->bind( socket, address, address_length );
+	}
+	//
+	
+done:
+	return status;
+}
+//
+
+// The function set_owner() is an altered version of the chown() system call in fs/open.c.
+static int chown_common ( struct path *path, uid_t user, gid_t group )
+{
+	struct inode *inode = path->dentry->d_inode;
+	int error;
+	struct iattr newattrs;
+
+	newattrs.ia_valid =  ATTR_CTIME;
+	if (user != (uid_t) -1) {
+		newattrs.ia_valid |= ATTR_UID;
+		newattrs.ia_uid = user;
+	}
+	if (group != (gid_t) -1) {
+		newattrs.ia_valid |= ATTR_GID;
+		newattrs.ia_gid = group;
+	}
+	if (!S_ISDIR(inode->i_mode))
+		newattrs.ia_valid |=
+			ATTR_KILL_SUID | ATTR_KILL_SGID | ATTR_KILL_PRIV;
+	mutex_lock(&inode->i_mutex);
+	error = notify_change(path->dentry, &newattrs);
+	mutex_unlock(&inode->i_mutex);
+
+	return error;
+}
+
+int set_owner ( char *path, uid_t user, gid_t group )
+{
+	//
+	struct nameidata nd;
+	struct path patho;
+	
+	int error = 0;
+	//
+
+	//
+	error = path_lookup( path, LOOKUP_FOLLOW, &nd );
+	if ( error < 0 )
+	{
+		goto done;
+	}
+	
+	patho = nd.path;
+	
+	error = mnt_want_write( patho.mnt );
+	if ( error < 0 )
+	{
+		goto put_path;
+	}
+	error = chown_common( &patho, user, group );
+	mnt_drop_write( patho.mnt );
+	//
+	
+	//
+put_path:
+	path_put( &patho );
+done:
+	return error;
+	//
+}
+//
+
+// This is an altered version of the listen() system call in net/socket.c.
+int listen_socket ( struct file *file, int backlog )
+{
+	//
+	struct socket *socket;
+
+	int somaxconn;
+	
+	int status = 0;
+	//
+	
+	//
+	if ( !file || !file->private_data )
+	{
+		status = -EINVAL;
+		
+		goto done;
+	}
+	
+	socket = file->private_data;
+	//
+
+	//
+	somaxconn = sock_net( socket->sk )->core.sysctl_somaxconn;
+	if ( ( unsigned ) backlog > somaxconn )
+	{
+		backlog = somaxconn;
+	}
+
+	status = security_socket_listen( socket, backlog );
+	if ( !status )
+	{
+		status = socket->ops->listen( socket, backlog );
+	}
+	//
+	
+done:
+	return status;
+}
+
+// Warning: Listening sockets must be restored before accept sockets or else terrible
+// things might happen...
+static void restore_unix_socket (int fd,  struct saved_file *saved_file, struct state_info* info )
+{
+	//
+	struct file *file;
+	
+	int flags = saved_file->flags;
+	
+	int state = saved_file->socket.unx.state;
+	int backlog = saved_file->socket.backlog;
+	
+	int family = saved_file->socket.sock_family;
+	int type = saved_file->socket.sock_type;
+	int protocol = saved_file->socket.sock_protocol;
+
+	struct map_entry* head = info->head;
+	
+	struct sockaddr_un address;
+	
+	struct socket *socket;
+	struct sock *sock;
+	struct unix_sock *u;
+	
+	struct saved_unix_socket *saved_unix = &saved_file->socket.unx;
+	struct socket *socket_other;
+	struct sock *sock_other;
+	struct unix_sock *unix_other;
+	
+	struct sk_buff *skb;
+	struct saved_sk_buff *cur;
+	
+	int status = 0;
+	//
+	if((file = find_by_first(head, saved_file)) != NULL)
+	{
+		int newfd;
+		sprint("Unix socket already restored %p\n", file);
+		newfd = alloc_fd(fd, 0);
+		if(newfd != fd)
+		{
+			panic("Could not get the original fd got %d expected %d\n", newfd, fd);
+		}
+		fd_install(fd, file);
+		return;
+	}
+
+	//
+	file = create_socket( fd, flags, family, type, protocol );
+	if ( IS_ERR( file ) )
+	{
+		panic( "Unable to recreate UNIX socket.  Error: %d\n", -( ( int ) file ) );
+	}
+	
+	socket = file->private_data;
+	sock = socket->sk;
+	u = unix_sk( sock );
+	
+	if ( saved_unix->kind == SOCKET_BOUND )
+	{
+		//
+		address = saved_unix->unix_address.address;
+		if ( address.sun_path[0] )
+		{
+			if ( address.sun_path[0] != '/' )
+			{
+				panic( "Unable to handle UNIX socket bind address of non-absolute path \'%s\'.\n", address.sun_path );
+			}
+		
+			status = unlink_file( address.sun_path );
+			if ( status < 0 )
+			{
+				sprint( "Unable to unlink file \'%s\'.  Error: %d\n", address.sun_path, -status );
+			}
+		}
+		//
+	
+		//
+		status = bind_socket( file, ( struct sockaddr * ) &address, saved_unix->unix_address.length );
+		if ( status < 0 )
+		{
+			panic( "Unable to rebind UNIX socket.  Error: %d\n", -status );
+		}
+		//
+		
+		//
+		if ( address.sun_path[0] )
+		{
+			status = set_owner( address.sun_path, saved_unix->user, saved_unix->group );
+			if ( status < 0 )
+			{
+				panic( "Unable to restore ownership information of bounded UNIX socket file.  Error: %d\n", -status );
+			}
+		}
+		//
+		
+		//
+		if ( state == TCP_LISTEN )
+		{
+			status = listen_socket( file, backlog );
+			if ( status < 0 )
+			{
+				panic( "Unable to put UNIX socket back to listening state.  Error: %d\n", -status );
+			}
+			
+			// Broadcast self.
+			insert_entry( head, saved_unix, sock );
+			//
+		}
+		//
+	}
+	
+	else if (	saved_unix->kind == SOCKET_ACCEPTED || 
+			saved_unix->kind == SOCKET_CONNECTED )
+	{
+		unix_state_lock( sock );
+		
+		// Form connection with peer and broadcast self.
+		//
+		// Warning: The connection broken sockets are restored
+		// as unconnected sockets...
+		if ( saved_unix->peer )
+		{
+			socket_other = find_by_first( head, saved_unix->peer );
+			if ( socket_other )
+			{
+				if ( !socket_other->sk )
+				{
+					sprint( "socket_other->state: %d\n", socket_other->state );
+					sprint( "socket_other->type: %d\n", socket_other->type );
+					sprint( "socket_other->flags: %d\n", socket_other->type );
+					sprint( "socket_other->fasync_list: %p\n", socket_other->fasync_list );
+					sprint( "socket_other->file: %p\n", socket_other->file );
+					sprint( "socket_other->sk: %p\n", socket_other->sk );
+					sprint( "socket_other->ops: %p\n", socket_other->ops );
+				
+				
+					panic( "socket_other->sk is NULL.\n" );
+				}
+			
+				sock_other = socket_other->sk;
+				unix_other = unix_sk( sock_other );
+			
+				unix_state_lock( sock_other );
+			
+				sock_hold( sock );
+				sock_hold( sock_other );
+			
+				u->peer = sock_other;
+				unix_other->peer = sock;
+			
+				if ( sock->sk_type != SOCK_DGRAM )
+				{
+					sock->sk_state = TCP_ESTABLISHED;
+					sock_other->sk_state = TCP_ESTABLISHED;
+				
+					socket->state = SS_CONNECTED;
+					socket_other->state = SS_CONNECTED;
+				}
+			
+				unix_state_unlock( sock_other );
+			}
+		
+			insert_entry( head, saved_unix, socket );
+		}
+		//
+		
+		//
+		if ( saved_unix->kind == SOCKET_ACCEPTED )
+		{
+			// Link self addr, dentry, and mnt to that of the listening socket.
+			if ( saved_unix->listen )
+			{
+				sock_other = find_by_first( head, saved_unix->listen );
+				if ( !sock_other )
+				{
+					panic( "Unable to restore UNIX \'accept\' socket before the listening socket.\n" );
+				}
+				
+				unix_other = unix_sk( sock_other );
+				
+				if ( unix_other->addr )
+				{
+					atomic_inc( &unix_other->addr->refcnt );
+					u->addr = unix_other->addr;
+				}
+				
+				if ( unix_other->dentry )
+				{
+					u->dentry = dget( unix_other->dentry );
+					u->mnt = mntget( unix_other->mnt );
+				}
+			}
+			
+			else
+			{
+				u->addr = kmalloc( sizeof( struct unix_address ) + saved_unix->unix_address.length, GFP_KERNEL );
+				if ( !u->addr )
+				{
+					panic( "Unable to allocate memory for UNIX \'accept\' socket address.\n" );
+				}
+				
+				// Warning: These two aren't quite correct...
+				u->dentry = NULL;
+				u->mnt = NULL;
+				//
+			}
+			//
+		}
+		//
+		
+		unix_state_unlock( sock );
+	}
+	//
+	
+	// ???
+	sock->sk_shutdown = saved_unix->shutdown;
+	
+	sock->sk_peercred = saved_unix->peercred;
+	//
+	
+	// Restore the receive queue.
+	unix_state_lock( sock );
+	list_for_each_entry(cur, &saved_unix->sk_buffs, list)
+	{
+		skb = sock_alloc_send_skb( sock, cur->len, 1, &status );
+		if ( !skb || status < 0 )
+		{
+			panic( "Unable to allocate UNIX socket buffer.  Error: %d\n", -status );
+		}
+
+		memcpy( skb->cb, cur->cb, sizeof( skb->cb ) );
+		memcpy( skb_put( skb, cur->len ), cur->content, cur->len );
+		skb_queue_tail( &sock->sk_receive_queue, skb );
+	}
+	
+	unix_state_unlock( sock );
+	//
+	
+	insert_entry(head, saved_file, file);
+	return;
+}
+
+
 void restore_socket(int fd, struct saved_file* f, struct state_info* info)
 {
 	struct saved_socket* sock = &f->socket;
-	if(sock->sock_family == PF_INET && sock->sock_type == SOCK_DGRAM)
+
+	switch(sock->sock_family)
 	{
-		restore_udp_socket(fd, f);
-	}
-	else if(sock->sock_family == PF_INET && sock->sock_type == SOCK_STREAM)
-	{
-		if(sock->tcp->state == TCP_LISTEN)
+	case AF_INET:
+		switch(sock->sock_type)
 		{
-			restore_listen_socket(fd, f, info);
+		case SOCK_DGRAM:
+			restore_udp_socket(fd, f);
+			break;
+		case SOCK_STREAM:
+			if(sock->tcp->state == TCP_LISTEN)
+			{
+				restore_listen_socket(fd, f, info);
+			}
+			else
+			{
+				restore_tcp_socket(fd, f, info);
+			}
+			break;
 		}
-		else
-		{
-			restore_tcp_socket(fd, f, info);
-		}
+		break;
+	case AF_UNIX:
+		restore_unix_socket(fd, f, info);
+		break;
+	default:
+		sprint( "Unknown socket family %d, type %d.\n", sock->sock_family, sock->sock_type );
+		break;
+
 	}
 }
 
@@ -1972,6 +2467,46 @@ void restore_files(struct saved_task_struct* state, struct state_info* info)
 	}
 	
 	insert_entry(info->head, state->open_files, current->files);
+}
+
+static void restore_fs(struct saved_task_struct* state, struct state_info* info)
+{
+	struct fs_struct* fs;
+	struct fs_struct* copy;
+	mm_segment_t fs_seg;
+	int err;
+	
+	if((fs = find_by_first(info->head, state->fs)) != NULL)
+	{
+		sprint("Restoring shared fs %p\n", fs);
+		BUG_ON(current->fs == fs);
+		
+		atomic_inc(&fs->count);
+		exit_fs(current);
+		current->fs = fs;
+		return;
+	}
+	copy = copy_fs_struct(current->fs);
+	if(!copy)
+	{
+		panic("Could not allocate new fs struct\n");
+	}
+	exit_fs(current);
+	current->fs = copy;
+	
+	current->fs->umask = state->fs->umask;
+	
+	fs_seg = get_fs();
+	set_fs(get_ds());
+	err = sys_chdir(state->fs->pwd);
+	if(err < 0)
+		panic("Could not set current directory %s\n", state->fs->pwd);
+	err = sys_chroot(state->fs->root);
+	if(err < 0)
+		panic("Could not set root directory %s\n", state->fs->root);
+	set_fs(fs_seg);
+	insert_entry(info->head, state->fs, current->fs);
+
 }
 
 void close_unused_pipes(struct saved_task_struct* state, struct global_state_info* global_state)
@@ -2232,7 +2767,22 @@ void restore_registers(struct saved_task_struct* state)
 			break;
 		}
 		sprint("No data for socket call, restarting\n");
-		// else fall through
+		goto restart;
+	case 3:  // read
+		if(state->syscall_data != NULL)
+		{
+			struct tcp_io_progress *iop = state->syscall_data;
+			if(iop->progress == 0)
+			{
+				sprint("Restaring read call with 0 progress\n");
+				goto restart;
+			}
+			sprint("Returning from read with %d progress\n", iop->progress);
+			state->registers.ax = iop->progress;
+			break;
+		}
+		sprint("No data for read call\n");
+		goto restart;
 	case 4:
 	case 162:  // nanosleep
 	case 240:  // futex
@@ -2410,7 +2960,7 @@ int do_set_state(struct state_info* info)
 	struct used_file* used_files;
 	struct saved_task_struct* state = info->state;
 
-	sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
+	sprint("Ptrace flags: %x, thread_info flags: %x\n", current->ptrace, task_thread_info(current)->flags);
 	retval = unshare_files(&displaced); // this seems to copy the open files of the current task (displaced is released later)
 	if(retval)
 		goto out_ret;
@@ -2503,6 +3053,7 @@ int do_set_state(struct state_info* info)
 			put_files_struct(displaced);
 
 		debug_was_state_restored = 1;
+		restore_fs(state, info);
 		restore_files(state, info);
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);

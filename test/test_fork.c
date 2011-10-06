@@ -26,37 +26,16 @@ int recursive_call(int n)
 
 int main()
 {
-	int err;
-	int count = 1;
 	int forked_again = 0;
-	pthread_t thread;
-	int childtid;
-//	err = my_clone(CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
-	err = fork();
-	printf("It works\n");
-	if(err == 0)
-	{
-		exit(0);
-	}
-	wait(NULL);
-//	execl("/bin/ls", "/bin/ls", "/home/maxim", NULL);
-//	exit(0);
-	enable_save_state();
 
 	while(1)
 	{
 		sleep(1);
-		printf("%d pid %d\n", count, getpid());
-		count++;
 		if(was_state_restored() && !forked_again)
 		{
 			forked_again = 1;
-			int childtid;
 			int ret;
-			/* if((err = pthread_create(&thread, NULL, thread_func, NULL)) != 0) */
-			/* { */
-			/* 	printf("Pthread error %d\n", err); */
-			/* } */
+
 //			fork();
 
 			// syscall(120, CLONE_SIGSTOP|CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, 0, 0, 0, &childtid);
@@ -67,11 +46,15 @@ int main()
 			ret = fork();
 			if (ret == 0)
 			{
-				int r;
-				r = recursive_call(100);
-				printf("Recurcive call done %d\n", r);
-				execl("/bin/ls", "/bin/ls", "/home/maxim", NULL);
+				int r = recursive_call(100);
+				if(r != 100)
+				{
+					printf("Recursive call in test_fork failed expected %d got %d\n", 100, r);
+					return 1;
+				}
+//				execl("/bin/ls", "/bin/ls", "/home/maxim", NULL);
 			}
+			return 0;
 
 
 		}

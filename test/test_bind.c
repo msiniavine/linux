@@ -10,17 +10,16 @@
 
 int main()
 {
-	int sockfd, newfd; // listen on sockfd, new connections on newfd
+	int sockfd;
 	struct addrinfo hints, *servinfo;
 	int err;
 	int yes = 1;
-
-	enable_save_state();
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	
+	// Want to bind to a specific address rather than any available one
 	if((err = getaddrinfo("localhost", "8080", &hints, &servinfo)) != 0)
 	{
 		fprintf(stderr, "getaddrinfo %s\n", gai_strerror(err));
@@ -52,40 +51,16 @@ int main()
 	{
 		close(sockfd);
 		perror("listen");
-		return 0;
+		return 1;
 	}
 
+
+	// if bind is not working this would crash during restore
 	while(1)
 	{
-		int read;
-		char buff[256];
-		newfd = accept(sockfd, NULL, NULL);
-		if(newfd < 0)
-		{
-			perror("accept");
-			close(sockfd);
-			return 1;
-		}
-
-		read = recv(newfd, buff, 255, 0);
-		if(read < 0)
-		{
-			perror("recv");
-			close(newfd);
-			continue;
-		}
-		if(read == 0)
-		{
-			close(newfd);
-			continue;
-		}
-
-		buff[read] = '\0';
-		err = send(newfd, buff, read,0);
-		if(err < 0)
-		{
-			perror("send");
-		}
-		close(newfd);
+		if(was_state_restored())
+			exit(0);
+		sleep(1);
 	}
+	return 1;
 }

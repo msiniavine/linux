@@ -71,8 +71,6 @@
 #include <asm/unaligned.h>
 #include <net/netdma.h>
 
-#include <linux/set_state.h>
-
 int sysctl_tcp_timestamps __read_mostly = 1;
 int sysctl_tcp_window_scaling __read_mostly = 1;
 int sysctl_tcp_sack __read_mostly = 1;
@@ -4906,7 +4904,6 @@ static void tcp_new_space(struct sock *sk)
 		sndmem *= 2 * demanded;
 		if (sndmem > sk->sk_sndbuf)
 		{
-			tlprintf("Expanding sndbuf to %d\n", min(sndmem, sysctl_tcp_wmem[2]));
 			sk->sk_sndbuf = min(sndmem, sysctl_tcp_wmem[2]);
 		}
 		tp->snd_cwnd_stamp = tcp_time_stamp(tp);
@@ -5188,7 +5185,6 @@ static int tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		 */
 		if (!th->rst)
 			tcp_send_dupack(sk, skb);
-		sprint("Sequence number invalid\n");
 		goto discard;
 	}
 
@@ -5382,7 +5378,6 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 			if (!eaten) {
 				if (tcp_checksum_complete_user(sk, skb))
 				{
-					sprint("checksum error %u\n", ntohl(th->seq));
 					goto csum_error;
 				}
 
