@@ -64,6 +64,9 @@
 
 #include "internal.h"
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 #ifndef CONFIG_NEED_MULTIPLE_NODES
 /* use the per-pgdat data instead for discontigmem - mbligh */
 unsigned long max_mapnr;
@@ -551,7 +554,7 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	if (unlikely(!pte_present(pte))) {
 		if (!pte_file(pte)) {
 			swp_entry_t entry = pte_to_swp_entry(pte);
-
+			// tlprintf("pte not present, doing swap stuff\n");
 			swap_duplicate(entry);
 			/* make sure dst_mm is on swapoff's mmlist. */
 			if (unlikely(list_empty(&dst_mm->mmlist))) {
@@ -580,6 +583,7 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 * in the parent and the child
 	 */
 	if (is_cow_mapping(vm_flags)) {
+		// tlprintf("write protect for cow mapping\n");
 		ptep_set_wrprotect(src_mm, addr, src_pte);
 		pte = pte_wrprotect(pte);
 	}
@@ -594,6 +598,7 @@ copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 
 	page = vm_normal_page(vma, addr, pte);
 	if (page) {
+		// tlprintf("page dup rmap\n");
 		get_page(page);
 		page_dup_rmap(page, vma, addr);
 		rss[!!PageAnon(page)]++;
@@ -637,6 +642,7 @@ again:
 			progress++;
 			continue;
 		}
+		// tlprintf("copy one pte %p-%p\n", addr);
 		copy_one_pte(dst_mm, src_mm, dst_pte, src_pte, vma, addr, rss);
 		progress += 8;
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
@@ -713,7 +719,10 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 */
 	if (!(vma->vm_flags & (VM_HUGETLB|VM_NONLINEAR|VM_PFNMAP|VM_INSERTPAGE))) {
 		if (!vma->anon_vma)
+		{
+			// tlprintf("Skip copy due to flags\n");
 			return 0;
+		}
 	}
 
 	if (is_vm_hugetlb_page(vma))
@@ -736,7 +745,10 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 * is_cow_mapping() returns true.
 	 */
 	if (is_cow_mapping(vma->vm_flags))
+	{
+		// tlprintf("Pre copy cow mapping\n");
 		mmu_notifier_invalidate_range_start(src_mm, addr, end);
+	}
 
 	ret = 0;
 	dst_pgd = pgd_offset(dst_mm, addr);
@@ -745,6 +757,7 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		next = pgd_addr_end(addr, end);
 		if (pgd_none_or_clear_bad(src_pgd))
 			continue;
+		// tlprintf("copy pud range for %p-%p\n", addr, next);
 		if (unlikely(copy_pud_range(dst_mm, src_mm, dst_pgd, src_pgd,
 					    vma, addr, next))) {
 			ret = -ENOMEM;
@@ -753,8 +766,11 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	} while (dst_pgd++, src_pgd++, addr = next, addr != end);
 
 	if (is_cow_mapping(vma->vm_flags))
+	{
+		// tlprintf("post copy cow mapping\n");
 		mmu_notifier_invalidate_range_end(src_mm,
 						  vma->vm_start, end);
+	}
 	return ret;
 }
 
@@ -2861,18 +2877,27 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 
 	entry = *pte;
 	if (!pte_present(entry)) {
+		// tlprintf("pte not present\n");
 		if (pte_none(entry)) {
 			if (vma->vm_ops) {
 				if (likely(vma->vm_ops->fault))
+				{
+					// tlprintf("doing linear fault\n");
 					return do_linear_fault(mm, vma, address,
 						pte, pmd, write_access, entry);
+				}
 			}
+			// tlprintf("Doing anonymous page\n");
 			return do_anonymous_page(mm, vma, address,
 						 pte, pmd, write_access);
 		}
 		if (pte_file(entry))
+		{
+			// tlprintf("doing nonlinera fault\n");
 			return do_nonlinear_fault(mm, vma, address,
 					pte, pmd, write_access, entry);
+		}
+		// tlprintf("Doing swap fault\n");
 		return do_swap_page(mm, vma, address,
 					pte, pmd, write_access, entry);
 	}
@@ -2882,13 +2907,19 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 	if (unlikely(!pte_same(*pte, entry)))
 		goto unlock;
 	if (write_access) {
+		// tlprintf("got write access\n");
 		if (!pte_write(entry))
+		{
+			// tlprintf("page table write bit not set (fork cow?)\n");
 			return do_wp_page(mm, vma, address,
 					pte, pmd, ptl, entry);
+		}
+		// tlprintf("Dirty page\n");
 		entry = pte_mkdirty(entry);
 	}
 	entry = pte_mkyoung(entry);
 	if (ptep_set_access_flags(vma, address, pte, entry, write_access)) {
+		// tlprintf("update cache\n");
 		update_mmu_cache(vma, address, entry);
 	} else {
 		/*
@@ -2898,7 +2929,10 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 		 * with threads.
 		 */
 		if (write_access)
+		{
+			// tlprintf("flush tlb page\n");
 			flush_tlb_page(vma, address);
+		}
 	}
 unlock:
 	pte_unmap_unlock(pte, ptl);

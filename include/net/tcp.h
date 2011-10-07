@@ -567,7 +567,7 @@ extern u32	__tcp_select_window(struct sock *sk);
  * to use only the low 32-bits of jiffies and hide the ugly
  * casts with the following macro.
  */
-#define tcp_time_stamp		((__u32)(jiffies))
+#define tcp_time_stamp(tp)		((__u32)(jiffies) + ((tp)->tstamp_offset))
 
 /* This is what the send packet queuing engine uses to pass
  * TCP per-packet control information to the transmission

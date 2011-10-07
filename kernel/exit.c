@@ -60,6 +60,8 @@ DEFINE_TRACE(sched_process_free);
 DEFINE_TRACE(sched_process_exit);
 DEFINE_TRACE(sched_process_wait);
 
+//#include <linux/set_state.h>
+
 static void exit_mm(struct task_struct * tsk);
 
 static void __unhash_process(struct task_struct *p)
@@ -1537,7 +1539,6 @@ static int do_wait_thread(struct task_struct *tsk, int *notask_error,
 				return ret;
 		}
 	}
-
 	return 0;
 }
 
@@ -1583,7 +1584,9 @@ repeat:
 	 */
 	retval = -ECHILD;
 	if ((type < PIDTYPE_MAX) && (!pid || hlist_empty(&pid->tasks[type])))
+	{
 		goto end;
+	}
 
 	current->state = TASK_INTERRUPTIBLE;
 	read_lock(&tasklist_lock);
@@ -1695,9 +1698,12 @@ SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
 	enum pid_type type;
 	long ret;
 
+
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
+	{
 		return -EINVAL;
+	}
 
 	if (upid == -1)
 		type = PIDTYPE_MAX;
