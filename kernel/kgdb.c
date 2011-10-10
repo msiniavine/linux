@@ -1002,7 +1002,7 @@ static void gdb_cmd_query(struct kgdb_state *ks)
 	case 's':
 	case 'f':
 		if (memcmp(remcom_in_buffer + 2, "ThreadInfo", 10)) {
-			error_packet(remcom_out_buffer, -EINVAL);
+//			error_packet(remcom_out_buffer, -EINVAL);
 			break;
 		}
 
@@ -1046,7 +1046,7 @@ static void gdb_cmd_query(struct kgdb_state *ks)
 		break;
 	case 'T':
 		if (memcmp(remcom_in_buffer + 1, "ThreadExtraInfo,", 16)) {
-			error_packet(remcom_out_buffer, -EINVAL);
+//			error_packet(remcom_out_buffer, -EINVAL);
 			break;
 		}
 		ks->threadid = 0;

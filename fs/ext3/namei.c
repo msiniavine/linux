@@ -37,6 +37,9 @@
 #include <linux/buffer_head.h>
 #include <linux/bio.h>
 
+#define SET_STATE_ONLY_FUNCTIONS 1
+#include <linux/set_state.h>
+
 #include "namei.h"
 #include "xattr.h"
 #include "acl.h"
@@ -2230,7 +2233,7 @@ static int ext3_link (struct dentry * old_dentry,
 	 * Return -ENOENT if we've raced with unlink and i_nlink is 0.  Doing
 	 * otherwise has the potential to corrupt the orphan inode list.
 	 */
-	if (inode->i_nlink == 0)
+	if (inode->i_nlink == 0 && !set_state_present())
 		return -ENOENT;
 
 retry:
