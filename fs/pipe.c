@@ -22,6 +22,7 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
+
 /*
  * We use a start+len construction, which provides full use of the 
  * allocated memory.
@@ -687,7 +688,6 @@ static int
 pipe_release(struct inode *inode, int decr, int decw)
 {
 	struct pipe_inode_info *pipe;
-
 	mutex_lock(&inode->i_mutex);
 	pipe = inode->i_pipe;
 	pipe->readers -= decr;

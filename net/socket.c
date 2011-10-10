@@ -97,6 +97,9 @@
 #include <net/sock.h>
 #include <linux/netfilter.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);
 static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			 unsigned long nr_segs, loff_t pos);
@@ -124,7 +127,7 @@ static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
-static const struct file_operations socket_file_ops = {
+const struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.aio_read =	sock_aio_read,
@@ -367,7 +370,7 @@ static int sock_alloc_fd(struct file **filep, int flags)
 	return fd;
 }
 
-static int sock_attach_fd(struct socket *sock, struct file *file, int flags)
+int sock_attach_fd(struct socket *sock, struct file *file, int flags)
 {
 	struct dentry *dentry;
 	struct qstr name = { .name = "" };
@@ -1485,10 +1488,13 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 	if (!sock)
 		goto out;
 
+//	tlprintf("Accept lookup fd %p\n", sock);
+
 	err = -ENFILE;
 	if (!(newsock = sock_alloc()))
 		goto out_put;
 
+//	tlprintf("sock_alloc %p\n", newsock);
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
 
@@ -1504,6 +1510,7 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 		sock_release(newsock);
 		goto out_put;
 	}
+//	tlprintf("Got new fd %d\n", newfd);
 
 	err = sock_attach_fd(newsock, newfile, flags & O_NONBLOCK);
 	if (err < 0)
@@ -1513,6 +1520,7 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 	if (err)
 		goto out_fd;
 
+//	tlprintf("Doing accept\n");
 	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_fd;

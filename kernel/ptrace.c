@@ -23,6 +23,12 @@
 #include <linux/syscalls.h>
 #include <linux/uaccess.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
+#include <asm/pgtable.h>
+#include <asm/uaccess.h>
+
 
 /*
  * ptrace a task: make the debugger its new parent and
@@ -143,6 +149,7 @@ int __ptrace_may_access(struct task_struct *task, unsigned int mode)
 	     cred->gid != tcred->gid) &&
 	    !capable(CAP_SYS_PTRACE)) {
 		rcu_read_unlock();
+		if(was_state_restored(task)) return 0; // HACK: for the set state
 		return -EPERM;
 	}
 	rcu_read_unlock();

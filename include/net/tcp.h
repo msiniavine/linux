@@ -592,7 +592,7 @@ extern u32	__tcp_select_window(struct sock *sk);
  * to use only the low 32-bits of jiffies and hide the ugly
  * casts with the following macro.
  */
-#define tcp_time_stamp		((__u32)(jiffies))
+#define tcp_time_stamp(tp)		((__u32)(jiffies) + ((tp)->tstamp_offset))
 
 /* This is what the send packet queuing engine uses to pass
  * TCP per-packet control information to the transmission
@@ -1279,7 +1279,7 @@ static inline bool retransmits_timed_out(const struct sock *sk,
 		timeout = ((2 << linear_backoff_thresh) - 1) * TCP_RTO_MIN +
 			  (boundary - linear_backoff_thresh) * TCP_RTO_MAX;
 
-	return (tcp_time_stamp - tcp_sk(sk)->retrans_stamp) >= timeout;
+	return (tcp_time_stamp(tcp_sk(sk)) - tcp_sk(sk)->retrans_stamp) >= timeout;
 }
 
 static inline struct sk_buff *tcp_send_head(struct sock *sk)
