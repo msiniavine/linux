@@ -4,12 +4,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
+
 #include "test.h"
 
 char* tests[] = {
 	"test_loop",
 	"test_altstack",
-//	"test_condvar",
+	"test_bind",
 	"test_pending_signals",
 	"test_pid",
 	"test_restore_signal",
@@ -18,6 +20,8 @@ char* tests[] = {
 	"test_sigsuspend",
 	"test_stack",
 	"test_wait",
+	"test_fork",
+	"test_tempfile",
 	NULL
 };
 
@@ -87,7 +91,7 @@ int main()
 		}
 	}
 	if (!all_errs) {
-		printf("all tests passed\n");
+		printf("\nall tests passed\n");
 		exit(0);
 	}
 	exit(1);
