@@ -353,6 +353,7 @@ struct tcp_sock {
 	u32	mdev_max;	/* maximal mdev for the last rtt period	*/
 	u32	rttvar;		/* smoothed mdev_max			*/
 	u32	rtt_seq;	/* sequence number to update rttvar	*/
+	u32 tstamp_offset;      /* offset to add to the time counter to keep timestamps working after restore */
 
 	u32	packets_out;	/* Packets which are "in flight"	*/
 	u32	retrans_out;	/* Retransmitted packets out		*/

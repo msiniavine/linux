@@ -1536,6 +1536,8 @@ int kernel_kexec(void)
 		kernel_restart_prepare(NULL);
 		printk(KERN_EMERG "Starting new kernel\n");
 		machine_shutdown();
+
+
 	}
 
 	machine_kexec(kexec_image);

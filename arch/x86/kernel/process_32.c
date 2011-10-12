@@ -196,6 +196,7 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 	struct pt_regs *childregs;
 	struct task_struct *tsk;
 	int err;
+	struct task_struct* parent = current;
 
 	childregs = task_pt_regs(p);
 	*childregs = *regs;

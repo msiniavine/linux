@@ -40,6 +40,9 @@
 
 #include <asm/uaccess.h>
 
+#define SET_STATE_ONLY_FUNCTIONS 1
+#include <linux/set_state.h>
+
 #include "xattr.h"
 #include "acl.h"
 #include "namei.h"
@@ -1430,6 +1433,14 @@ static void ext3_orphan_cleanup (struct super_block * sb,
 #ifdef CONFIG_QUOTA
 	int i;
 #endif
+
+
+	if(set_state_present())
+	{
+		printk(KERN_INFO "Skipping orphan clean up because of save state\n");
+		return;
+	}
+
 	if (!es->s_last_orphan) {
 		jbd_debug(4, "no orphan inodes to clean up\n");
 		return;
@@ -2613,7 +2624,7 @@ static int ext3_remount (struct super_block * sb, int * flags, char * data)
 			 * around from a previously readonly bdev mount,
 			 * require a full umount/remount for now.
 			 */
-			if (es->s_last_orphan) {
+			if (es->s_last_orphan && !set_state_present()) {
 				ext3_msg(sb, KERN_WARNING, "warning: couldn't "
 				       "remount RDWR because of unprocessed "
 				       "orphan inode list.  Please "
