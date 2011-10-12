@@ -337,3 +337,9 @@ ENTRY(sys_call_table)
 	.long sys_rt_tgsigqueueinfo	/* 335 */
 	.long sys_perf_event_open
 	.long sys_recvmmsg
+	.long sys_load_saved_state      
+	.long sys_enable_save_state
+	.long sys_was_state_restored    /* 340 */
+	.long sys_save_state
+	.long sys_state_present
+

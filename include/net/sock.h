@@ -312,6 +312,10 @@ struct sock {
   	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);  
 	void                    (*sk_destruct)(struct sock *sk);
+
+	int io_in_progress;   // 0 indicates that no socket io is happening 1 is for write, 2 is for read
+	int expected_size;    // indicates how many bytes a user wants to read from/write to a socket
+	int io_progress;      // tell how many of the expected bytes have been writte/read
 };
 
 /*

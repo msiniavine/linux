@@ -103,6 +103,9 @@
 #include <linux/sockios.h>
 #include <linux/atalk.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 static int sock_no_open(struct inode *irrelevant, struct file *dontcare);
 static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			 unsigned long nr_segs, loff_t pos);
@@ -130,7 +133,7 @@ static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
-static const struct file_operations socket_file_ops = {
+const struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
 	.aio_read =	sock_aio_read,
@@ -304,7 +307,7 @@ static int sockfs_get_sb(struct file_system_type *fs_type,
 			     mnt);
 }
 
-static struct vfsmount *sock_mnt __read_mostly;
+struct vfsmount *sock_mnt __read_mostly;
 
 static struct file_system_type sock_fs_type = {
 	.name =		"sockfs",
@@ -321,7 +324,7 @@ static char *sockfs_dname(struct dentry *dentry, char *buffer, int buflen)
 				dentry->d_inode->i_ino);
 }
 
-static const struct dentry_operations sockfs_dentry_operations = {
+const struct dentry_operations sockfs_dentry_operations = {
 	.d_dname  = sockfs_dname,
 };
 
@@ -1492,10 +1495,13 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 	if (!sock)
 		goto out;
 
+//	tlprintf("Accept lookup fd %p\n", sock);
+
 	err = -ENFILE;
 	if (!(newsock = sock_alloc()))
 		goto out_put;
 
+//	tlprintf("sock_alloc %p\n", newsock);
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
 
@@ -1511,11 +1517,13 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 		sock_release(newsock);
 		goto out_put;
 	}
+//	tlprintf("Got new fd %d\n", newfd);
 
 	err = security_socket_accept(sock, newsock);
 	if (err)
 		goto out_fd;
 
+//	tlprintf("Doing accept\n");
 	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_fd;

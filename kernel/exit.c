@@ -1558,7 +1558,6 @@ static int do_wait_thread(struct wait_opts *wo, struct task_struct *tsk)
 		if (ret)
 			return ret;
 	}
-
 	return 0;
 }
 
@@ -1730,9 +1729,12 @@ SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
 	enum pid_type type;
 	long ret;
 
+
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
+	{
 		return -EINVAL;
+	}
 
 	if (upid == -1)
 		type = PIDTYPE_MAX;

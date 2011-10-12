@@ -29,6 +29,10 @@
 #include "e1000.h"
 #include <net/ip6_checksum.h>
 
+#ifndef SET_STATE_HAX
+#define SET_STATE_HAX 1
+#endif
+
 char e1000_driver_name[] = "e1000";
 static char e1000_driver_string[] = "Intel(R) PRO/1000 Network Driver";
 #define DRV_VERSION "7.3.21-k5-NAPI"
@@ -917,6 +921,11 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	netdev->vlan_features |= NETIF_F_TSO;
 	netdev->vlan_features |= NETIF_F_HW_CSUM;
 	netdev->vlan_features |= NETIF_F_SG;
+
+#if SET_STATE_HAX
+#warning "Set state disabling ALL the card's features"
+	netdev->features = 0;
+#endif
 
 	adapter->en_mng_pt = e1000_enable_mng_pass_thru(hw);
 

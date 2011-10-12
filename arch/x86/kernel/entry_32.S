@@ -1254,6 +1254,12 @@ return_to_handler:
 	jmp *%ecx
 #endif
 
+ENTRY(asm_resume_saved_state)
+	mov %eax, %esp
+	jmp restore_all
+
+END(asm_resume_saved_state)	
+
 .section .rodata,"a"
 #include "syscall_table_32.S"
 

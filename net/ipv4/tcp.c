@@ -276,6 +276,10 @@
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 
+// for set_state tcp hook
+#define SET_STATE_ONLY_FUNCTIONS 1
+#include <linux/set_state.h>  
+
 int sysctl_tcp_fin_timeout __read_mostly = TCP_FIN_TIMEOUT;
 
 struct percpu_counter tcp_orphan_count;
@@ -732,7 +736,7 @@ static unsigned int tcp_xmit_size_goal(struct sock *sk, u32 mss_now,
 	return max(xmit_size_goal, mss_now);
 }
 
-static int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
+int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
 {
 	int mss_now;
 
@@ -741,6 +745,7 @@ static int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
 
 	return mss_now;
 }
+EXPORT_SYMBOL(tcp_send_mss);
 
 static ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffset,
 			 size_t psize, int flags)
@@ -912,6 +917,10 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	lock_sock(sk);
 	TCP_CHECK_TIMER(sk);
 
+	sk->io_in_progress = 1;
+	sk->io_progress = 0;
+	sk->expected_size = msg->msg_iov->iov_len;
+
 	flags = msg->msg_flags;
 	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
 
@@ -953,17 +962,23 @@ int tcp_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 
 			if (copy <= 0) {
 new_segment:
+				//			tlprintf("New segment\n");
 				/* Allocate new segment. If the interface is SG,
 				 * allocate skb fitting to single page.
 				 */
 				if (!sk_stream_memory_free(sk))
+				{
+//					tlprintf("No free memory wait for sndbuf total %d queued %d\n", sk->sk_sndbuf, sk->sk_wmem_queued);
 					goto wait_for_sndbuf;
+				}
 
 				skb = sk_stream_alloc_skb(sk, select_size(sk),
 						sk->sk_allocation);
 				if (!skb)
+				{
+//					tlprintf("stream alloc failed, wait for memory\n");
 					goto wait_for_memory;
-
+				}
 				/*
 				 * Check whether we can use HW checksum.
 				 */
@@ -986,6 +1001,8 @@ new_segment:
 					copy = skb_tailroom(skb);
 				if ((err = skb_add_data(skb, from, copy)) != 0)
 					goto do_fault;
+
+//				tlprintf("%d bytes added to tail\n", copy);
 			} else {
 				int merge = 0;
 				int i = skb_shinfo(skb)->nr_frags;
@@ -1062,6 +1079,7 @@ new_segment:
 			if (!copied)
 				TCP_SKB_CB(skb)->flags &= ~TCPCB_FLAG_PSH;
 
+			sk->io_progress += copy;
 			tp->write_seq += copy;
 			TCP_SKB_CB(skb)->end_seq += copy;
 			skb_shinfo(skb)->gso_segs = 0;
@@ -1085,10 +1103,14 @@ wait_for_sndbuf:
 			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 wait_for_memory:
 			if (copied)
+			{
 				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
-
+			}
+			
+//			csprint("%u %u %u %u\n", tp->snd_una, tp->snd_nxt, tp->pushed_seq, tp->write_seq);
 			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
 				goto do_error;
+//			csprint("Done wait for memory\n");
 
 			mss_now = tcp_send_mss(sk, &size_goal, flags);
 		}
@@ -1096,7 +1118,11 @@ wait_for_memory:
 
 out:
 	if (copied)
+	{
+//		tlprintf("Final push\n");
 		tcp_push(sk, flags, mss_now, tp->nonagle);
+	}
+	sk->io_in_progress = 0;
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
 	return copied;
@@ -1116,6 +1142,7 @@ do_error:
 		goto out;
 out_err:
 	err = sk_stream_error(sk, flags, err);
+	sk->io_in_progress = 0;
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
 	return err;
@@ -1413,7 +1440,8 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		}
 	}
 #endif
-
+	sk->io_in_progress = 1;
+	sk->io_progress = 0;
 	do {
 		u32 offset;
 
@@ -1471,6 +1499,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 
 			if (sk->sk_err) {
 				copied = sock_error(sk);
+				// csprint("error %d\n", copied);
 				break;
 			}
 
@@ -1482,6 +1511,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 					/* This occurs when user tries to read
 					 * from never connected socket.
 					 */
+					// csprint("Socket never connected\n");
 					copied = -ENOTCONN;
 					break;
 				}
@@ -1489,12 +1519,14 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 			}
 
 			if (!timeo) {
+				// csprint("timeo\n");
 				copied = -EAGAIN;
 				break;
 			}
 
 			if (signal_pending(current)) {
 				copied = sock_intr_errno(timeo);
+				// csprint("Signal pending error\n");
 				break;
 			}
 		}
@@ -1566,6 +1598,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 				NET_ADD_STATS_USER(sock_net(sk), LINUX_MIB_TCPDIRECTCOPYFROMBACKLOG, chunk);
 				len -= chunk;
 				copied += chunk;
+				sk->io_progress += chunk;
 			}
 
 			if (tp->rcv_nxt == tp->copied_seq &&
@@ -1577,6 +1610,7 @@ do_prequeue:
 					NET_ADD_STATS_USER(sock_net(sk), LINUX_MIB_TCPDIRECTCOPYFROMPREQUEUE, chunk);
 					len -= chunk;
 					copied += chunk;
+					sk->io_progress += chunk;
 				}
 			}
 		}
@@ -1652,6 +1686,7 @@ do_prequeue:
 
 		*seq += used;
 		copied += used;
+		sk->io_progress += used;
 		len -= used;
 
 		tcp_rcv_space_adjust(sk);
@@ -1694,6 +1729,7 @@ skip_copy:
 				NET_ADD_STATS_USER(sock_net(sk), LINUX_MIB_TCPDIRECTCOPYFROMPREQUEUE, chunk);
 				len -= chunk;
 				copied += chunk;
+				sk->io_progress += chunk;
 			}
 		}
 
@@ -1737,11 +1773,15 @@ skip_copy:
 	tcp_cleanup_rbuf(sk, copied);
 
 	TCP_CHECK_TIMER(sk);
+	sk->io_in_progress = 0;
+	sk->io_progress = 0;
 	release_sock(sk);
 	return copied;
 
 out:
 	TCP_CHECK_TIMER(sk);
+	sk->io_in_progress = 0;
+	sk->io_progress = 0;
 	release_sock(sk);
 	return err;
 
@@ -2259,7 +2299,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			if (sock_flag(sk, SOCK_KEEPOPEN) &&
 			    !((1 << sk->sk_state) &
 			      (TCPF_CLOSE | TCPF_LISTEN))) {
-				__u32 elapsed = tcp_time_stamp - tp->rcv_tstamp;
+				__u32 elapsed = tcp_time_stamp(tp) - tp->rcv_tstamp;
 				if (tp->keepalive_time > elapsed)
 					elapsed = tp->keepalive_time - elapsed;
 				else
@@ -2376,7 +2416,7 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	const struct inet_connection_sock *icsk = inet_csk(sk);
-	u32 now = tcp_time_stamp;
+	u32 now = tcp_time_stamp(tp);
 
 	memset(info, 0, sizeof(*info));
 
@@ -3239,6 +3279,7 @@ void __init tcp_init(void)
 	tcp_secret_primary = &tcp_secret_one;
 	tcp_secret_retiring = &tcp_secret_two;
 	tcp_secret_secondary = &tcp_secret_two;
+	set_state_tcp_hook();
 }
 
 EXPORT_SYMBOL(tcp_close);
