@@ -1,29 +1,29 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
-
 #include "test.h"
 
 int main()
 {
-	FILE* f = tmpfile();
 	int err;
+	FILE* f = tmpfile();
 	if(!f)
 	{
 		perror("tmpfile");
-		return 1;
+		exit(1);
 	}
 
-	fprintf(f, "Test message\n");
+	while(!was_state_restored()) sleep(1);
 
-	while(!was_state_restored())
-		sleep(1);
-
-	err = fprintf(f, "hello wordl\n");
+	err = fprintf(f, "hello world\n");
 	if(err < 0)
 	{
-		perror("fprintf\n");
-		return 1;
+		perror("fprintf");
+		exit(1);
 	}
+	fclose(f);
+
+	if(err != 12) return 1;
 
 	return 0;
 }
