@@ -1079,6 +1079,18 @@ static void save_creds(struct task_struct* task, struct saved_task_struct* state
 	state->cap_bset = task->cap_bset;
 }
 
+static void check_status(struct task_struct* task)
+{
+	if(task->state == TASK_UNINTERRUPTIBLE)
+	{
+		sprint("Task uninterruptible\n");
+	}
+	else if (task->state == TASK_RUNNING && (task_pt_regs(task)->orig_ax < 0))
+	{
+		sprint("Task desheduled\n");
+	}
+}
+
 static struct saved_task_struct* save_process(struct task_struct* task, struct map_entry* head)
 {
 	struct vm_area_struct* area = NULL;
@@ -1092,6 +1104,8 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	INIT_LIST_HEAD(&current_task->next);
 	INIT_LIST_HEAD(&current_task->thread_group);
 	INIT_LIST_HEAD(&current_task->vm_areas);
+
+	check_status(task);
 
 	sprint( "Target task %s pid: %d will be saved at %p\n", task->comm, task->pid, current_task);
 	strcpy(current_task->name, task->comm);
