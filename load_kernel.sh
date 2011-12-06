@@ -3,7 +3,7 @@
 cd test
 {
     sleep 10
-    kexec -l /boot/vmlinuz-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state"
+    kexec -l /boot/vmlinuz-`uname -r` --append="root=/dev/sdb1 1 irqpoll maxcpus=4 reset_devices load_state"
     kexec -e
 } &
 
