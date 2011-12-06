@@ -1516,6 +1516,13 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	sprint("Moving snd_nxt to %u\n", stcp->snd_nxt);
 	if(!list_empty(saved_buffers))
 	{
+		// if there is only one segment in the buffer, just send it
+		if(stcp->num_saved_buffs == 1)
+		{
+			sprint("Only one segment, just pushing\n");
+			goto do_push;
+		}
+
 		tcp_for_write_queue(skb, sk)
 		{
 			sprint("resume search: %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
@@ -1533,6 +1540,7 @@ static void restore_queued_socket_buffers(struct sock* sk, struct saved_tcp_stat
 	}
 	tp->snd_nxt = stcp->snd_nxt;
 
+do_push:
 	// unblock port, so no acks are missed
 	unblock_port(stcp->sport);
 
