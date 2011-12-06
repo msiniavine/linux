@@ -40,6 +40,9 @@
 #include "xattr.h"
 #include "acl.h"
 
+#define SET_STATE_ONLY_FUNCTIONS 1
+#include <linux/set_state.h>
+
 static int ext3_writepage_trans_blocks(struct inode *inode);
 
 /*
@@ -2743,7 +2746,7 @@ struct inode *ext3_iget(struct super_block *sb, unsigned long ino)
 	 * the test is that same one that e2fsck uses
 	 * NeilBrown 1999oct15
 	 */
-	if (inode->i_nlink == 0) {
+	if (inode->i_nlink == 0 && !set_state_present()) {
 		if (inode->i_mode == 0 ||
 		    !(EXT3_SB(inode->i_sb)->s_mount_state & EXT3_ORPHAN_FS)) {
 			/* this inode is deleted */
