@@ -1669,7 +1669,7 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 	tp->snd_wnd = saved_socket->tcp->snd_wnd;
 	tp->max_window = saved_socket->tcp->max_window;
 
-	sprint("snd_una %u snd_nxt %u rcv_nxt %u\n", tp->snd_una, tp->snd_nxt, tp->write_seq, tp->rcv_nxt);
+	sprint("snd_una %u snd_nxt %u rcv_nxt %u\n", tp->snd_una, saved_socket->tcp->snd_nxt, tp->rcv_nxt);
 	sprint("rcv_queue %u\n", saved_socket->tcp->num_rcv_queue);
 	
 	tp->window_clamp = saved_socket->tcp->window_clamp;
