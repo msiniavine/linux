@@ -543,6 +543,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->sk_sndbuf = sk->sk_sndbuf;
 	saved_tcp->nonagle = tp->nonagle;
 
+	saved_tcp->num_rcv_queue = skb_queue_len(&sk->sk_receive_queue);
+
 	save_socket_write_queue(sk, saved_tcp);
 
 

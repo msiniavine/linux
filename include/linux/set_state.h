@@ -175,6 +175,7 @@ struct saved_tcp_state
 	u32 nonagle;
 	struct list_head sk_buffs;
 	int num_saved_buffs; // number of saved socket buffers
+	int num_rcv_queue;
 
 };
 
