@@ -25,7 +25,7 @@ void set_state_tcp_hook(void);
 void unregister_set_state_hook(void);
 void unblock_port(u16 port);
 
-#define STATE_DEBUG 1
+#define STATE_DEBUG 0
 #if STATE_DEBUG
 extern int debug_was_state_restored;
 #define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
