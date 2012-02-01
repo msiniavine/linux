@@ -19,13 +19,15 @@ void add_to_restored_list(struct task_struct*);
 int sock_attach_fd(struct socket *sock, struct file *file, int flags);
 struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 int set_state_present(void);
+int save_state(void);
+void save_running_processes(void);
 
 // TCP hook used to drop some incoming tcp packets until the state is restored
 void set_state_tcp_hook(void);
 void unregister_set_state_hook(void);
 void unblock_port(u16 port);
 
-#define STATE_DEBUG 0
+#define STATE_DEBUG 1
 #if STATE_DEBUG
 extern int debug_was_state_restored;
 #define sprint(format, ...) printk(KERN_EMERG format, ##__VA_ARGS__)
@@ -40,7 +42,7 @@ extern int debug_was_state_restored;
 
 #define tlprintf(format, ...) {		       \
 		struct task_struct* __tsk = current;		\
-		if(!strcmp("httpd", __tsk->comm))		\
+		if(!strcmp("test_loop", __tsk->comm))		\
 			printk(KERN_INFO format, ##__VA_ARGS__); }
 
 static void inline busy_wait(unsigned long timeout)

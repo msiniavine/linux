@@ -84,7 +84,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 		}
 		else
 		{
-			//sprint("Reserved pfn: %ld\n", page->pfn);
+//			sprint("Reserved pfn: %ld\n", page->pfn);
 		}
 	}
 
@@ -996,8 +996,8 @@ struct save_state_permission
 	struct save_state_permission* next;
 };
 
-static struct save_state_permission* save_permitted;
-static struct save_state_permission* state_restored; 
+static struct save_state_permission* save_permitted = NULL;
+static struct save_state_permission* state_restored = NULL; 
 
 static void save_signals(struct task_struct* task, struct saved_task_struct* state)
 {
@@ -1083,14 +1083,17 @@ static void save_creds(struct task_struct* task, struct saved_task_struct* state
 
 static void check_status(struct task_struct* task)
 {
-	if(task->state == TASK_UNINTERRUPTIBLE)
-	{
-		sprint("Task uninterruptible\n");
-	}
-	else if (task->state == TASK_RUNNING && (task_pt_regs(task)->orig_ax < 0))
-	{
-		sprint("Task desheduled\n");
-	}
+	/* if(task->state == TASK_UNINTERRUPTIBLE) */
+	/* { */
+	/* 	sprint("Task uninterruptible\n"); */
+	/* } */
+	/* else if (task->state == TASK_RUNNING && (task_pt_regs(task)->orig_ax < 0)) */
+	/* { */
+	/* 	sprint("Task desheduled\n"); */
+	/* } */
+
+//	sprint("%s %d state %d ax %d\n", task->comm, task->pid, task->state, task_pt_regs(task)->orig_ax);
+//	busy_wait(2);
 }
 
 static struct saved_task_struct* save_process(struct task_struct* task, struct map_entry* head)
@@ -1113,7 +1116,8 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	strcpy(current_task->name, task->comm);
 	
 	current_task->registers = *task_pt_regs(task);
-	savesegment(gs, current_task->gs);
+	current_task->gs = task->thread.gs;
+
 	memcpy(current_task->tls_array, task->thread.tls_array, GDT_ENTRY_TLS_ENTRIES*sizeof(struct desc_struct));
 	
 	mm = find_by_first(head, task->mm);
@@ -1199,7 +1203,7 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	
 }
 
-static void save_running_processes(void)
+void save_running_processes(void)
 {
 	struct saved_state* state;
 	struct task_struct* task;
@@ -1303,7 +1307,7 @@ static void prepare_shutdown(void)
 	machine_shutdown();
 }
 
-static int load_state = 0;
+//static int load_state = 0;
 static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x)
 {
 //	prepare_shutdown();
@@ -1318,22 +1322,22 @@ asmlinkage void sys_save_state(void)
 	print_saved_processes();
 }
 
-static int set_load_state(char* arg)
-{
-  load_state = 1;
-  return 0;
-}
+//static int set_load_state(char* arg)
+//{
+// load_state = 1;
+// return 0;
+//}
 
-__setup("load_state", set_load_state);
+//__setup("load_state", set_load_state);
 
-static __init void fr_init(void)
-{
-	save_permitted = NULL;
-	state_restored = NULL;
-	register_reboot_notifier(&fr_notifier);
-}
+//static __init void fr_init(void)
+//{
+//	save_permitted = NULL;
+//	state_restored = NULL;
+//	register_reboot_notifier(&fr_notifier);
+//}
 
-late_initcall(fr_init);
+//late_initcall(fr_init);
 
 
 asmlinkage int sys_enable_save_state(struct pt_regs regs)
@@ -1401,7 +1405,7 @@ asmlinkage int sys_was_state_restored(struct pt_regs regs)
 	}
 	else
 	{
-		sprint("State was not restored for process %d\n", task_pid_nr(current));
+//		sprint("State was not restored for process %d\n", task_pid_nr(current));
 	}
 	return ret;
 }

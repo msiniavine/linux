@@ -17,6 +17,10 @@
 #include <linux/resource.h>
 #include <linux/kernel.h>
 #include <linux/kexec.h>
+
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 #include <linux/workqueue.h>
 #include <linux/capability.h>
 #include <linux/device.h>
@@ -413,6 +417,14 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void __user
 			unlock_kernel();
 			return ret;
 		}
+
+	case 0xdeadbeef:   // Save state
+	{
+		int ret;
+		ret = save_state();
+		unlock_kernel();
+		return ret;
+	}
 #endif
 
 #ifdef CONFIG_HIBERNATION

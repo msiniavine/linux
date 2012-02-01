@@ -3013,6 +3013,7 @@ int do_set_state(struct state_info* info)
 
 		current_pid = task_pid(current);
 		sprint("Current pid count:%d\n", atomic_read(&current_pid->count));
+		sprint("Saved gs %x\n", state->gs);
 		
 		cpu = get_cpu();
 		current->thread.gs = state->gs;
@@ -3020,6 +3021,7 @@ int do_set_state(struct state_info* info)
 		load_TLS(&current->thread, cpu);
 		put_cpu();
 		loadsegment(gs, state->gs);
+		
 	       
 	
 		pid = alloc_orig_pid(state->pid, current->nsproxy->pid_ns);

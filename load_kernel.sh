@@ -3,8 +3,8 @@
 cd test
 {
     sleep 10
-    kexec -l /boot/vmlinuz-`uname -r` --append="root=/dev/sdb1 1 irqpoll maxcpus=4 reset_devices load_state"
-    kexec -e
+    kexec -l /boot/vmlinuz-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state"
+    ./save_state
 } &
 
 #sudo -u maxim /home/maxim/apache/bin/apachectl start
@@ -12,7 +12,9 @@ cd test
 
 #./launcher `pidof memcached`
 
-./launcher `pidof mysqld`
+#./launcher `pidof mysqld`
+
+./test_runner
 
 #kexec -l /boot/vmlinuz-`uname -r` --initrd=/boot/initrd.img-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state debug early_printk bootmem_debug"
 #kexec -l /boot/vmlinuz-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state debug early_printk"

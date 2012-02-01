@@ -38,6 +38,10 @@
 #include <asm/system.h>
 #include <asm/sections.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+#include <linux/stop_machine.h>
+
 /* Per cpu memory for storing cpu states in case of system crash. */
 note_buf_t* crash_notes;
 
@@ -1423,11 +1427,25 @@ static int __init crash_save_vmcoreinfo_init(void)
 
 module_init(crash_save_vmcoreinfo_init)
 
+static int kexec_set_state(void* unused)
+{
+	save_running_processes();
+	system_state = SYSTEM_RESTART;
+	device_shutdown();
+	sysdev_shutdown();
+	printk(KERN_EMERG "Starting new kernel\n");
+	machine_shutdown();
+
+	machine_kexec(kexec_image);
+
+	return 0;
+}
+
 /*
  * Move into place and start executing a preloaded standalone
  * executable.  If nothing was preloaded return an error.
  */
-int kernel_kexec(void)
+static int do_kernel_kexec(unsigned int flags)
 {
 	int error = 0;
 
@@ -1469,11 +1487,18 @@ int kernel_kexec(void)
 	} else
 #endif
 	{
-		kernel_restart_prepare(NULL);
-		printk(KERN_EMERG "Starting new kernel\n");
-		machine_shutdown();
-
-
+		if(flags == 0)
+		{
+			kernel_restart_prepare(NULL);
+			printk(KERN_EMERG "Starting new kernel\n");
+			machine_shutdown();
+		}
+		else if(flags == 0xdeadbeef)
+		{
+			blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
+			printk(KERN_EMERG "Saving state\n");
+			stop_machine(kexec_set_state, NULL, NULL);
+		}
 	}
 
 	machine_kexec(kexec_image);
@@ -1499,4 +1524,14 @@ int kernel_kexec(void)
  Unlock:
 	mutex_unlock(&kexec_mutex);
 	return error;
+}
+
+int kernel_kexec()
+{
+	return do_kernel_kexec(0);
+}
+
+int save_state()
+{
+	return do_kernel_kexec(0xdeadbeef);
 }
