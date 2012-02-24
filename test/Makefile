@@ -81,7 +81,7 @@ test_cli: test_cli.o syscalls.o
 	gcc -nostdlib -g test_cli.o syscalls.o -o test_cli
 test_sockserver: test_sockserver.o test.o
 test_sockload: test_sockload.o test.o
-test_fork: test_fork.o test.o clone.o
+test_fork: test_fork.o test.o
 test_tempfile: test_tempfile.o test.o
 test_bind: test_bind.o test.o
 test_unixserver: test_unixserver.o test.o
