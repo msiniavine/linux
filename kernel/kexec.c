@@ -1431,15 +1431,6 @@ static int kexec_set_state(void* unused)
 {
 	time_end_quiesence();
 	save_running_processes();
-	system_state = SYSTEM_RESTART;
-	printk(KERN_EMERG "Checkpoint done\n");
-	device_shutdown();
-	printk(KERN_EMERG "Device shutdown done\n");
-	sysdev_shutdown();
-	printk(KERN_EMERG "Starting new kernel\n");
-	machine_shutdown();
-
-	machine_kexec(kexec_image);
 
 	return 0;
 }
@@ -1502,6 +1493,15 @@ static int do_kernel_kexec(unsigned int flags)
 			printk(KERN_EMERG "Saving state\n");
 			time_start_quiesence();
 			stop_machine(kexec_set_state, NULL, NULL);
+
+			system_state = SYSTEM_RESTART;
+			printk(KERN_EMERG "Checkpoint done\n");
+			device_shutdown();
+			printk(KERN_EMERG "Device shutdown done\n");
+			sysdev_shutdown();
+			printk(KERN_EMERG "Starting new kernel\n");
+			machine_shutdown();
+			
 		}
 	}
 
