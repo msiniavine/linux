@@ -1429,6 +1429,7 @@ module_init(crash_save_vmcoreinfo_init)
 
 static int kexec_set_state(void* unused)
 {
+	time_end_quiesence();
 	save_running_processes();
 	system_state = SYSTEM_RESTART;
 	device_shutdown();
@@ -1497,6 +1498,7 @@ static int do_kernel_kexec(unsigned int flags)
 		{
 			blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
 			printk(KERN_EMERG "Saving state\n");
+			time_start_quiesence();
 			stop_machine(kexec_set_state, NULL, NULL);
 		}
 	}

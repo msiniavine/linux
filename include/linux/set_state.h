@@ -11,6 +11,7 @@ struct socket;
 
 unsigned long get_reserved_region(void);
 
+struct pt_regs;
 void print_regs(struct pt_regs* regs);
 int set_state(struct pt_regs* regs, struct saved_task_struct* state);
 int is_save_enabled(struct task_struct*);
@@ -21,6 +22,16 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 int set_state_present(void);
 int save_state(void);
 void save_running_processes(void);
+
+// timing specific functions
+void time_start_quiesence(void);
+void time_end_quiesence(void);
+void time_start_checkpoint(void);
+void time_end_checkpoint(void);
+void time_start_kernel_init(void);
+void time_end_kernel_init(void);
+void time_start_restore(void);
+void time_end_restore(void);
 
 // TCP hook used to drop some incoming tcp packets until the state is restored
 void set_state_tcp_hook(void);
@@ -58,6 +69,14 @@ struct map_entry* new_map(void);
 void delete_map(struct map_entry*);
 void insert_entry(struct map_entry* head, void* first, void* second);
 void* find_by_first(struct map_entry* head,  void* first);
+
+struct saved_state
+{
+	struct list_head processes;
+	unsigned long checkpoint_size;
+	struct timespec start_quiesence, end_quiesence, start_checkpoint, end_checkpoint;
+};
+
 
 #ifndef SET_STATE_ONLY_FUNCTIONS
 #define PATH_LENGTH 256
@@ -404,10 +423,6 @@ struct saved_task_struct
 };
 
 
-struct saved_state
-{
-	struct list_head processes;
-};
 
 struct global_state_info
 {

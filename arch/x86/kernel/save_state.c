@@ -31,12 +31,12 @@
 
 #include <linux/set_state.h>
 
-static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
-static struct notifier_block fr_notifier = {
-  .notifier_call = fr_reboot_notifier,
-    .next = NULL,
-    .priority=INT_MAX
-    };
+//static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
+/* static struct notifier_block fr_notifier = { */
+/*   .notifier_call = fr_reboot_notifier, */
+/*     .next = NULL, */
+/*     .priority=INT_MAX */
+/*     }; */
 
 unsigned long get_reserved_region(void)
 {
@@ -1208,26 +1208,14 @@ void save_running_processes(void)
 	struct saved_state* state;
 	struct task_struct* task;
 	struct map_entry* head;
+
+	time_start_checkpoint();
 	
 	read_lock(&tasklist_lock);
 	
 	head = new_map();
 	state = (struct saved_state*)alloc(sizeof(*state));
 	INIT_LIST_HEAD(&state->processes);
-
-	//sprint( "State is at: %p\n", state);
-	//sprint( "Processes are at: %p\n", state->processes);
-
-	for_each_process(task)
-	{
-		struct task_struct* thread;
-		sprint("pid %d group leader pid %d\n", task->pid, task->group_leader->pid);
-		list_for_each_entry_rcu(thread, &task->thread_group, thread_group)
-		{
-			sprint("thread tid %d\n", thread->pid);
-		}
-	}
-	
 	
 	sprint("head prev %p next %p\n", state->processes.prev, state->processes.next);
 	for_each_process(task)
@@ -1250,8 +1238,9 @@ void save_running_processes(void)
 			
 		}
 	}
-	
-	//sprint( "\n");
+	state->checkpoint_size = allocated;
+	time_end_checkpoint();
+	sprint("Checkpoint size %lu\n", state->checkpoint_size);
 	read_unlock(&tasklist_lock);
 }
 
@@ -1300,21 +1289,21 @@ static void print_saved_processes(void)
 	}
 }
 
-static void prepare_shutdown(void)
-{
-	device_shutdown();
-	sysdev_shutdown();
-	machine_shutdown();
-}
+/* static void prepare_shutdown(void) */
+/* { */
+/* 	device_shutdown(); */
+/* 	sysdev_shutdown(); */
+/* 	machine_shutdown(); */
+/* } */
 
 //static int load_state = 0;
-static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x)
-{
-//	prepare_shutdown();
-	save_running_processes();
-	sprint( "State saved\n");
-	return 0;
-}
+/* static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x) */
+/* { */
+/* //	prepare_shutdown(); */
+/* 	save_running_processes(); */
+/* 	sprint( "State saved\n"); */
+/* 	return 0; */
+/* } */
 
 asmlinkage void sys_save_state(void)
 {
@@ -1455,7 +1444,9 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	}
  
 	print_saved_processes();
+	time_start_restore();
 	ret = set_state(&regs, list_first_entry(&state->processes, struct saved_task_struct, next));
+	time_end_restore();
 	sprint( "set_state returned %d\n", ret);
 /*   if(ret == 0) */
 /*   { */
