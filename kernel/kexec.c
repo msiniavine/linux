@@ -1432,7 +1432,9 @@ static int kexec_set_state(void* unused)
 	time_end_quiesence();
 	save_running_processes();
 	system_state = SYSTEM_RESTART;
+	printk(KERN_EMERG "Checkpoint done\n");
 	device_shutdown();
+	printk(KERN_EMERG "Device shutdown done\n");
 	sysdev_shutdown();
 	printk(KERN_EMERG "Starting new kernel\n");
 	machine_shutdown();
