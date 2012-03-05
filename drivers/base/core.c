@@ -1511,16 +1511,29 @@ void device_shutdown(void)
 {
 	struct device *dev, *devn;
 
+	printk(KERN_EMERG "Device shutdown\n");
+
 	list_for_each_entry_safe_reverse(dev, devn, &devices_kset->list,
 				kobj.entry) {
+		printk(KERN_EMERG "Doing device %p\n", dev);
+		printk(KERN_EMERG "%s %s: save state shutting down\n", dev_driver_string(dev), dev_name(dev));
 		if (dev->bus && dev->bus->shutdown) {
 			dev_dbg(dev, "shutdown\n");
+			printk(KERN_EMERG "%s %s: %p - shutdown func\n", dev_driver_string(dev), dev_name(dev), dev->bus->shutdown);
 			dev->bus->shutdown(dev);
 		} else if (dev->driver && dev->driver->shutdown) {
 			dev_dbg(dev, "shutdown\n");
+			printk(KERN_EMERG "%s %s: %p - shutdown func\n", dev_driver_string(dev), dev_name(dev), dev->driver->shutdown);
 			dev->driver->shutdown(dev);
 		}
+		else
+		{
+			printk(KERN_EMERG "Shutdown was not called\n");
+		}
+
 	}
+
+	printk(KERN_EMERG "Finalizing device shutdown\n");
 	kobject_put(sysfs_dev_char_kobj);
 	kobject_put(sysfs_dev_block_kobj);
 	kobject_put(dev_kobj);
