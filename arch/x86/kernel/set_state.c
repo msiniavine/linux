@@ -2592,6 +2592,7 @@ static int alloc_pidmap_for_orig_pid(pid_t original_pid, struct pid_namespace *p
 				}
 				sprint("Could not find original pid\n");
 				sprint("Things will go wrong now\n");
+				panic("Could not allocate original pid\n");
 				offset = find_next_offset(map, offset);
 				pid = mk_pid(pid_ns, map, offset);
 			/*
@@ -2615,6 +2616,7 @@ static int alloc_pidmap_for_orig_pid(pid_t original_pid, struct pid_namespace *p
 		}
 		sprint("Could not find original pid\n");
 		sprint("Things will go wrong now\n");
+		panic("Could not get original pid\n");
 		pid = mk_pid(pid_ns, map, offset);
 	}
 	return -1;
