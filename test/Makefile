@@ -2,7 +2,7 @@ CFLAGS = -g -Wall -fno-stack-protector
 #LDFLAGS = -lpthread
 
 
-all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait test_my_mutex test_condvar test_pipe1 test_pipe2 test_terminal launcher test_runner test_cli_full test_cli test_serv state_present test_sockserver test_sockload test_fork test_tempfile test_bind test_unixserver test_unixclient
+all: test_simple_fork test_stack test_sleep test_pid test_sighandler test_sighandler_call test_pending_signals test_restore_signal test_altstack test_sigsuspend test_loop run_test set_state test_parent_child save_state test_thread test_wait test_my_mutex test_condvar test_pipe1 test_pipe2 test_terminal launcher test_runner test_cli_full test_cli test_serv state_present test_sockserver test_sockload test_fork test_tempfile test_bind test_unixserver test_unixclient test_mmap
 
 syscalls.o: syscalls.S
 	as syscalls.S -o syscalls.o
@@ -86,6 +86,7 @@ test_tempfile: test_tempfile.o test.o
 test_bind: test_bind.o test.o
 test_unixserver: test_unixserver.o test.o
 test_unixclient: test_unixclient.o
+test_mmap: test_mmap.o test.o
 #	gcc -static -o test_fork test_fork.o test.o #-lpthread
 
 #file_test.o: file_test.c
@@ -96,6 +97,7 @@ test_unixclient: test_unixclient.o
 
 clean:
 	-rm *.o
+	-rm test_mmap
 	-rm test_unixserver
 	-rm test_unixclient
 	-rm test_bind
