@@ -2226,6 +2226,8 @@ static int sched_balance_self(int cpu, int flag)
  *
  * returns failure only if the task is already active.
  */
+
+int wake_up_disabled = 0;
 static int try_to_wake_up(struct task_struct *p, unsigned int state, int sync)
 {
 	int cpu, orig_cpu, this_cpu, success = 0;
@@ -2256,6 +2258,8 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state, int sync)
 	rq = task_rq_lock(p, &flags);
 	old_state = p->state;
 	if (!(old_state & state))
+		goto out;
+	if(wake_up_disabled && old_state == TASK_INTERRUPTIBLE)
 		goto out;
 
 	if (p->se.on_rq)

@@ -1427,6 +1427,7 @@ static int __init crash_save_vmcoreinfo_init(void)
 
 module_init(crash_save_vmcoreinfo_init)
 
+extern int wake_up_disabled;
 static int kexec_set_state(void* unused)
 {
 	int ready = is_ready_to_save();
@@ -1438,6 +1439,8 @@ static int kexec_set_state(void* unused)
 
 	time_end_quiesence();
 	save_running_processes();
+
+	wake_up_disabled = 1;
 
 	return ready;
 }
