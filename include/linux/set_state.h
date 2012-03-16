@@ -22,6 +22,9 @@ struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 int set_state_present(void);
 int save_state(void);
 void save_running_processes(void);
+int is_ready_to_save(void);
+void install_syscall_blocker(void);
+void activate_syscall_blocker(void);
 
 // timing specific functions
 void time_start_quiesence(void);

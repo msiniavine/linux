@@ -28,6 +28,8 @@
 #include <linux/socket.h>
 #include <linux/un.h>
 #include <net/af_unix.h>
+#include <linux/kprobes.h>
+#include <linux/kallsyms.h>
 
 #include <linux/set_state.h>
 
@@ -1081,20 +1083,6 @@ static void save_creds(struct task_struct* task, struct saved_task_struct* state
 	state->cap_bset = task->cap_bset;
 }
 
-static void check_status(struct task_struct* task)
-{
-	/* if(task->state == TASK_UNINTERRUPTIBLE) */
-	/* { */
-	/* 	sprint("Task uninterruptible\n"); */
-	/* } */
-	/* else if (task->state == TASK_RUNNING && (task_pt_regs(task)->orig_ax < 0)) */
-	/* { */
-	/* 	sprint("Task desheduled\n"); */
-	/* } */
-
-//	sprint("%s %d state %d ax %d\n", task->comm, task->pid, task->state, task_pt_regs(task)->orig_ax);
-//	busy_wait(2);
-}
 
 static struct saved_task_struct* save_process(struct task_struct* task, struct map_entry* head)
 {
@@ -1110,7 +1098,6 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	INIT_LIST_HEAD(&current_task->thread_group);
 	INIT_LIST_HEAD(&current_task->vm_areas);
 
-	check_status(task);
 
 	sprint( "Target task %s pid: %d will be saved at %p\n", task->comm, task->pid, current_task);
 	strcpy(current_task->name, task->comm);
@@ -1244,6 +1231,139 @@ void save_running_processes(void)
 	read_unlock(&tasklist_lock);
 }
 
+static char* task_states(int state)
+{
+	static char* states[] = {"Running", "Interruptible", "Uninterruptible", "Other"};
+	switch(state)
+	{
+	case TASK_RUNNING:
+	case TASK_INTERRUPTIBLE:
+	case TASK_UNINTERRUPTIBLE:
+		return states[state];
+		break;
+	default:
+		return states[3]; // other
+		break;
+	}
+}
+
+static int is_bad_task(struct task_struct* task)
+{
+	if(task->state == TASK_INTERRUPTIBLE) return 0;
+	if(task->state == TASK_UNINTERRUPTIBLE)
+	{
+		sprint("%s[%d] uninterruptible, need to wait\n", task->comm, task->pid);
+		return 1;
+	}
+
+	if(task->state == TASK_RUNNING)
+	{
+		struct pt_regs* regs = task_pt_regs(task);
+		// exceptions
+		if(!strcmp(task->comm, "kstop/0")) return 0;
+		if(!strcmp(task->comm, "save_state")) return 0;
+		if(regs->orig_ax == -240) return 0; 
+		sprint("%s[%d] running orig_ax %ld, pt_ip %p ts_ip %p\n", task->comm, task->pid, regs->orig_ax, (void*)regs->ip, (void*)task->thread.ip);
+		return 1;
+	}
+
+	return 0;
+
+}
+
+int is_ready_to_save(void)
+{
+	int ready = 1;
+	struct task_struct* task;
+
+	read_lock(&tasklist_lock);
+	for_each_process(task)
+	{
+		struct task_struct* thread;
+		if(is_bad_task(task))
+		{
+			ready = 0;
+			goto out;
+		}
+	     
+		list_for_each_entry(thread, &task->thread_group, thread_group)
+		{
+			if(is_bad_task(thread))
+			{
+				ready = 0;
+				goto out;
+			}
+		}
+	}
+
+out:
+	read_unlock(&tasklist_lock);
+	return ready;
+}
+
+static unsigned long* sys_call_table = (unsigned long*)0xc03776b0;
+
+static struct kprobe int80;
+static struct kprobe sysenter;
+static int activated = 0;
+
+static int redirected_syscall(void)
+{
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule();
+	return -EINVAL;
+}
+
+static int block_handler(struct kprobe* p, struct pt_regs* regs)
+{
+	struct pt_regs* r = task_pt_regs(current);
+	if(!activated) return 0;
+	sys_call_table[r->ax] = (unsigned long)redirected_syscall;
+	return 0;
+}
+
+void set_address_writable(unsigned long addr)
+{
+	unsigned int level;
+	pte_t* pte = lookup_address(addr, &level);
+	if(pte->pte &~_PAGE_RW) pte->pte |= _PAGE_RW;
+}
+
+void activate_syscall_blocker()
+{
+	activated = 1;
+}
+
+void install_syscall_blocker(void)
+{
+	unsigned long probe_address = 0;
+
+	memset(&int80, 0, sizeof(int80));
+	memset(&sysenter, 0, sizeof(sysenter));
+
+	set_address_writable((unsigned long)sys_call_table);
+
+	int80.pre_handler = sysenter.pre_handler = block_handler;
+
+	probe_address = kallsyms_lookup_name("ia32_sysenter_target");
+	if(probe_address == 0)
+	{
+		sprint("Could not get sysenter address\n");
+	}
+	probe_address += 0x6a;  // add offset to the call instruction
+	sysenter.addr = (kprobe_opcode_t*)probe_address;
+	register_kprobe(&sysenter);
+
+	probe_address = kallsyms_lookup_name("system_call");
+	if(probe_address == 0)
+	{
+		sprint("Could not get system call address\n");
+	}
+	probe_address += 0x3b; // add offset for int 0x80 system call
+	int80.addr = (kprobe_opcode_t*)probe_address;
+	register_kprobe(&int80);
+}
+
 static void print_saved_process(struct saved_task_struct* task)
 {
 	struct shared_resource* elem;
@@ -1375,7 +1495,7 @@ int was_state_restored(struct task_struct* task)
 //	sprint("Checking restore state for %d\n", task_pid_nr(task));
 	for(;cur!=NULL;cur=cur->next)
 	{
-		if(cur->pid == pid_vnr(task_pid(task))) 
+		if(cur->pid == task->pid) 
 		{
 //			sprint("State was restored for process %d\n", task_pid_nr(task));
 			return 1;

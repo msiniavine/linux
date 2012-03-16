@@ -1429,10 +1429,17 @@ module_init(crash_save_vmcoreinfo_init)
 
 static int kexec_set_state(void* unused)
 {
+	int ready = is_ready_to_save();
+	if(!ready)
+	{
+		activate_syscall_blocker();
+		return ready;
+	}
+
 	time_end_quiesence();
 	save_running_processes();
 
-	return 0;
+	return ready;
 }
 
 /*
@@ -1489,17 +1496,32 @@ static int do_kernel_kexec(unsigned int flags)
 		}
 		else if(flags == 0xdeadbeef)
 		{
+			int ready = 0;
+			int count = 0;
 			blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
 			printk(KERN_EMERG "Saving state\n");
 			time_start_quiesence();
-			stop_machine(kexec_set_state, NULL, NULL);
-
+			install_syscall_blocker();
+			while(!ready)
+			{
+				ready = stop_machine(kexec_set_state, NULL, NULL);
+				if(ready)
+				{
+					sprint("Done! Count %d\n", count);
+					break;
+				}
+				count ++;
+				if(count > 1000)
+				{
+					break;
+				}
+				set_current_state(TASK_INTERRUPTIBLE);
+				schedule_timeout(5);
+			}
+				
 			system_state = SYSTEM_RESTART;
-			printk(KERN_EMERG "Checkpoint done\n");
 			device_shutdown();
-			printk(KERN_EMERG "Device shutdown done\n");
 			sysdev_shutdown();
-			printk(KERN_EMERG "Starting new kernel\n");
 			machine_shutdown();
 			
 		}
