@@ -1428,21 +1428,81 @@ static int __init crash_save_vmcoreinfo_init(void)
 module_init(crash_save_vmcoreinfo_init)
 
 extern int wake_up_disabled;
-static int kexec_set_state(void* unused)
+static int check_user_quiescence(void* unused)
 {
-	int ready = is_ready_to_save();
+	int ready = are_user_tasks_ready();
 	if(!ready)
 	{
 		activate_syscall_blocker();
 		return ready;
 	}
 
-	time_end_quiesence();
-	save_running_processes();
-
 	wake_up_disabled = 1;
 
 	return ready;
+}
+
+static int check_all_quiescence(void* unused)
+{
+	if( are_all_tasks_ready())
+	{
+		save_running_processes();
+		return 1;
+	}
+	return 0;
+	
+}
+
+static void stop_user_tasks(void)
+{
+	int ready = 0;
+	int count = 0;
+	install_syscall_blocker();
+	while(!ready)
+	{
+		ready = stop_machine(check_user_quiescence, NULL, NULL);
+		if(ready)
+		{
+			sprint("Done! Count %d\n", count);
+			break;
+		}
+		count ++;
+		if(count > 1000)
+		{
+			break;
+		}
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(5);
+	}
+
+	if(!ready)
+		panic("Failed to stop user tasks\n");
+}
+
+static void take_checkpoint(void)
+{
+	int ready = 0;
+	int count = 0;
+	while(!ready)
+	{
+		ready = stop_machine(check_all_quiescence, NULL, NULL);
+		if(ready)
+		{
+			sprint("Done! Count %d\n", count);
+			break;
+		}
+		count ++;
+		if(count > 1000)
+		{
+			break;
+		}
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(5);
+	}
+
+	if(!ready)
+		panic("Failed to take the checkpoint\n");
+
 }
 
 /*
@@ -1499,32 +1559,20 @@ static int do_kernel_kexec(unsigned int flags)
 		}
 		else if(flags == 0xdeadbeef)
 		{
-			int ready = 0;
-			int count = 0;
+		
 			blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
 			printk(KERN_EMERG "Saving state\n");
 			time_start_quiesence();
-			install_syscall_blocker();
-			while(!ready)
-			{
-				ready = stop_machine(kexec_set_state, NULL, NULL);
-				if(ready)
-				{
-					sprint("Done! Count %d\n", count);
-					break;
-				}
-				count ++;
-				if(count > 1000)
-				{
-					break;
-				}
-				set_current_state(TASK_INTERRUPTIBLE);
-				schedule_timeout(5);
-			}
-				
+
+			stop_user_tasks();
+			sprint("Shutting down devices\n");	
 			system_state = SYSTEM_RESTART;
+			emergency_sync();
 			device_shutdown();
 			sysdev_shutdown();
+
+			sprint("Taking checkpoint\n");
+			take_checkpoint();
 			machine_shutdown();
 			
 		}

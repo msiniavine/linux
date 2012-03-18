@@ -1247,11 +1247,13 @@ static char* task_states(int state)
 	}
 }
 
-static int is_bad_task(struct task_struct* task)
+static int is_bad_task(struct task_struct* task, int skip_kernel_threads)
 {
 	if(task->state == TASK_INTERRUPTIBLE) return 0;
+	if(skip_kernel_threads && (task->flags & PF_KTHREAD)) return 0;
 	if(task->state == TASK_UNINTERRUPTIBLE)
 	{
+		if(!strcmp("save_state", task->comm)) return 0;
 		sprint("%s[%d] uninterruptible, need to wait\n", task->comm, task->pid);
 		return 1;
 	}
@@ -1261,6 +1263,9 @@ static int is_bad_task(struct task_struct* task)
 		struct pt_regs* regs = task_pt_regs(task);
 		// exceptions
 		if(!strcmp(task->comm, "kstop/0")) return 0;
+		if(!strcmp(task->comm, "kstop/1")) return 0;
+		if(!strcmp(task->comm, "kstop/1")) return 0;
+		if(!strcmp(task->comm, "kstop/1")) return 0;
 		if(!strcmp(task->comm, "save_state")) return 0;
 		if(regs->orig_ax == -240) return 0; 
 		sprint("%s[%d] running orig_ax %ld, pt_ip %p ts_ip %p\n", task->comm, task->pid, regs->orig_ax, (void*)regs->ip, (void*)task->thread.ip);
@@ -1271,7 +1276,7 @@ static int is_bad_task(struct task_struct* task)
 
 }
 
-int is_ready_to_save(void)
+static int check_if_tasks_are_ready(int skip_kernel_threads)
 {
 	int ready = 1;
 	struct task_struct* task;
@@ -1280,7 +1285,7 @@ int is_ready_to_save(void)
 	for_each_process(task)
 	{
 		struct task_struct* thread;
-		if(is_bad_task(task))
+		if(is_bad_task(task, skip_kernel_threads))
 		{
 			ready = 0;
 			goto out;
@@ -1288,7 +1293,7 @@ int is_ready_to_save(void)
 	     
 		list_for_each_entry(thread, &task->thread_group, thread_group)
 		{
-			if(is_bad_task(thread))
+			if(is_bad_task(thread, skip_kernel_threads))
 			{
 				ready = 0;
 				goto out;
@@ -1299,6 +1304,16 @@ int is_ready_to_save(void)
 out:
 	read_unlock(&tasklist_lock);
 	return ready;
+}
+
+int are_user_tasks_ready(void)
+{
+	return check_if_tasks_are_ready(1);
+}
+
+int are_all_tasks_ready(void)
+{
+	return check_if_tasks_are_ready(0);
 }
 
 static unsigned long* sys_call_table = (unsigned long*)0xc03776b0;
