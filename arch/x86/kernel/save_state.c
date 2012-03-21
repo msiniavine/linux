@@ -1264,8 +1264,8 @@ static int is_bad_task(struct task_struct* task, int skip_kernel_threads)
 		// exceptions
 		if(!strcmp(task->comm, "kstop/0")) return 0;
 		if(!strcmp(task->comm, "kstop/1")) return 0;
-		if(!strcmp(task->comm, "kstop/1")) return 0;
-		if(!strcmp(task->comm, "kstop/1")) return 0;
+		if(!strcmp(task->comm, "kstop/2")) return 0;
+		if(!strcmp(task->comm, "kstop/3")) return 0;
 		if(!strcmp(task->comm, "save_state")) return 0;
 		if(regs->orig_ax == -240) return 0; 
 		sprint("%s[%d] running orig_ax %ld, pt_ip %p ts_ip %p\n", task->comm, task->pid, regs->orig_ax, (void*)regs->ip, (void*)task->thread.ip);

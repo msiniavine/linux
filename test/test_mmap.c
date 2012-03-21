@@ -31,9 +31,16 @@ void touch_memory(void* addr, size_t size)
 
 void do_sleep()
 {
-	struct timespec time = {3, 0};
+	struct timespec time = {1, 0};
 	nanosleep(&time, NULL);
 
+}
+
+int sleep_time = 3;
+void do_variable_sleep()
+{
+	struct timespec time = {2, 0};
+	nanosleep(&time, NULL);
 }
 
 void fork_children(int fork_count)
@@ -53,6 +60,7 @@ void fork_children(int fork_count)
 		{
 			// child, so will continue to fork more children
 			current_count -= 1;
+			sleep_time += 1; // sleep less, so that the last child exits last
 		}
 		else
 		{
@@ -94,5 +102,6 @@ int main(int argc, char** argv)
 	}
 
 	touch_memory(mem, MMAP_SIZE);
+	do_variable_sleep();
 	return 0;
 }

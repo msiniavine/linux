@@ -2811,9 +2811,7 @@ void asm_resume_saved_state(void* correct_stack);
 
 void resume_saved_state(void)
 {
-	sprint("Current thread info: %p\n", current_thread_info());
-	sprint("pt_regs: %p, stack: %p\n", task_pt_regs(current), task_stack_page(current));
-	sprint("Switching to user space\n");
+	sprint("Switching to user space %s %d\n", current->comm, current->exit_signal);
 	asm_resume_saved_state(task_pt_regs(current));
 }
 
@@ -2894,6 +2892,22 @@ int count_processes(struct saved_task_struct* state)
 	return count;
 }
 
+static void reparent_to_init(struct task_struct* task)
+{
+	struct task_struct* init;
+	write_lock_irq(&tasklist_lock);
+
+	init = pid_task(find_vpid(1), PIDTYPE_PID); 
+
+	if(!init)
+		panic("Could not find init\n");
+
+	task->real_parent = task->parent=init;
+	list_move_tail(&task->sibling, &task->real_parent->children);
+
+	write_unlock_irq(&tasklist_lock);
+}
+
 
 int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
@@ -2938,6 +2952,8 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 		sprint("Failed to create a thread\n");
 		return 0;
 	}
+
+	reparent_to_init(thread);
 
  	wake_up_process(thread);
 	sprint("parent waiting for children\n");
