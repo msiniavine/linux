@@ -53,10 +53,6 @@
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
 
-//#include <linux/set_state.h>
-
-#define waitdb(tsk, format, ...) if(tsk != NULL && !strcmp(tsk->comm, "test_mmap")) printk(KERN_EMERG "[%d] " format, tsk->pid, ##__VA_ARGS__)
-
 static void exit_mm(struct task_struct * tsk);
 
 static inline int task_detached(struct task_struct *p)
@@ -167,7 +163,6 @@ void release_task(struct task_struct * p)
 	struct task_struct *leader;
 	int zap_leader;
 repeat:
-	if(!strcmp("test_mmap", p->comm)) printk(KERN_EMERG "Releasing %d\n", p->pid);
 	tracehook_prepare_release_task(p);
 	atomic_dec(&p->user->processes);
 	proc_flush_task(p);
@@ -310,7 +305,6 @@ kill_orphaned_pgrp(struct task_struct *tsk, struct task_struct *parent)
 	    task_session(parent) == task_session(tsk) &&
 	    will_become_orphaned_pgrp(pgrp, ignored_task) &&
 	    has_stopped_jobs(pgrp)) {
-		waitdb(parent, "Sending SIGHUP and SIGCONT\n");
 		__kill_pgrp_info(SIGHUP, SEND_SIG_PRIV, pgrp);
 		__kill_pgrp_info(SIGCONT, SEND_SIG_PRIV, pgrp);
 	}
@@ -825,10 +819,7 @@ static void reparent_thread(struct task_struct *p, struct task_struct *father)
 	 * notify anyone anything has happened.
 	 */
 	if (same_thread_group(p->real_parent, father))
-	{
-		waitdb(father, "Same thread group\n");
 		return;
-	}
 
 	/* We don't want people slaying init.  */
 	if (!task_detached(p))
@@ -840,10 +831,7 @@ static void reparent_thread(struct task_struct *p, struct task_struct *father)
 	if (!ptrace_reparented(p) &&
 	    p->exit_state == EXIT_ZOMBIE &&
 	    !task_detached(p) && thread_group_empty(p))
-	{
-		waitdb(father, "do_notify parent\n");
 		do_notify_parent(p, p->exit_signal);
-	}
 
 	kill_orphaned_pgrp(p, father);
 }
@@ -899,10 +887,7 @@ static void forget_original_parent(struct task_struct *father)
 	 */
 	ptrace_exit(father, &ptrace_dead);
 
-	waitdb(father, "%d Found new father %s %d\n", father->pid, reaper->comm, reaper->pid);
-
 	list_for_each_entry_safe(p, n, &father->children, sibling) {
-		waitdb(father, "Reparenting child %s %d\n", p->comm, p->pid);
 		p->real_parent = reaper;
 		if (p->parent == father) {
 			BUG_ON(p->ptrace);
@@ -926,7 +911,6 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
 	int signal;
 	void *cookie;
 
-	waitdb(tsk, "%d exit_notify\n", tsk->pid);
 	/*
 	 * This does two things:
 	 *
@@ -964,22 +948,15 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
 
 	signal = tracehook_notify_death(tsk, &cookie, group_dead);
 	if (signal >= 0)
-	{
-		waitdb(tsk, "Notify parent %s %d\n", tsk->real_parent->comm, tsk->real_parent->pid);
 		signal = do_notify_parent(tsk, signal);
-	}
 
 	tsk->exit_state = signal == DEATH_REAP ? EXIT_DEAD : EXIT_ZOMBIE;
-	waitdb(tsk, "Setting exit state to %d %s\n", tsk->exit_state, tsk->exit_state == EXIT_DEAD ? "DEAD" : "ZOMBIE");
 
 	/* mt-exec, de_thread() is waiting for us */
 	if (thread_group_leader(tsk) &&
 	    tsk->signal->group_exit_task &&
 	    tsk->signal->notify_count < 0)
-	{
-		waitdb(tsk, "Wake up group exit task\n");
 		wake_up_process(tsk->signal->group_exit_task);
-	}
 
 	write_unlock_irq(&tasklist_lock);
 
@@ -987,10 +964,7 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
 
 	/* If the process is dead, release it - nobody will wait for it */
 	if (signal == DEATH_REAP)
-	{
-		waitdb(tsk, "Releasing task\n");
 		release_task(tsk);
-	}
 }
 
 #ifdef CONFIG_DEBUG_STACK_USAGE
@@ -1232,10 +1206,7 @@ static int eligible_child(enum pid_type type, struct pid *pid, int options,
 
 	if (type < PIDTYPE_MAX) {
 		if (task_pid_type(p, type) != pid)
-		{
-//			waitdb("pidtype rejected\n");
 			return 0;
-		}
 	}
 
 	/* Wait for all children (clone and not) if __WALL is set;
@@ -1245,19 +1216,12 @@ static int eligible_child(enum pid_type type, struct pid *pid, int options,
 	 * using a signal other than SIGCHLD.) */
 	if (((p->exit_signal != SIGCHLD) ^ ((options & __WCLONE) != 0))
 	    && !(options & __WALL))
-	{
-//		waitdb("exit_signal rejected\n");
 		return 0;
-	}
 
 	err = security_task_wait(p);
 	if (err)
-	{
-//		waitdb("Security error %d\n", err);
 		return err;
-	}
 
-//	waitdb("eligible\n");
 	return 1;
 }
 
@@ -1607,7 +1571,6 @@ static int wait_consider_task(struct task_struct *parent, int ptrace,
 	if (!ret)
 		return ret;
 
-//	waitdb("Eligible returned %d\n", ret);
 	if (unlikely(ret < 0)) {
 		/*
 		 * If we have not yet seen any eligible child,
@@ -1625,25 +1588,18 @@ static int wait_consider_task(struct task_struct *parent, int ptrace,
 		 * This child is hidden by ptrace.
 		 * We aren't allowed to see it now, but eventually we will.
 		 */
-//		waitdb("hidden by ptrace\n");
 		*notask_error = 0;
 		return 0;
 	}
 
 	if (p->exit_state == EXIT_DEAD)
-	{
-//		waitdb("it is dead\n");
 		return 0;
-	}
 
 	/*
 	 * We don't reap group leaders with subthreads.
 	 */
 	if (p->exit_state == EXIT_ZOMBIE && !delay_group_leader(p))
-	{
-//		waitdb("it is zombie\n");
 		return wait_task_zombie(p, options, infop, stat_addr, ru);
-	}
 
 	/*
 	 * It's stopped or running now, so it might
@@ -1652,13 +1608,9 @@ static int wait_consider_task(struct task_struct *parent, int ptrace,
 	*notask_error = 0;
 
 	if (task_is_stopped_or_traced(p))
-	{
-//		waitdb("it is stopped or traced\n");
 		return wait_task_stopped(ptrace, p, options,
 					 infop, stat_addr, ru);
-	}
 
-//	waitdb("it continued\n");
 	return wait_task_continued(p, options, infop, stat_addr, ru);
 }
 
@@ -1683,19 +1635,14 @@ static int do_wait_thread(struct task_struct *tsk, int *notask_error,
 		 * Do not consider detached threads.
 		 */
 		if (!task_detached(p)) {
-			int ret;
-//			waitdb("considering %s[%d]\n", p->comm, p->pid);
-			ret = wait_consider_task(tsk, 0, p, notask_error,
+			int ret = wait_consider_task(tsk, 0, p, notask_error,
 						     type, pid, options,
 						     infop, stat_addr, ru);
 			if (ret)
-			{
-//				waitdb("Done wait %d\n", ret);
 				return ret;
-			}
 		}
 	}
-//	waitdb("Done looking through children\n");
+
 	return 0;
 }
 
@@ -1741,9 +1688,7 @@ repeat:
 	 */
 	retval = -ECHILD;
 	if ((type < PIDTYPE_MAX) && (!pid || hlist_empty(&pid->tasks[type])))
-	{
 		goto end;
-	}
 
 	current->state = TASK_INTERRUPTIBLE;
 	read_lock(&tasklist_lock);
@@ -1856,12 +1801,9 @@ asmlinkage long sys_wait4(pid_t upid, int __user *stat_addr,
 	enum pid_type type;
 	long ret;
 
-
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
-	{
 		return -EINVAL;
-	}
 
 	if (upid == -1)
 		type = PIDTYPE_MAX;
