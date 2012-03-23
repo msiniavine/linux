@@ -30,6 +30,7 @@
 #include <net/af_unix.h>
 #include <linux/kprobes.h>
 #include <linux/kallsyms.h>
+#include <linux/hash.h>
 
 #include <linux/set_state.h>
 
@@ -873,6 +874,81 @@ static void save_fs(struct fs_struct* fs, struct saved_task_struct* task, struct
 	
 }
 
+#define TMP_FILE_MAP_SIZE 64
+#define TMP_FILE_MAP_BITS 6
+struct tmp_file_chain
+{
+	struct hlist_node chain;
+	struct file* file;
+};
+static struct hlist_head tmp_file_map[TMP_FILE_MAP_SIZE];
+static int saving_temp_files = 0;
+
+void hardlink_temp_file(const char* name, unsigned long ino);
+
+static void save_temp_files(struct task_struct* task)
+{
+	unsigned int fd;
+	struct fdtable* fdt;
+	char name[PATH_LENGTH];
+	struct task_struct* child;
+	
+//	spin_lock(&task->files->file_lock);
+	fdt = files_fdtable(task->files);
+
+	for(fd=0; fd<fdt->max_fds; fd++)
+	{
+		struct tmp_file_chain* chain;
+		struct file* f = fcheck_files(task->files, fd);
+
+		if(f == NULL)
+			continue;
+
+		if(f->f_dentry->d_inode->i_nlink != 0) continue;
+
+		get_path_absolute(f, name);
+		hardlink_temp_file(name, f->f_dentry->d_inode->i_ino);
+
+		chain = kmalloc(sizeof(*chain), GFP_KERNEL);
+		INIT_HLIST_NODE(&chain->chain);
+		chain->file = f;
+		
+		hlist_add_head(&chain->chain, &tmp_file_map[hash_ptr(f, TMP_FILE_MAP_BITS)]);
+	}
+
+//	spin_unlock(&task->files->file_lock);
+
+	list_for_each_entry(child, &task->children, sibling)
+	{
+		save_temp_files(child);
+	}
+}
+
+void hardlink_temp_files(void)
+{
+	struct task_struct* task;
+	int i;
+
+	for(i=0; i<TMP_FILE_MAP_SIZE; i++)
+	{
+		INIT_HLIST_HEAD(&tmp_file_map[i]);
+	}
+	saving_temp_files = 1;
+	
+	read_lock(&tasklist_lock);
+
+	for_each_process(task)
+	{
+		if(!is_save_enabled(task)) continue;
+
+		save_temp_files(task);
+
+	}
+
+	read_unlock(&tasklist_lock);
+}
+
+
 int save_state_mutex_debug = 0;
 int do_path_lookup(int dfd, const char *name,
 		   unsigned int flags, struct nameidata *nd);
@@ -910,6 +986,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);
 		struct shared_resource* file_res;
+		struct tmp_file_chain* chain;
+		struct hlist_node* pos;
 
 //		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
 
@@ -936,9 +1014,13 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		file->count = file_count(f);
 		file->ino = f->f_dentry->d_inode->i_ino;
 		sprint("link count %d\n", f->f_dentry->d_inode->i_nlink);
-		if(f->f_dentry->d_inode->i_nlink == 0)
+
+		hlist_for_each_entry(chain, pos, &tmp_file_map[hash_ptr(f, TMP_FILE_MAP_BITS)], chain)
 		{
-			file->temporary = 1;
+			if(chain->file == f)
+			{
+				file->temporary = 1;
+			}
 		}
 		
 		if(f->f_mode & FMODE_READ)
@@ -1230,6 +1312,7 @@ void save_running_processes(void)
 	sprint("Checkpoint size %lu\n", state->checkpoint_size);
 	read_unlock(&tasklist_lock);
 }
+
 
 static char* task_states(int state)
 {
@@ -1538,7 +1621,7 @@ int set_state_present()
 {
 	struct saved_state* state;
 	state = (struct saved_state*)get_reserved_region();
-	return !list_empty(&state->processes);
+	return !list_empty(&state->processes) || saving_temp_files;
 }
 
 void test_restore_sockets(void);

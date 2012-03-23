@@ -9,18 +9,18 @@
 #include "test.h"
 
 char* tests[] = {
-	"test_loop",
-	"test_altstack",
-	"test_bind",
-	"test_pending_signals",
-	"test_pid",
-	"test_restore_signal",
-	"test_sighandler",
-	"test_sighandler_call",
-	"test_sigsuspend",
-	"test_stack",
-	"test_wait",
-	"test_fork",
+	/* "test_loop", */
+	/* "test_altstack", */
+	/* "test_bind", */
+	/* "test_pending_signals", */
+	/* "test_pid", */
+	/* "test_restore_signal", */
+	/* "test_sighandler", */
+	/* "test_sighandler_call", */
+	/* "test_sigsuspend", */
+	/* "test_stack", */
+	/* "test_wait", */
+	/* "test_fork", */
 	"test_tempfile",
 	NULL
 };

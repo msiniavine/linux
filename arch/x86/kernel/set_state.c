@@ -1026,7 +1026,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 #include <linux/ext3_fs.h>
 
 struct inode *ext3_iget(struct super_block *sb, unsigned long ino);
-static void restore_temp_file(struct saved_file* file)
+void hardlink_temp_file(const char* name, unsigned long ino)
 {
 	struct nameidata nd;
 	int err;
@@ -1035,8 +1035,8 @@ static void restore_temp_file(struct saved_file* file)
 	struct super_block *sb;
 	struct inode* inode;
 
-	sprint("Hardlinking to %s\n", file->name);
-	err = path_lookup(file->name, LOOKUP_PARENT, &nd);
+	sprint("Hardlinking to %s\n", name);
+	err = path_lookup(name, LOOKUP_PARENT, &nd);
 	if(err)
 		panic("Failed to lookup path for new file");
 
@@ -1056,11 +1056,11 @@ static void restore_temp_file(struct saved_file* file)
 
 	sb = nd.path.dentry->d_sb;
 	EXT3_SB(sb)->s_mount_state |= EXT3_ORPHAN_FS;
-	inode = ext3_iget(sb, file->ino);
+	inode = ext3_iget(sb, ino);
 	EXT3_SB(sb)->s_mount_state &= ~EXT3_ORPHAN_FS;
 
 	if(IS_ERR(inode))
-		panic("Could not get inode = %lu err %ld", file->ino, PTR_ERR(inode));
+		panic("Could not get inode = %lu err %ld", ino, PTR_ERR(inode));
 	fake_dentry.d_inode = inode;
 
 	sprint("Getting write access\n");
@@ -1120,9 +1120,6 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 			file = restore_vc_terminal(f);
 			break;
 		default:
-			if(f->temporary)
-				restore_temp_file(f);
-			
 			file = do_filp_open(AT_FDCWD, f->name, f->flags, 0); 
 
 			if(IS_ERR(file))

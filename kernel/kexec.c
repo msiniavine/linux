@@ -1569,6 +1569,7 @@ static int do_kernel_kexec(unsigned int flags)
 			stop_user_tasks();
 			sprint("Shutting down devices\n");	
 			system_state = SYSTEM_RESTART;
+			hardlink_temp_files();
 			do_sync(1);
 			device_shutdown();
 			sysdev_shutdown();
