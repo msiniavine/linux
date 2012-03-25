@@ -11,16 +11,16 @@ static struct saved_state* get_saved_state(void)
 	return (struct saved_state*)get_reserved_region();
 }
 
-static struct timespec start_quiesence, end_quiesence, start_checkpoint, start_kernel, end_kernel, start_restore, end_restore;
+static struct timespec start_quiescence, end_quiescence, start_checkpoint, start_kernel, end_kernel, start_restore, end_restore;
 
-void time_start_quiesence()
+void time_start_quiescence()
 {
-	getnstimeofday(&start_quiesence);
+	getnstimeofday(&start_quiescence);
 }
 
-void time_end_quiesence()
+void time_end_quiescence()
 {
-	getnstimeofday(&end_quiesence);
+	getnstimeofday(&end_quiescence);
 }
 void time_start_checkpoint()
 {
@@ -29,8 +29,8 @@ void time_start_checkpoint()
 void time_end_checkpoint()
 {
 	struct saved_state* s = get_saved_state();
-	s->start_quiesence = start_quiesence;
-	s->end_quiesence = end_quiesence;
+	s->start_quiescence = start_quiescence;
+	s->end_quiescence = end_quiescence;
 	s->start_checkpoint = start_checkpoint;
 	getnstimeofday(&get_saved_state()->end_checkpoint);
 }
@@ -57,8 +57,8 @@ static int timings_read(char* page, char** start, off_t offeset, int count, int*
 	int len = 0;
 	struct saved_state* s = get_saved_state();
 	len += sprintf(page+len, "Size: %lu\n", s->checkpoint_size);
-	len += sprintf(page+len, "Squiesence: %ld %ld\n", s->start_quiesence.tv_sec, s->start_quiesence.tv_nsec);
-	len += sprintf(page+len, "Equiesence: %ld %ld\n", s->end_quiesence.tv_sec, s->end_quiesence.tv_nsec);
+	len += sprintf(page+len, "Squiescence: %ld %ld\n", s->start_quiescence.tv_sec, s->start_quiescence.tv_nsec);
+	len += sprintf(page+len, "Equiescence: %ld %ld\n", s->end_quiescence.tv_sec, s->end_quiescence.tv_nsec);
 	len += sprintf(page+len, "SCehckpoint: %ld %ld\n", s->start_checkpoint.tv_sec, s->start_checkpoint.tv_nsec);
 	len += sprintf(page+len, "ECheckpoint: %ld %ld\n", s->end_checkpoint.tv_sec, s->end_checkpoint.tv_nsec);
 	len += sprintf(page+len, "Skernel:  %ld %ld\n", start_kernel.tv_sec, start_kernel.tv_nsec);

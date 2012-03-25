@@ -1446,6 +1446,7 @@ static int check_all_quiescence(void* unused)
 {
 	if( are_all_tasks_ready())
 	{
+		time_end_quiescence();
 		save_running_processes();
 		return 1;
 	}
@@ -1564,7 +1565,7 @@ static int do_kernel_kexec(unsigned int flags)
 		
 			blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
 			printk(KERN_EMERG "Saving state\n");
-			time_start_quiesence();
+			time_start_quiescence();
 
 			stop_user_tasks();
 			sprint("Shutting down devices\n");	

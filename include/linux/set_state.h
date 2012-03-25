@@ -28,8 +28,8 @@ void install_syscall_blocker(void);
 void activate_syscall_blocker(void);
 
 // timing specific functions
-void time_start_quiesence(void);
-void time_end_quiesence(void);
+void time_start_quiescence(void);
+void time_end_quiescence(void);
 void time_start_checkpoint(void);
 void time_end_checkpoint(void);
 void time_start_kernel_init(void);
@@ -78,7 +78,7 @@ struct saved_state
 {
 	struct list_head processes;
 	unsigned long checkpoint_size;
-	struct timespec start_quiesence, end_quiesence, start_checkpoint, end_checkpoint;
+	struct timespec start_quiescence, end_quiescence, start_checkpoint, end_checkpoint;
 };
 
 
