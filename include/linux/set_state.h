@@ -26,6 +26,7 @@ int are_user_tasks_ready(void);
 int are_all_tasks_ready(void);
 void install_syscall_blocker(void);
 void activate_syscall_blocker(void);
+void hardlink_temp_files(void);
 
 // timing specific functions
 void time_start_quiescence(void);

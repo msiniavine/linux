@@ -1371,13 +1371,12 @@ static void ext3_orphan_cleanup (struct super_block * sb,
 #ifdef CONFIG_QUOTA
 	int i;
 #endif
-
-
 	if(set_state_present())
 	{
 		printk(KERN_INFO "Skipping orphan clean up because of save state\n");
 		return;
 	}
+
 
 	if (!es->s_last_orphan) {
 		jbd_debug(4, "no orphan inodes to clean up\n");

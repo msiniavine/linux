@@ -19,8 +19,8 @@ cd test
 
 #./launcher `pidof mysqld`
 
-#./test_runner
-./test_mmap 7
+./test_runner
+#./test_mmap 7
 
 #kexec -l /boot/vmlinuz-`uname -r` --initrd=/boot/initrd.img-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state debug early_printk bootmem_debug"
 #kexec -l /boot/vmlinuz-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state debug early_printk"
