@@ -6,7 +6,11 @@
 int main()
 {
 	int err;
-	FILE* f = tmpfile();
+	char name[] = "/home/maxim/tmpXXXXXX";
+	int fd = mkstemp(name);
+	FILE* f = fdopen(fd, "w");
+	unlink(name);
+	fprintf(f, "temp print\n");
 	if(!f)
 	{
 		perror("tmpfile");
