@@ -1312,7 +1312,7 @@ int restore_inet_hash(struct inet_timewait_death_row* death_row, struct sock* sk
 
 	inet_bind_bucket_for_each(tb, node, &head->chain)
 	{
-		if(tb->ib_net == net && tb->port == desired_port)
+		if(ib_net(tb) == net && tb->port == desired_port)
 		{
 			WARN_ON(hlist_empty(&tb->owners));
 			if(tb->fastreuse >= 0)
