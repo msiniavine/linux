@@ -1506,8 +1506,6 @@ static void take_checkpoint(void)
 
 }
 
-extern void do_sync(unsigned long wait);
-
 /*
  * Move into place and start executing a preloaded standalone
  * executable.  If nothing was preloaded return an error.
@@ -1574,7 +1572,7 @@ static int do_kernel_kexec(unsigned int flags)
 			sprint("Shutting down devices\n");	
 			system_state = SYSTEM_RESTART;
 			hardlink_temp_files();
-			do_sync(1);
+			sys_sync();
 			device_shutdown();
 			sysdev_shutdown();
 

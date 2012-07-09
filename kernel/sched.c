@@ -2354,7 +2354,7 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state,
 	update_rq_clock(rq);
 	if (!(p->state & state))
 		goto out;
-	if(wake_up_disabled && old_state == TASK_INTERRUPTIBLE && !(p->flags & PF_KTHREAD))
+	if(wake_up_disabled && p->state == TASK_INTERRUPTIBLE && !(p->flags & PF_KTHREAD))
 		goto out;
 
 	if (p->se.on_rq)
