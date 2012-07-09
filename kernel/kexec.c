@@ -38,6 +38,10 @@
 #include <asm/system.h>
 #include <asm/sections.h>
 
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+#include <linux/stop_machine.h>
+
 /* Per cpu memory for storing cpu states in case of system crash. */
 note_buf_t* crash_notes;
 
@@ -1423,11 +1427,92 @@ static int __init crash_save_vmcoreinfo_init(void)
 
 module_init(crash_save_vmcoreinfo_init)
 
+extern int wake_up_disabled;
+static int check_user_quiescence(void* unused)
+{
+	int ready = are_user_tasks_ready();
+	if(!ready)
+	{
+		activate_syscall_blocker();
+		return ready;
+	}
+
+	wake_up_disabled = 1;
+
+	return ready;
+}
+
+static int check_all_quiescence(void* unused)
+{
+	if( are_all_tasks_ready())
+	{
+		time_end_quiescence();
+		save_running_processes();
+		return 1;
+	}
+	return 0;
+	
+}
+
+static void stop_user_tasks(void)
+{
+	int ready = 0;
+	int count = 0;
+	install_syscall_blocker();
+	while(!ready)
+	{
+		ready = stop_machine(check_user_quiescence, NULL, NULL);
+		if(ready)
+		{
+			sprint("Done! Count %d\n", count);
+			break;
+		}
+		count ++;
+		if(count > 1000)
+		{
+			break;
+		}
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(5);
+	}
+
+	if(!ready)
+		panic("Failed to stop user tasks\n");
+}
+
+static void take_checkpoint(void)
+{
+	int ready = 0;
+	int count = 0;
+	while(!ready)
+	{
+		ready = stop_machine(check_all_quiescence, NULL, NULL);
+		if(ready)
+		{
+			sprint("Done! Count %d\n", count);
+			break;
+		}
+		count ++;
+		if(count > 1000)
+		{
+			break;
+		}
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(5);
+	}
+
+	if(!ready)
+		panic("Failed to take the checkpoint\n");
+
+}
+
+extern void do_sync(unsigned long wait);
+
 /*
  * Move into place and start executing a preloaded standalone
  * executable.  If nothing was preloaded return an error.
  */
-int kernel_kexec(void)
+static int do_kernel_kexec(unsigned int flags)
 {
 	int error = 0;
 
@@ -1472,11 +1557,32 @@ int kernel_kexec(void)
 	} else
 #endif
 	{
-		kernel_restart_prepare(NULL);
-		printk(KERN_EMERG "Starting new kernel\n");
-		machine_shutdown();
+		if(flags == 0)
+		{
+			kernel_restart_prepare(NULL);
+			printk(KERN_EMERG "Starting new kernel\n");
+			machine_shutdown();
+		}
+		else if(flags == 0xdeadbeef)
+		{
+		
+			blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
+			printk(KERN_EMERG "Saving state\n");
+			time_start_quiescence();
 
+			stop_user_tasks();
+			sprint("Shutting down devices\n");	
+			system_state = SYSTEM_RESTART;
+			hardlink_temp_files();
+			do_sync(1);
+			device_shutdown();
+			sysdev_shutdown();
 
+			sprint("Taking checkpoint\n");
+			take_checkpoint();
+			machine_shutdown();
+			
+		}
 	}
 
 	machine_kexec(kexec_image);
@@ -1503,4 +1609,14 @@ int kernel_kexec(void)
  Unlock:
 	mutex_unlock(&kexec_mutex);
 	return error;
+}
+
+int kernel_kexec()
+{
+	return do_kernel_kexec(0);
+}
+
+int save_state()
+{
+	return do_kernel_kexec(0xdeadbeef);
 }

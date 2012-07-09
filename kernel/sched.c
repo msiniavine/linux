@@ -2336,6 +2336,7 @@ void task_oncpu_function_call(struct task_struct *p,
  *
  * returns failure only if the task is already active.
  */
+int wake_up_disabled = 0;
 static int try_to_wake_up(struct task_struct *p, unsigned int state,
 			  int wake_flags)
 {
@@ -2352,6 +2353,8 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state,
 	rq = orig_rq = task_rq_lock(p, &flags);
 	update_rq_clock(rq);
 	if (!(p->state & state))
+		goto out;
+	if(wake_up_disabled && old_state == TASK_INTERRUPTIBLE && !(p->flags & PF_KTHREAD))
 		goto out;
 
 	if (p->se.on_rq)

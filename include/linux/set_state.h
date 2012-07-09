@@ -11,6 +11,7 @@ struct socket;
 
 unsigned long get_reserved_region(void);
 
+struct pt_regs;
 void print_regs(struct pt_regs* regs);
 int set_state(struct pt_regs* regs, struct saved_task_struct* state);
 int is_save_enabled(struct task_struct*);
@@ -19,6 +20,23 @@ void add_to_restored_list(struct task_struct*);
 int sock_attach_fd(struct socket *sock, struct file *file, int flags);
 struct page* alloc_specific_page(unsigned long pfn, int mapcount);
 int set_state_present(void);
+int save_state(void);
+void save_running_processes(void);
+int are_user_tasks_ready(void);
+int are_all_tasks_ready(void);
+void install_syscall_blocker(void);
+void activate_syscall_blocker(void);
+void hardlink_temp_files(void);
+
+// timing specific functions
+void time_start_quiescence(void);
+void time_end_quiescence(void);
+void time_start_checkpoint(void);
+void time_end_checkpoint(void);
+void time_start_kernel_init(void);
+void time_end_kernel_init(void);
+void time_start_restore(void);
+void time_end_restore(void);
 
 // TCP hook used to drop some incoming tcp packets until the state is restored
 void set_state_tcp_hook(void);
@@ -40,7 +58,7 @@ extern int debug_was_state_restored;
 
 #define tlprintf(format, ...) {		       \
 		struct task_struct* __tsk = current;		\
-		if(!strcmp("httpd", __tsk->comm))		\
+		if(!strcmp("test_loop", __tsk->comm))		\
 			printk(KERN_INFO format, ##__VA_ARGS__); }
 
 static void inline busy_wait(unsigned long timeout)
@@ -56,6 +74,14 @@ struct map_entry* new_map(void);
 void delete_map(struct map_entry*);
 void insert_entry(struct map_entry* head, void* first, void* second);
 void* find_by_first(struct map_entry* head,  void* first);
+
+struct saved_state
+{
+	struct list_head processes;
+	unsigned long checkpoint_size;
+	struct timespec start_quiescence, end_quiescence, start_checkpoint, end_checkpoint;
+};
+
 
 #ifndef SET_STATE_ONLY_FUNCTIONS
 #define PATH_LENGTH 256
@@ -175,6 +201,7 @@ struct saved_tcp_state
 	u32 nonagle;
 	struct list_head sk_buffs;
 	int num_saved_buffs; // number of saved socket buffers
+	int num_rcv_queue;
 
 };
 
@@ -401,10 +428,6 @@ struct saved_task_struct
 };
 
 
-struct saved_state
-{
-	struct list_head processes;
-};
 
 struct global_state_info
 {

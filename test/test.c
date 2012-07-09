@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <sys/reboot.h>
 
 #include "test.h"
 
@@ -17,9 +18,9 @@ int was_state_restored(void)
 	return syscall(__NR_was_state_restored);
 }
 
-void save_state(void)
+int save_state(void)
 {
-	syscall(__NR_save_state);
+	return reboot(0xdeadbeef);
 }
 
 int state_present(void)

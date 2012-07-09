@@ -107,7 +107,7 @@ scx200-y			+= scx200_32.o
 
 obj-$(CONFIG_OLPC)		+= olpc.o
 obj-$(CONFIG_X86_MRST)		+= mrst.o
-obj-y				+= save_state.o set_state.o save_state_map.o set_state_tcp_hook.o
+obj-y				+= save_state.o set_state.o save_state_map.o set_state_tcp_hook.o save_state_timings.o
 
 microcode-y				:= microcode_core.o
 microcode-$(CONFIG_MICROCODE_INTEL)	+= microcode_intel.o

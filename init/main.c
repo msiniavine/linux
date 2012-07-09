@@ -81,6 +81,9 @@
 #include <asm/smp.h>
 #endif
 
+#define SET_STATE_ONLY_FUNCTIONS 1
+#include <linux/set_state.h>
+
 static int kernel_init(void *);
 
 extern void init_IRQ(void);
@@ -876,6 +879,7 @@ static int __init kernel_init(void * unused)
 	smp_init();
 	sched_init_smp();
 
+	time_start_kernel_init();
 	do_basic_setup();
 
 	/*
@@ -897,6 +901,7 @@ static int __init kernel_init(void * unused)
 	 * initmem segments and start the user-mode stuff..
 	 */
 
+	time_end_kernel_init();
 	init_post();
 	return 0;
 }

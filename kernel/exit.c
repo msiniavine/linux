@@ -1551,6 +1551,7 @@ static int do_wait_thread(struct wait_opts *wo, struct task_struct *tsk)
 				return ret;
 		}
 	}
+
 	return 0;
 }
 
@@ -1610,7 +1611,6 @@ repeat:
 	if ((wo->wo_type < PIDTYPE_MAX) &&
 	   (!wo->wo_pid || hlist_empty(&wo->wo_pid->tasks[wo->wo_type])))
 		goto notask;
-
 	set_current_state(TASK_INTERRUPTIBLE);
 	read_lock(&tasklist_lock);
 	tsk = current;
@@ -1722,12 +1722,9 @@ SYSCALL_DEFINE4(wait4, pid_t, upid, int __user *, stat_addr,
 	enum pid_type type;
 	long ret;
 
-
 	if (options & ~(WNOHANG|WUNTRACED|WCONTINUED|
 			__WNOTHREAD|__WCLONE|__WALL))
-	{
 		return -EINVAL;
-	}
 
 	if (upid == -1)
 		type = PIDTYPE_MAX;

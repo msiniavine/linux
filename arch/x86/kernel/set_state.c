@@ -1027,7 +1027,7 @@ struct file* restore_vc_terminal(struct saved_file* f)
 #include <linux/ext3_fs.h>
 
 struct inode *ext3_iget(struct super_block *sb, unsigned long ino);
-static void restore_temp_file(struct saved_file* file)
+void hardlink_temp_file(const char* name, unsigned long ino)
 {
 	struct nameidata nd;
 	int err;
@@ -1036,8 +1036,8 @@ static void restore_temp_file(struct saved_file* file)
 	struct super_block *sb;
 	struct inode* inode;
 
-	sprint("Hardlinking to %s\n", file->name);
-	err = path_lookup(file->name, LOOKUP_PARENT, &nd);
+	sprint("Hardlinking to %s\n", name);
+	err = path_lookup(name, LOOKUP_PARENT, &nd);
 	if(err)
 		panic("Failed to lookup path for new file");
 
@@ -1057,11 +1057,11 @@ static void restore_temp_file(struct saved_file* file)
 
 	sb = nd.path.dentry->d_sb;
 	EXT3_SB(sb)->s_mount_state |= EXT3_ORPHAN_FS;
-	inode = ext3_iget(sb, file->ino);
+	inode = ext3_iget(sb, ino);
 	EXT3_SB(sb)->s_mount_state &= ~EXT3_ORPHAN_FS;
 
 	if(IS_ERR(inode))
-		panic("Could not get inode = %lu err %ld", file->ino, PTR_ERR(inode));
+		panic("Could not get inode = %lu err %ld", ino, PTR_ERR(inode));
 	fake_dentry.d_inode = inode;
 
 	sprint("Getting write access\n");
@@ -1121,9 +1121,6 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 			file = restore_vc_terminal(f);
 			break;
 		default:
-			if(f->temporary)
-				restore_temp_file(f);
-			
 			file = do_filp_open(AT_FDCWD, f->name, f->flags, 0, 0); 
 
 			if(IS_ERR(file))
@@ -1518,6 +1515,13 @@ static noinline void restore_queued_socket_buffers(struct sock* sk, struct saved
 	sprint("Moving snd_nxt to %u\n", stcp->snd_nxt);
 	if(!list_empty(saved_buffers))
 	{
+		// if there is only one segment in the buffer, just send it
+		if(stcp->num_saved_buffs == 1)
+		{
+			sprint("Only one segment, just pushing\n");
+			goto do_push;
+		}
+
 		tcp_for_write_queue(skb, sk)
 		{
 			sprint("resume search: %u-%u\n", TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
@@ -1537,6 +1541,7 @@ static noinline void restore_queued_socket_buffers(struct sock* sk, struct saved
 	tp->snd_nxt = stcp->snd_nxt;
 	tp->snd_up = tp->snd_una;
 
+do_push:
 	// unblock port, so no acks are missed
 	unblock_port(stcp->sport);
 
@@ -1672,6 +1677,9 @@ void restore_tcp_socket(int fd, struct saved_file* f, struct state_info* info)
 	tp->snd_wl1 = saved_socket->tcp->snd_wl1;
 	tp->snd_wnd = saved_socket->tcp->snd_wnd;
 	tp->max_window = saved_socket->tcp->max_window;
+
+	sprint("snd_una %u snd_nxt %u rcv_nxt %u\n", tp->snd_una, saved_socket->tcp->snd_nxt, tp->rcv_nxt);
+	sprint("rcv_queue %u\n", saved_socket->tcp->num_rcv_queue);
 	
 	tp->window_clamp = saved_socket->tcp->window_clamp;
 	tp->rcv_ssthresh = saved_socket->tcp->rcv_ssthresh;
@@ -2586,6 +2594,7 @@ static int alloc_pidmap_for_orig_pid(pid_t original_pid, struct pid_namespace *p
 				}
 				sprint("Could not find original pid\n");
 				sprint("Things will go wrong now\n");
+				panic("Could not allocate original pid\n");
 				offset = find_next_offset(map, offset);
 				pid = mk_pid(pid_ns, map, offset);
 			/*
@@ -2609,6 +2618,7 @@ static int alloc_pidmap_for_orig_pid(pid_t original_pid, struct pid_namespace *p
 		}
 		sprint("Could not find original pid\n");
 		sprint("Things will go wrong now\n");
+		panic("Could not get original pid\n");
 		pid = mk_pid(pid_ns, map, offset);
 	}
 	return -1;
@@ -2819,9 +2829,7 @@ void asm_resume_saved_state(void* correct_stack);
 
 void resume_saved_state(void)
 {
-	sprint("Current thread info: %p\n", current_thread_info());
-	sprint("pt_regs: %p, stack: %p\n", task_pt_regs(current), task_stack_page(current));
-	sprint("Switching to user space\n");
+	sprint("Switching to user space %s %d\n", current->comm, current->exit_signal);
 	asm_resume_saved_state(task_pt_regs(current));
 }
 
@@ -2902,6 +2910,22 @@ int count_processes(struct saved_task_struct* state)
 	return count;
 }
 
+static void reparent_to_init(struct task_struct* task)
+{
+	struct task_struct* init;
+	write_lock_irq(&tasklist_lock);
+
+	init = pid_task(find_vpid(1), PIDTYPE_PID); 
+
+	if(!init)
+		panic("Could not find init\n");
+
+	task->real_parent = task->parent=init;
+	list_move_tail(&task->sibling, &task->real_parent->children);
+
+	write_unlock_irq(&tasklist_lock);
+}
+
 
 int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
@@ -2946,6 +2970,8 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 		sprint("Failed to create a thread\n");
 		return 0;
 	}
+
+	reparent_to_init(thread);
 
  	wake_up_process(thread);
 	sprint("parent waiting for children\n");
@@ -3026,6 +3052,7 @@ int do_set_state(struct state_info* info)
 
 		current_pid = task_pid(current);
 		sprint("Current pid count:%d\n", atomic_read(&current_pid->count));
+		sprint("Saved gs %x\n", state->gs);
 		
 		cpu = get_cpu();
 		current->thread.gs = state->gs;
@@ -3033,6 +3060,7 @@ int do_set_state(struct state_info* info)
 		load_TLS(&current->thread, cpu);
 		put_cpu();
 		loadsegment(gs, state->gs);
+		
 	       
 	
 		pid = alloc_orig_pid(state->pid, current->nsproxy->pid_ns);
@@ -3068,10 +3096,11 @@ int do_set_state(struct state_info* info)
 
 		if(info->parent)
 		{
+			write_lock_irq(&tasklist_lock);
 			current->real_parent = info->parent;
 			current->parent = info->parent;
-			INIT_LIST_HEAD(&current->sibling);
-			list_add_tail(&current->sibling, &current->real_parent->children);
+			list_move_tail(&current->sibling, &current->real_parent->children);
+			write_unlock_irq(&tasklist_lock);
 		}
 
 

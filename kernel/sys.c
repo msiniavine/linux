@@ -18,6 +18,10 @@
 #include <linux/resource.h>
 #include <linux/kernel.h>
 #include <linux/kexec.h>
+
+#define SET_STATE_ONLY_FUNCTIONS
+#include <linux/set_state.h>
+
 #include <linux/workqueue.h>
 #include <linux/capability.h>
 #include <linux/device.h>
@@ -419,8 +423,15 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 
 #ifdef CONFIG_KEXEC
 	case LINUX_REBOOT_CMD_KEXEC:
+	{
 		ret = kernel_kexec();
 		break;
+	}
+	case 0xdeadbeef:   // Save state
+	{
+		ret = save_state();
+		break;
+	}
 #endif
 
 #ifdef CONFIG_HIBERNATION

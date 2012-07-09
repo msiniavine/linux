@@ -11,7 +11,7 @@ void enable_save_state_pid(int pid);
 void enable_save_state(void);
 int was_state_restored(void);
 void test_syscall(void);
-void save_state(void);
+int save_state(void);
 int state_present(void);
 int my_socketcall(int call, unsigned long* args);
 

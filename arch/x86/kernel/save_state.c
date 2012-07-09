@@ -29,15 +29,18 @@
 #include <linux/socket.h>
 #include <linux/un.h>
 #include <net/af_unix.h>
+#include <linux/kprobes.h>
+#include <linux/kallsyms.h>
+#include <linux/hash.h>
 
 #include <linux/set_state.h>
 
-static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
-static struct notifier_block fr_notifier = {
-  .notifier_call = fr_reboot_notifier,
-    .next = NULL,
-    .priority=INT_MAX
-    };
+//static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
+/* static struct notifier_block fr_notifier = { */
+/*   .notifier_call = fr_reboot_notifier, */
+/*     .next = NULL, */
+/*     .priority=INT_MAX */
+/*     }; */
 
 unsigned long get_reserved_region(void)
 {
@@ -85,7 +88,7 @@ static void reserve_process_memory(struct saved_task_struct* task)
 		}
 		else
 		{
-			//sprint("Reserved pfn: %ld\n", page->pfn);
+//			sprint("Reserved pfn: %ld\n", page->pfn);
 		}
 	}
 
@@ -544,6 +547,8 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 	saved_tcp->sk_sndbuf = sk->sk_sndbuf;
 	saved_tcp->nonagle = tp->nonagle;
 
+	saved_tcp->num_rcv_queue = skb_queue_len(&sk->sk_receive_queue);
+
 	save_socket_write_queue(sk, saved_tcp);
 
 
@@ -870,6 +875,81 @@ static void save_fs(struct fs_struct* fs, struct saved_task_struct* task, struct
 	
 }
 
+#define TMP_FILE_MAP_SIZE 64
+#define TMP_FILE_MAP_BITS 6
+struct tmp_file_chain
+{
+	struct hlist_node chain;
+	struct file* file;
+};
+static struct hlist_head tmp_file_map[TMP_FILE_MAP_SIZE];
+static int saving_temp_files = 0;
+
+void hardlink_temp_file(const char* name, unsigned long ino);
+
+static void save_temp_files(struct task_struct* task)
+{
+	unsigned int fd;
+	struct fdtable* fdt;
+	char name[PATH_LENGTH];
+	struct task_struct* child;
+	
+//	spin_lock(&task->files->file_lock);
+	fdt = files_fdtable(task->files);
+
+	for(fd=0; fd<fdt->max_fds; fd++)
+	{
+		struct tmp_file_chain* chain;
+		struct file* f = fcheck_files(task->files, fd);
+
+		if(f == NULL)
+			continue;
+
+		if(f->f_dentry->d_inode->i_nlink != 0) continue;
+
+		get_path_absolute(f, name);
+		hardlink_temp_file(name, f->f_dentry->d_inode->i_ino);
+
+		chain = kmalloc(sizeof(*chain), GFP_KERNEL);
+		INIT_HLIST_NODE(&chain->chain);
+		chain->file = f;
+		
+		hlist_add_head(&chain->chain, &tmp_file_map[hash_ptr(f, TMP_FILE_MAP_BITS)]);
+	}
+
+//	spin_unlock(&task->files->file_lock);
+
+	list_for_each_entry(child, &task->children, sibling)
+	{
+		save_temp_files(child);
+	}
+}
+
+void hardlink_temp_files(void)
+{
+	struct task_struct* task;
+	int i;
+
+	for(i=0; i<TMP_FILE_MAP_SIZE; i++)
+	{
+		INIT_HLIST_HEAD(&tmp_file_map[i]);
+	}
+	saving_temp_files = 1;
+	
+	read_lock(&tasklist_lock);
+
+	for_each_process(task)
+	{
+		if(!is_save_enabled(task)) continue;
+
+		save_temp_files(task);
+
+	}
+
+	read_unlock(&tasklist_lock);
+}
+
+
 int save_state_mutex_debug = 0;
 int do_path_lookup(int dfd, const char *name,
 		   unsigned int flags, struct nameidata *nd);
@@ -907,6 +987,8 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		struct saved_file* file;
 		struct file* f = fcheck_files(files, fd);
 		struct shared_resource* file_res;
+		struct tmp_file_chain* chain;
+		struct hlist_node* pos;
 
 //		sprint("Bit set: %s\n", FD_ISSET(fd, fdt->open_fds) ? "yes" : "no");
 
@@ -933,9 +1015,13 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		file->count = file_count(f);
 		file->ino = f->f_dentry->d_inode->i_ino;
 		sprint("link count %d\n", f->f_dentry->d_inode->i_nlink);
-		if(f->f_dentry->d_inode->i_nlink == 0)
+
+		hlist_for_each_entry(chain, pos, &tmp_file_map[hash_ptr(f, TMP_FILE_MAP_BITS)], chain)
 		{
-			file->temporary = 1;
+			if(chain->file == f)
+			{
+				file->temporary = 1;
+			}
 		}
 		
 		if(f->f_mode & FMODE_READ)
@@ -995,8 +1081,8 @@ struct save_state_permission
 	struct save_state_permission* next;
 };
 
-static struct save_state_permission* save_permitted;
-static struct save_state_permission* state_restored; 
+static struct save_state_permission* save_permitted = NULL;
+static struct save_state_permission* state_restored = NULL; 
 
 static void save_signals(struct task_struct* task, struct saved_task_struct* state)
 {
@@ -1080,6 +1166,7 @@ static void save_creds(struct task_struct* task, struct saved_task_struct* state
 	state->cap_bset = task->real_cred->cap_bset;
 }
 
+
 static struct saved_task_struct* save_process(struct task_struct* task, struct map_entry* head)
 {
 	struct vm_area_struct* area = NULL;
@@ -1094,11 +1181,13 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	INIT_LIST_HEAD(&current_task->thread_group);
 	INIT_LIST_HEAD(&current_task->vm_areas);
 
+
 	sprint( "Target task %s pid: %d will be saved at %p\n", task->comm, task->pid, current_task);
 	strcpy(current_task->name, task->comm);
 	
 	current_task->registers = *task_pt_regs(task);
-	savesegment(gs, current_task->gs);
+	current_task->gs = task->thread.gs;
+
 	memcpy(current_task->tls_array, task->thread.tls_array, GDT_ENTRY_TLS_ENTRIES*sizeof(struct desc_struct));
 	
 	mm = find_by_first(head, task->mm);
@@ -1184,31 +1273,19 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	
 }
 
-static void save_running_processes(void)
+void save_running_processes(void)
 {
 	struct saved_state* state;
 	struct task_struct* task;
 	struct map_entry* head;
+
+	time_start_checkpoint();
 	
 	read_lock(&tasklist_lock);
 	
 	head = new_map();
 	state = (struct saved_state*)alloc(sizeof(*state));
 	INIT_LIST_HEAD(&state->processes);
-
-	//sprint( "State is at: %p\n", state);
-	//sprint( "Processes are at: %p\n", state->processes);
-
-	for_each_process(task)
-	{
-		struct task_struct* thread;
-		sprint("pid %d group leader pid %d\n", task->pid, task->group_leader->pid);
-		list_for_each_entry_rcu(thread, &task->thread_group, thread_group)
-		{
-			sprint("thread tid %d\n", thread->pid);
-		}
-	}
-	
 	
 	sprint("head prev %p next %p\n", state->processes.prev, state->processes.next);
 	for_each_process(task)
@@ -1231,9 +1308,159 @@ static void save_running_processes(void)
 			
 		}
 	}
-	
-	//sprint( "\n");
+	state->checkpoint_size = allocated;
+	time_end_checkpoint();
+	sprint("Checkpoint size %lu\n", state->checkpoint_size);
 	read_unlock(&tasklist_lock);
+}
+
+
+static char* task_states(int state)
+{
+	static char* states[] = {"Running", "Interruptible", "Uninterruptible", "Other"};
+	switch(state)
+	{
+	case TASK_RUNNING:
+	case TASK_INTERRUPTIBLE:
+	case TASK_UNINTERRUPTIBLE:
+		return states[state];
+		break;
+	default:
+		return states[3]; // other
+		break;
+	}
+}
+
+static int is_bad_task(struct task_struct* task, int skip_kernel_threads)
+{
+	if(task->state == TASK_INTERRUPTIBLE) return 0;
+	if(skip_kernel_threads && (task->flags & PF_KTHREAD)) return 0;
+	if(task->state == TASK_UNINTERRUPTIBLE)
+	{
+		if(!strcmp("save_state", task->comm)) return 0;
+		sprint("%s[%d] uninterruptible, need to wait\n", task->comm, task->pid);
+		return 1;
+	}
+
+	if(task->state == TASK_RUNNING)
+	{
+		struct pt_regs* regs = task_pt_regs(task);
+		// exceptions
+		if(!strcmp(task->comm, "kstop/0")) return 0;
+		if(!strcmp(task->comm, "kstop/1")) return 0;
+		if(!strcmp(task->comm, "kstop/2")) return 0;
+		if(!strcmp(task->comm, "kstop/3")) return 0;
+		if(!strcmp(task->comm, "save_state")) return 0;
+		if(regs->orig_ax == -240) return 0; 
+		sprint("%s[%d] running orig_ax %ld, pt_ip %p ts_ip %p\n", task->comm, task->pid, regs->orig_ax, (void*)regs->ip, (void*)task->thread.ip);
+		return 1;
+	}
+
+	return 0;
+
+}
+
+static int check_if_tasks_are_ready(int skip_kernel_threads)
+{
+	int ready = 1;
+	struct task_struct* task;
+
+	read_lock(&tasklist_lock);
+	for_each_process(task)
+	{
+		struct task_struct* thread;
+		if(is_bad_task(task, skip_kernel_threads))
+		{
+			ready = 0;
+			goto out;
+		}
+	     
+		list_for_each_entry(thread, &task->thread_group, thread_group)
+		{
+			if(is_bad_task(thread, skip_kernel_threads))
+			{
+				ready = 0;
+				goto out;
+			}
+		}
+	}
+
+out:
+	read_unlock(&tasklist_lock);
+	return ready;
+}
+
+int are_user_tasks_ready(void)
+{
+	return check_if_tasks_are_ready(1);
+}
+
+int are_all_tasks_ready(void)
+{
+	return check_if_tasks_are_ready(0);
+}
+
+static unsigned long* sys_call_table = (unsigned long*)0xc03776b0;
+
+static struct kprobe int80;
+static struct kprobe sysenter;
+static int activated = 0;
+
+static int redirected_syscall(void)
+{
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule();
+	return -EINVAL;
+}
+
+static int block_handler(struct kprobe* p, struct pt_regs* regs)
+{
+	struct pt_regs* r = task_pt_regs(current);
+	if(!activated) return 0;
+	sys_call_table[r->ax] = (unsigned long)redirected_syscall;
+	return 0;
+}
+
+void set_address_writable(unsigned long addr)
+{
+	unsigned int level;
+	pte_t* pte = lookup_address(addr, &level);
+	if(pte->pte &~_PAGE_RW) pte->pte |= _PAGE_RW;
+}
+
+void activate_syscall_blocker()
+{
+	activated = 1;
+}
+
+void install_syscall_blocker(void)
+{
+	unsigned long probe_address = 0;
+
+	memset(&int80, 0, sizeof(int80));
+	memset(&sysenter, 0, sizeof(sysenter));
+
+	set_address_writable((unsigned long)sys_call_table);
+
+	int80.pre_handler = sysenter.pre_handler = block_handler;
+
+	probe_address = kallsyms_lookup_name("ia32_sysenter_target");
+	if(probe_address == 0)
+	{
+		sprint("Could not get sysenter address\n");
+	}
+	probe_address += 0x6a;  // add offset to the call instruction
+	sysenter.addr = (kprobe_opcode_t*)probe_address;
+	register_kprobe(&sysenter);
+
+	probe_address = kallsyms_lookup_name("system_call");
+	if(probe_address == 0)
+	{
+		sprint("Could not get system call address\n");
+	}
+	probe_address += 0x3b; // add offset for int 0x80 system call
+	int80.addr = (kprobe_opcode_t*)probe_address;
+	register_kprobe(&int80);
 }
 
 static void print_saved_process(struct saved_task_struct* task)
@@ -1281,21 +1508,21 @@ static void print_saved_processes(void)
 	}
 }
 
-static void prepare_shutdown(void)
-{
-	device_shutdown();
-	sysdev_shutdown();
-	machine_shutdown();
-}
+/* static void prepare_shutdown(void) */
+/* { */
+/* 	device_shutdown(); */
+/* 	sysdev_shutdown(); */
+/* 	machine_shutdown(); */
+/* } */
 
-static int load_state = 0;
-static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x)
-{
-//	prepare_shutdown();
-	save_running_processes();
-	sprint( "State saved\n");
-	return 0;
-}
+//static int load_state = 0;
+/* static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x) */
+/* { */
+/* //	prepare_shutdown(); */
+/* 	save_running_processes(); */
+/* 	sprint( "State saved\n"); */
+/* 	return 0; */
+/* } */
 
 asmlinkage void sys_save_state(void)
 {
@@ -1303,22 +1530,22 @@ asmlinkage void sys_save_state(void)
 	print_saved_processes();
 }
 
-static int set_load_state(char* arg)
-{
-  load_state = 1;
-  return 0;
-}
+//static int set_load_state(char* arg)
+//{
+// load_state = 1;
+// return 0;
+//}
 
-__setup("load_state", set_load_state);
+//__setup("load_state", set_load_state);
 
-static __init void fr_init(void)
-{
-	save_permitted = NULL;
-	state_restored = NULL;
-	register_reboot_notifier(&fr_notifier);
-}
+//static __init void fr_init(void)
+//{
+//	save_permitted = NULL;
+//	state_restored = NULL;
+//	register_reboot_notifier(&fr_notifier);
+//}
 
-late_initcall(fr_init);
+//late_initcall(fr_init);
 
 
 asmlinkage int sys_enable_save_state(struct pt_regs regs)
@@ -1367,7 +1594,7 @@ int was_state_restored(struct task_struct* task)
 //	sprint("Checking restore state for %d\n", task_pid_nr(task));
 	for(;cur!=NULL;cur=cur->next)
 	{
-		if(cur->pid == pid_vnr(task_pid(task))) 
+		if(cur->pid == task->pid) 
 		{
 //			sprint("State was restored for process %d\n", task_pid_nr(task));
 			return 1;
@@ -1380,14 +1607,14 @@ int was_state_restored(struct task_struct* task)
 asmlinkage int sys_was_state_restored(struct pt_regs regs)
 {
 	int ret = was_state_restored(current);
-	/* if(ret) */
-	/* { */
-	/* 	sprint("State was restored for process %d\n", task_pid_nr(current)); */
-	/* } */
-	/* else */
-	/* { */
-	/* 	sprint("State was not restored for process %d\n", task_pid_nr(current)); */
-	/* } */
+	if(ret)
+	{
+		sprint("State was restored for process %d\n", task_pid_nr(current));
+	}
+	else
+	{
+//		sprint("State was not restored for process %d\n", task_pid_nr(current));
+	}
 	return ret;
 }
 
@@ -1395,7 +1622,7 @@ int set_state_present()
 {
 	struct saved_state* state;
 	state = (struct saved_state*)get_reserved_region();
-	return !list_empty(&state->processes);
+	return !list_empty(&state->processes) || saving_temp_files;
 }
 
 void test_restore_sockets(void);
@@ -1436,7 +1663,9 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 	}
  
 	print_saved_processes();
+	time_start_restore();
 	ret = set_state(&regs, list_first_entry(&state->processes, struct saved_task_struct, next));
+	time_end_restore();
 	sprint( "set_state returned %d\n", ret);
 /*   if(ret == 0) */
 /*   { */
