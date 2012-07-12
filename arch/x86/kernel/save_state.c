@@ -1400,25 +1400,13 @@ int are_all_tasks_ready(void)
 	return check_if_tasks_are_ready(0);
 }
 
-static unsigned long* sys_call_table = (unsigned long*)0xc03776b0;
-
-static struct kprobe int80;
-static struct kprobe sysenter;
-static int activated = 0;
-
 static int redirected_syscall(void)
 {
+	sprint("Blocked system call for %s[%d]\n", current->comm, current->pid);
 	set_current_state(TASK_INTERRUPTIBLE);
 	schedule();
+	sprint("Unblocked system call for %s[%d]\n", current->comm, current->pid);
 	return -EINVAL;
-}
-
-static int block_handler(struct kprobe* p, struct pt_regs* regs)
-{
-	struct pt_regs* r = task_pt_regs(current);
-	if(!activated) return 0;
-	sys_call_table[r->ax] = (unsigned long)redirected_syscall;
-	return 0;
 }
 
 void set_address_writable(unsigned long addr)
@@ -1428,39 +1416,47 @@ void set_address_writable(unsigned long addr)
 	if(pte->pte &~_PAGE_RW) pte->pte |= _PAGE_RW;
 }
 
-void activate_syscall_blocker()
+static int validate_sys_call_table_location(unsigned long* sys_call_table)
 {
-	activated = 1;
+	if(sys_call_table[__NR_close] == sys_close)
+	{
+		sprint("Validated sys_close location in syscall table\n");
+	}
+	else
+	{
+		return 0;
+	}
+
+	sys_call_table[__NR_close] = sys_close;
+	return 1;
 }
 
+
+static int syscalls_blocked = 0;
 void install_syscall_blocker(void)
 {
-	unsigned long probe_address = 0;
+	int i;
+	unsigned long* sys_call_table;
+	if(syscalls_blocked)
+		return;
 
-	memset(&int80, 0, sizeof(int80));
-	memset(&sysenter, 0, sizeof(sysenter));
+	sys_call_table = (unsigned long*)kallsyms_lookup_name("sys_call_table");
+	sprint("Kallsyms returnd %p for syscall table\n", sys_call_table);
 
 	set_address_writable((unsigned long)sys_call_table);
 
-	int80.pre_handler = sysenter.pre_handler = block_handler;
-
-	probe_address = kallsyms_lookup_name("ia32_sysenter_target");
-	if(probe_address == 0)
+	if(!validate_sys_call_table_location(sys_call_table))
 	{
-		sprint("Could not get sysenter address\n");
+		panic("Could not validate sys_call_table location");
 	}
-	probe_address += 0x6a;  // add offset to the call instruction
-	sysenter.addr = (kprobe_opcode_t*)probe_address;
-	register_kprobe(&sysenter);
 
-	probe_address = kallsyms_lookup_name("system_call");
-	if(probe_address == 0)
+	for(i=0; i<342; i++)
 	{
-		sprint("Could not get system call address\n");
+		sys_call_table[i] = redirected_syscall;
 	}
-	probe_address += 0x3b; // add offset for int 0x80 system call
-	int80.addr = (kprobe_opcode_t*)probe_address;
-	register_kprobe(&int80);
+
+	syscalls_blocked = 1;
+
 }
 
 static void print_saved_process(struct saved_task_struct* task)

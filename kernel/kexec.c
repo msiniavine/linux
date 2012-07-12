@@ -1433,7 +1433,8 @@ static int check_user_quiescence(void* unused)
 	int ready = are_user_tasks_ready();
 	if(!ready)
 	{
-		activate_syscall_blocker();
+		install_syscall_blocker();
+
 		return ready;
 	}
 
@@ -1458,7 +1459,6 @@ static void stop_user_tasks(void)
 {
 	int ready = 0;
 	int count = 0;
-	install_syscall_blocker();
 	while(!ready)
 	{
 		ready = stop_machine(check_user_quiescence, NULL, NULL);
