@@ -22,9 +22,15 @@
 #include <linux/rfkill.h>
 #include <linux/power_supply.h>
 #include <linux/acpi.h>
+#include <linux/input.h>
 #include "../../firmware/dcdbas.h"
 
 #define BRIGHTNESS_TOKEN 0x7d
+#define WLAN_SWITCH_MASK 0
+#define BT_SWITCH_MASK 1
+#define WWAN_SWITCH_MASK 2
+#define HW_SWITCH_SUPPORT 3
+#define HW_SWITCH_MASK 16
 
 /* This structure will be modified by the firmware when we enter
  * system management mode, hence the volatiles */
@@ -63,6 +69,13 @@ static struct rfkill *wifi_rfkill;
 static struct rfkill *bluetooth_rfkill;
 static struct rfkill *wwan_rfkill;
 
+/*
+ * RFkill status is maintained in software because the BIOS has an annoying
+ * habit of emitting a KEY_WLAN key press event before the BIOS state is updated, making
+ * dell_send_request() racy.
+ */
+static int   hw_switch_status;
+
 static const struct dmi_system_id __initdata dell_device_table[] = {
 	{
 		.ident = "Dell laptop",
@@ -71,7 +84,68 @@ static const struct dmi_system_id __initdata dell_device_table[] = {
 			DMI_MATCH(DMI_CHASSIS_TYPE, "8"),
 		},
 	},
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_CHASSIS_TYPE, "9"), /*Laptop*/
+		},
+	},
+	{
+		.ident = "Dell Computer Corporation",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Computer Corporation"),
+			DMI_MATCH(DMI_CHASSIS_TYPE, "8"),
+		},
+	},
 	{ }
+};
+
+static struct dmi_system_id __devinitdata dell_blacklist[] = {
+	/* BIOS always returns HW switch disabled */
+	{
+		.ident = "Dell Vostro 1720",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Vostro 1720"),
+		},
+	},
+	/* Supported by compal-laptop */
+	{
+		.ident = "Dell Mini 9",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 910"),
+		},
+	},
+	{
+		.ident = "Dell Mini 10",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 1010"),
+		},
+	},
+	{
+		.ident = "Dell Mini 10v",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 1011"),
+		},
+	},
+	{
+		.ident = "Dell Inspiron 11z",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 1110"),
+		},
+	},
+	{
+		.ident = "Dell Mini 12",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 1210"),
+		},
+	},
+	{}
 };
 
 static void parse_da_table(const struct dmi_header *dm)
@@ -180,10 +254,12 @@ static int dell_rfkill_set(void *data, bool blocked)
 	int disable = blocked ? 1 : 0;
 	unsigned long radio = (unsigned long)data;
 
-	memset(&buffer, 0, sizeof(struct calling_interface_buffer));
-	buffer.input[0] = (1 | (radio<<8) | (disable << 16));
-	dell_send_request(&buffer, 17, 11);
-
+	if (!(hw_switch_status & BIT(radio-1)) || !(hw_switch_status & BIT(HW_SWITCH_MASK)) || \
+			!(hw_switch_status & BIT(HW_SWITCH_SUPPORT))) {
+		memset(&buffer, 0, sizeof(struct calling_interface_buffer));
+		buffer.input[0] = (1 | (radio<<8) | (disable << 16));
+		dell_send_request(&buffer, 17, 11);
+	}
 	return 0;
 }
 
@@ -191,14 +267,33 @@ static void dell_rfkill_query(struct rfkill *rfkill, void *data)
 {
 	struct calling_interface_buffer buffer;
 	int status;
-	int bit = (unsigned long)data + 16;
+	int bit = (unsigned long)data - 1;
 
 	memset(&buffer, 0, sizeof(struct calling_interface_buffer));
 	dell_send_request(&buffer, 17, 11);
 	status = buffer.output[1];
 
-	if (status & BIT(bit))
-		rfkill_set_hw_state(rfkill, !!(status & BIT(16)));
+	hw_switch_status |= (status & BIT(0)) << BIT(HW_SWITCH_SUPPORT);
+	hw_switch_status |= (status & BIT(HW_SWITCH_MASK)) ^ BIT(HW_SWITCH_MASK);
+
+	/* HW switch control not supported
+	   explicitly set it to all 3 as they'll change in unison then */
+	if (!(status & BIT(0)))
+		hw_switch_status |= BIT(WLAN_SWITCH_MASK) | BIT(BT_SWITCH_MASK) | (WWAN_SWITCH_MASK);
+	else {
+		/* rerun the query to see what is really supported */
+		memset(&buffer, 0, sizeof(struct calling_interface_buffer));
+		buffer.input[0] = 2;
+		dell_send_request(&buffer, 17, 11);
+		status = buffer.output[1];
+
+		hw_switch_status |= status & BIT(bit);
+	}
+
+	if (hw_switch_status & BIT(bit))
+		rfkill_set_hw_state(rfkill, hw_switch_status & BIT(HW_SWITCH_MASK));
+	else
+		rfkill_set_hw_state(rfkill, 0);
 }
 
 static const struct rfkill_ops dell_rfkill_ops = {
@@ -206,11 +301,38 @@ static const struct rfkill_ops dell_rfkill_ops = {
 	.query = dell_rfkill_query,
 };
 
+/*
+ * Called for each KEY_WLAN key press event. Note that a physical
+ * rf-kill switch change also causes the BIOS to emit a KEY_WLAN.
+ *
+ * dell_rfkill_set may block, so schedule it on a worker thread.
+ */
+static void dell_rfkill_update(struct work_struct *work)
+{
+	hw_switch_status ^= BIT(HW_SWITCH_MASK);
+	if (wifi_rfkill && (hw_switch_status & BIT(WLAN_SWITCH_MASK))) {
+		rfkill_set_hw_state(wifi_rfkill, hw_switch_status & BIT(HW_SWITCH_MASK));
+		dell_rfkill_set((void*)1, rfkill_blocked(wifi_rfkill));
+	}
+
+	if (bluetooth_rfkill && (hw_switch_status & BIT(BT_SWITCH_MASK))) {
+		rfkill_set_hw_state(bluetooth_rfkill, hw_switch_status & BIT(HW_SWITCH_MASK));
+		dell_rfkill_set((void*)2, rfkill_blocked(bluetooth_rfkill));
+	}
+
+	if (wwan_rfkill && (hw_switch_status & BIT(WWAN_SWITCH_MASK))) {
+		rfkill_set_hw_state(wwan_rfkill, hw_switch_status & BIT(HW_SWITCH_MASK));
+		dell_rfkill_set((void*)3, rfkill_blocked(wwan_rfkill));
+	}
+}
+DECLARE_WORK(dell_rfkill_update_work, &dell_rfkill_update);
+
 static int dell_setup_rfkill(void)
 {
 	struct calling_interface_buffer buffer;
 	int status;
 	int ret;
+	hw_switch_status = 0;
 
 	memset(&buffer, 0, sizeof(struct calling_interface_buffer));
 	dell_send_request(&buffer, 17, 11);
@@ -310,6 +432,92 @@ static struct backlight_ops dell_ops = {
 	.update_status  = dell_send_intensity,
 };
 
+static const struct input_device_id dell_input_ids[] = {
+	{
+		.bustype = 0x11,
+		.vendor = 0x01,
+		.product = 0x01,
+		.version = 0xab41,
+		.flags = INPUT_DEVICE_ID_MATCH_BUS |
+			 INPUT_DEVICE_ID_MATCH_VENDOR |
+			 INPUT_DEVICE_ID_MATCH_PRODUCT |
+			 INPUT_DEVICE_ID_MATCH_VERSION
+	},
+	{ },
+};
+
+static bool dell_input_filter(struct input_handle *handle, unsigned int type,
+			     unsigned int code, int value)
+{
+	if (type == EV_KEY && code == KEY_WLAN && value == 1) {
+		if (!schedule_work(&dell_rfkill_update_work))
+			printk(KERN_NOTICE "rfkill switch handling already "
+					   "scheduled, dropping this event\n");
+		return 1;
+	}
+
+	return 0;
+}
+
+static void dell_input_event(struct input_handle *handle, unsigned int type,
+			     unsigned int code, int value)
+{
+}
+
+static int dell_input_connect(struct input_handler *handler,
+			      struct input_dev *dev,
+			      const struct input_device_id *id)
+{
+	struct input_handle *handle;
+	int error;
+
+	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
+	if (!handle)
+		return -ENOMEM;
+
+	handle->dev = dev;
+	handle->handler = handler;
+	handle->name = "dell-laptop";
+
+	error = input_register_handle(handle);
+	if (error)
+		goto err_free_handle;
+
+	error = input_open_device(handle);
+	if (error)
+		goto err_unregister_handle;
+
+	error = input_filter_device(handle);
+	if (error)
+		goto err_close_handle;
+
+	return 0;
+
+err_close_handle:
+	input_close_device(handle);
+err_unregister_handle:
+	input_unregister_handle(handle);
+err_free_handle:
+	kfree(handle);
+	return error;
+}
+
+static void dell_input_disconnect(struct input_handle *handle)
+{
+	input_close_device(handle);
+	input_unregister_handle(handle);
+	kfree(handle);
+}
+
+static struct input_handler dell_input_handler = {
+	.name = "dell-laptop",
+	.filter = dell_input_filter,
+	.event = dell_input_event,
+	.connect = dell_input_connect,
+	.disconnect = dell_input_disconnect,
+	.id_table = dell_input_ids,
+};
+
 static int __init dell_init(void)
 {
 	struct calling_interface_buffer buffer;
@@ -318,6 +526,12 @@ static int __init dell_init(void)
 
 	if (!dmi_check_system(dell_device_table))
 		return -ENODEV;
+
+	if (dmi_check_system(dell_blacklist)) {
+		printk(KERN_INFO "dell-laptop: Blacklisted hardware detected - "
+				"not loading\n");
+		return -ENODEV;
+	}
 
 	dmi_walk(find_tokens, NULL);
 
@@ -332,6 +546,10 @@ static int __init dell_init(void)
 		printk(KERN_WARNING "dell-laptop: Unable to setup rfkill\n");
 		goto out;
 	}
+
+	if (input_register_handler(&dell_input_handler))
+		printk(KERN_INFO
+		       "dell-laptop: Could not register input filter\n");
 
 #ifdef CONFIG_ACPI
 	/* In the event of an ACPI backlight being available, don't
@@ -388,6 +606,7 @@ static void __exit dell_exit(void)
 		rfkill_unregister(bluetooth_rfkill);
 	if (wwan_rfkill)
 		rfkill_unregister(wwan_rfkill);
+	input_unregister_handler(&dell_input_handler);
 }
 
 module_init(dell_init);
@@ -397,3 +616,5 @@ MODULE_AUTHOR("Matthew Garrett <mjg@redhat.com>");
 MODULE_DESCRIPTION("Dell laptop driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("dmi:*svnDellInc.:*:ct8:*");
+MODULE_ALIAS("dmi:*svnDellInc.:*:ct9:*");
+MODULE_ALIAS("dmi:*svnDellComputerCorporation.:*:ct8:*");

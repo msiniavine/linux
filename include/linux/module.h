@@ -724,4 +724,13 @@ static inline int  module_bug_finalize(const Elf_Ehdr *hdr,
 static inline void module_bug_cleanup(struct module *mod) {}
 #endif	/* CONFIG_GENERIC_BUG */
 
+/*
+ * Establish a symbolic link between 2 modules so that depmod
+ * and modprobe do the heavy lifting of loading the modules in the
+ * correct dependency order.
+ */
+#define MODULE_EXPORT(mod_name) int sym_link_##mod_name; EXPORT_SYMBOL(sym_link_##mod_name);
+#define MODULE_IMPORT(mod_name) extern int sym_link_##mod_name; int func_sym_link_##mod_name(void) {sym_link_##mod_name=1;}; EXPORT_SYMBOL(func_sym_link_##mod_name);
+
+
 #endif /* _LINUX_MODULE_H */

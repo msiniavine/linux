@@ -27,6 +27,8 @@
 #include <linux/sched.h>
 #include <linux/prctl.h>
 #include <linux/securebits.h>
+#include <linux/syslog.h>
+#include <linux/personality.h>
 
 /*
  * If a non-root user executes a setuid-root binary in
@@ -511,6 +513,11 @@ int cap_bprm_set_creds(struct linux_binprm *bprm)
 	}
 skip:
 
+	/* if we have fs caps, clear dangerous personality flags */
+	if (!cap_issubset(new->cap_permitted, old->cap_permitted))
+		bprm->per_clear |= PER_CLEAR_ON_SETID;
+
+
 	/* Don't let someone trace a set[ug]id/setpcap binary with the revised
 	 * credentials unless they have the appropriate permit
 	 */
@@ -956,12 +963,16 @@ error:
 /**
  * cap_syslog - Determine whether syslog function is permitted
  * @type: Function requested
+ * @from_file: Whether this request came from an open file (i.e. /proc)
  *
  * Determine whether the current process is permitted to use a particular
  * syslog function, returning 0 if permission is granted, -ve if not.
  */
-int cap_syslog(int type)
+int cap_syslog(int type, bool from_file)
 {
+	/* /proc/kmsg can open be opened by CAP_SYS_ADMIN */
+	if (type != 1 && from_file)
+		return 0;
 	if ((type != 3 && type != 10) && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 	return 0;

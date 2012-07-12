@@ -595,6 +595,48 @@ struct input_absinfo {
 #define KEY_NUMERIC_STAR	0x20a
 #define KEY_NUMERIC_POUND	0x20b
 
+#define BTN_TRIGGER_HAPPY		0x2c0
+#define BTN_TRIGGER_HAPPY1		0x2c0
+#define BTN_TRIGGER_HAPPY2		0x2c1
+#define BTN_TRIGGER_HAPPY3		0x2c2
+#define BTN_TRIGGER_HAPPY4		0x2c3
+#define BTN_TRIGGER_HAPPY5		0x2c4
+#define BTN_TRIGGER_HAPPY6		0x2c5
+#define BTN_TRIGGER_HAPPY7		0x2c6
+#define BTN_TRIGGER_HAPPY8		0x2c7
+#define BTN_TRIGGER_HAPPY9		0x2c8
+#define BTN_TRIGGER_HAPPY10		0x2c9
+#define BTN_TRIGGER_HAPPY11		0x2ca
+#define BTN_TRIGGER_HAPPY12		0x2cb
+#define BTN_TRIGGER_HAPPY13		0x2cc
+#define BTN_TRIGGER_HAPPY14		0x2cd
+#define BTN_TRIGGER_HAPPY15		0x2ce
+#define BTN_TRIGGER_HAPPY16		0x2cf
+#define BTN_TRIGGER_HAPPY17		0x2d0
+#define BTN_TRIGGER_HAPPY18		0x2d1
+#define BTN_TRIGGER_HAPPY19		0x2d2
+#define BTN_TRIGGER_HAPPY20		0x2d3
+#define BTN_TRIGGER_HAPPY21		0x2d4
+#define BTN_TRIGGER_HAPPY22		0x2d5
+#define BTN_TRIGGER_HAPPY23		0x2d6
+#define BTN_TRIGGER_HAPPY24		0x2d7
+#define BTN_TRIGGER_HAPPY25		0x2d8
+#define BTN_TRIGGER_HAPPY26		0x2d9
+#define BTN_TRIGGER_HAPPY27		0x2da
+#define BTN_TRIGGER_HAPPY28		0x2db
+#define BTN_TRIGGER_HAPPY29		0x2dc
+#define BTN_TRIGGER_HAPPY30		0x2dd
+#define BTN_TRIGGER_HAPPY31		0x2de
+#define BTN_TRIGGER_HAPPY32		0x2df
+#define BTN_TRIGGER_HAPPY33		0x2e0
+#define BTN_TRIGGER_HAPPY34		0x2e1
+#define BTN_TRIGGER_HAPPY35		0x2e2
+#define BTN_TRIGGER_HAPPY36		0x2e3
+#define BTN_TRIGGER_HAPPY37		0x2e4
+#define BTN_TRIGGER_HAPPY38		0x2e5
+#define BTN_TRIGGER_HAPPY39		0x2e6
+#define BTN_TRIGGER_HAPPY40		0x2e7
+
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x2ff
@@ -658,6 +700,7 @@ struct input_absinfo {
 #define ABS_MT_TOOL_TYPE	0x37	/* Type of touching device */
 #define ABS_MT_BLOB_ID		0x38	/* Group a set of packets as a blob */
 #define ABS_MT_TRACKING_ID	0x39	/* Unique ID of initiated contact */
+#define ABS_MT_PRESSURE		0x3a	/* Pressure on contact area */
 
 #define ABS_MAX			0x3f
 #define ABS_CNT			(ABS_MAX+1)
@@ -1118,6 +1161,7 @@ struct input_dev {
 	int (*event)(struct input_dev *dev, unsigned int type, unsigned int code, int value);
 
 	struct input_handle *grab;
+	struct input_handle *filter;
 
 	spinlock_t event_lock;
 	struct mutex mutex;
@@ -1218,6 +1262,7 @@ struct input_handler {
 	void *private;
 
 	void (*event)(struct input_handle *handle, unsigned int type, unsigned int code, int value);
+	bool (*filter)(struct input_handle *handle, unsigned int type, unsigned int code, int value);
 	int (*connect)(struct input_handler *handler, struct input_dev *dev, const struct input_device_id *id);
 	void (*disconnect)(struct input_handle *handle);
 	void (*start)(struct input_handle *handle);
@@ -1294,6 +1339,9 @@ void input_unregister_handle(struct input_handle *);
 
 int input_grab_device(struct input_handle *);
 void input_release_device(struct input_handle *);
+
+int input_filter_device(struct input_handle *);
+void input_unfilter_device(struct input_handle *);
 
 int input_open_device(struct input_handle *);
 void input_close_device(struct input_handle *);

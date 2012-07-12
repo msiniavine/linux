@@ -8,6 +8,7 @@
 #include <linux/dirent.h>
 #include <linux/syscalls.h>
 #include <linux/utime.h>
+#include <linux/async.h>
 
 static __initdata char *message;
 static void __init error(char *x)
@@ -455,7 +456,8 @@ static char * __init unpack_to_rootfs(char *buf, unsigned len)
 					 compress_name);
 				message = msg_buf;
 			}
-		}
+		} else
+			error("junk in compressed archive");
 		if (state != Reset)
 			error("junk in compressed archive");
 		this_header = saved_offset + my_inptr;
@@ -565,7 +567,9 @@ static void __init clean_rootfs(void)
 }
 #endif
 
-static int __init populate_rootfs(void)
+LIST_HEAD(populate_rootfs_domain);
+
+static void __init async_populate_rootfs(void *data, async_cookie_t cookie)
 {
 	char *err = unpack_to_rootfs(__initramfs_start,
 			 __initramfs_end - __initramfs_start);
@@ -579,7 +583,7 @@ static int __init populate_rootfs(void)
 			initrd_end - initrd_start);
 		if (!err) {
 			free_initrd();
-			return 0;
+			return;
 		} else {
 			clean_rootfs();
 			unpack_to_rootfs(__initramfs_start,
@@ -603,6 +607,27 @@ static int __init populate_rootfs(void)
 		free_initrd();
 #endif
 	}
+	return;
+}
+
+static int __initdata rootfs_populated;
+
+static int __init populate_rootfs_early(void)
+{
+	if (num_online_cpus() > 1) {
+		rootfs_populated = 1;
+		async_schedule_domain(async_populate_rootfs, NULL,
+						&populate_rootfs_domain);
+	}
 	return 0;
 }
+static int __init populate_rootfs(void)
+{
+	if (!rootfs_populated)
+		async_schedule_domain(async_populate_rootfs, NULL,
+						&populate_rootfs_domain);
+	return 0;
+}
+
+earlyrootfs_initcall(populate_rootfs_early);
 rootfs_initcall(populate_rootfs);

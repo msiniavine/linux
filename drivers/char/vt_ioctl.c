@@ -38,6 +38,8 @@
 #include <linux/kbd_diacr.h>
 #include <linux/selection.h>
 
+#define max_font_size 65536
+
 char vt_dont_switch;
 extern struct tty_driver *console_driver;
 
@@ -503,6 +505,7 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 	struct kbd_struct * kbd;
 	unsigned int console;
 	unsigned char ucval;
+	unsigned int uival;
 	void __user *up = (void __user *)arg;
 	int i, perm;
 	int ret = 0;
@@ -657,7 +660,7 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		break;
 
 	case KDGETMODE:
-		ucval = vc->vc_mode;
+		uival = vc->vc_mode;
 		goto setint;
 
 	case KDMAPDISP:
@@ -695,7 +698,7 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		break;
 
 	case KDGKBMODE:
-		ucval = ((kbd->kbdmode == VC_RAW) ? K_RAW :
+		uival = ((kbd->kbdmode == VC_RAW) ? K_RAW :
 				 (kbd->kbdmode == VC_MEDIUMRAW) ? K_MEDIUMRAW :
 				 (kbd->kbdmode == VC_UNICODE) ? K_UNICODE :
 				 K_XLATE);
@@ -717,9 +720,9 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		break;
 
 	case KDGKBMETA:
-		ucval = (vc_kbd_mode(kbd, VC_META) ? K_ESCPREFIX : K_METABIT);
+		uival = (vc_kbd_mode(kbd, VC_META) ? K_ESCPREFIX : K_METABIT);
 	setint:
-		ret = put_user(ucval, (int __user *)arg);
+		ret = put_user(uival, (int __user *)arg);
 		break;
 
 	case KDGETKEYCODE:
@@ -949,7 +952,7 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 		for (i = 0; i < MAX_NR_CONSOLES; ++i)
 			if (! VT_IS_IN_USE(i))
 				break;
-		ucval = i < MAX_NR_CONSOLES ? (i+1) : -1;
+		uival = i < MAX_NR_CONSOLES ? (i+1) : -1;
 		goto setint;		 
 
 	/*
@@ -1589,6 +1592,7 @@ static void complete_change_console(struct vc_data *vc)
 {
 	unsigned char old_vc_mode;
 	int old = fg_console;
+	struct vc_data *oldvc = vc_cons[fg_console].d;
 
 	last_console = fg_console;
 
@@ -1597,9 +1601,31 @@ static void complete_change_console(struct vc_data *vc)
 	 * KD_TEXT mode or vice versa, which means we need to blank or
 	 * unblank the screen later.
 	 */
-	old_vc_mode = vc_cons[fg_console].d->vc_mode;
+	old_vc_mode = oldvc->vc_mode;
+
+#if defined(CONFIG_VGA_CONSOLE)
+	if (old_vc_mode == KD_TEXT && oldvc->vc_sw == &vga_con &&
+	    oldvc->vc_sw->con_font_get) {
+		if (!oldvc->vc_font.data)
+			oldvc->vc_font.data = kmalloc(max_font_size, 
+						      GFP_KERNEL);
+		lock_kernel();
+		oldvc->vc_sw->con_font_get(oldvc, &oldvc->vc_font);
+		unlock_kernel();
+	}
+#endif
 	switch_screen(vc);
 
+#if defined(CONFIG_VGA_CONSOLE)
+	if (vc->vc_mode == KD_TEXT && vc->vc_sw == &vga_con &&
+	    vc->vc_sw->con_font_set) {
+		if (vc->vc_font.data) {
+			lock_kernel();
+			vc->vc_sw->con_font_set(vc, &vc->vc_font, 0);
+			unlock_kernel();
+		}
+	}
+#endif
 	/*
 	 * This can't appear below a successful kill_pid().  If it did,
 	 * then the *blank_screen operation could occur while X, having

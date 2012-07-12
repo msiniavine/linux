@@ -447,7 +447,7 @@ static struct rds_rdma_op *rds_rdma_prepare(struct rds_sock *rs,
 		goto out;
 	}
 
-	if (args->nr_local > (u64)UINT_MAX) {
+	if (args->nr_local > UIO_MAXIOV) {
 		ret = -EMSGSIZE;
 		goto out;
 	}
@@ -473,6 +473,17 @@ static struct rds_rdma_op *rds_rdma_prepare(struct rds_sock *rs,
 
 		max_pages = max(nr, max_pages);
 		nr_pages += nr;
+
+		/*
+		 * nr for one entry in limited to (UINT_MAX>>PAGE_SHIFT)+1
+		 * so nr_pages cannot overflow without becoming bigger than
+		 * INT_MAX first. If nr cannot overflow then max_pages should
+		 * be ok.
+		 */
+		if (nr_pages > INT_MAX) {
+			ret = -EINVAL;
+			goto out;
+		}
 	}
 
 	pages = kcalloc(max_pages, sizeof(struct page *), GFP_KERNEL);
@@ -605,18 +616,32 @@ out:
 int rds_cmsg_rdma_args(struct rds_sock *rs, struct rds_message *rm,
 			  struct cmsghdr *cmsg)
 {
+	struct rds_rdma_args *args;
 	struct rds_rdma_op *op;
+	int ret = 0;
 
 	if (cmsg->cmsg_len < CMSG_LEN(sizeof(struct rds_rdma_args))
-	 || rm->m_rdma_op != NULL)
-		return -EINVAL;
+	 || rm->m_rdma_op != NULL) {
+		ret = -EINVAL;
+		goto out;
+        }
+
+	args = CMSG_DATA(cmsg);
+
+	if (args->nr_local > UIO_MAXIOV) {
+		ret = -EMSGSIZE;
+		goto out;
+	}
 
 	op = rds_rdma_prepare(rs, CMSG_DATA(cmsg));
-	if (IS_ERR(op))
-		return PTR_ERR(op);
+	if (IS_ERR(op)) {
+		ret = PTR_ERR(op);
+		goto out;
+	}
 	rds_stats_inc(s_send_rdma);
 	rm->m_rdma_op = op;
-	return 0;
+out:
+	return ret;
 }
 
 /*

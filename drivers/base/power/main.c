@@ -324,6 +324,41 @@ static void pm_dev_err(struct device *dev, pm_message_t state, char *info,
 		kobject_name(&dev->kobj), pm_verb(state.event), info, error);
 }
 
+static void device_show_time(struct device *dev, ktime_t starttime, pm_message_t state, char *info)
+{
+	ktime_t calltime;
+	s64 usecs64;
+	int usecs;
+
+	calltime = ktime_get();
+	usecs64 = ktime_to_ns(ktime_sub(calltime, starttime));
+	do_div(usecs64, NSEC_PER_USEC);
+	usecs = usecs64;
+	if (usecs == 0)
+		usecs = 1;
+	if ((usecs / USEC_PER_MSEC) > CONFIG_SR_REPORT_TIME_LIMIT)
+		pr_info("PM: %s%s%s of drv:%s dev:%s complete after %ld.%03ld msecs\n", info ?: "", info ? " " : "", pm_verb(state.event),
+		dev_driver_string(dev), dev_name(dev), usecs / USEC_PER_MSEC,
+		usecs % USEC_PER_MSEC);
+}
+
+static void dpm_show_time(ktime_t starttime, pm_message_t state, char *info)
+{
+	ktime_t calltime;
+	s64 usecs64;
+	int usecs;
+
+	calltime = ktime_get();
+	usecs64 = ktime_to_ns(ktime_sub(calltime, starttime));
+	do_div(usecs64, NSEC_PER_USEC);
+	usecs = usecs64;
+	if (usecs == 0)
+		usecs = 1;
+	pr_info("PM: %s%s%s of devices complete after %ld.%03ld msecs\n",
+		info ?: "", info ? " " : "", pm_verb(state.event),
+		usecs / USEC_PER_MSEC, usecs % USEC_PER_MSEC);
+}
+
 /*------------------------- Resume routines -------------------------*/
 
 /**
@@ -337,6 +372,7 @@ static void pm_dev_err(struct device *dev, pm_message_t state, char *info,
 static int device_resume_noirq(struct device *dev, pm_message_t state)
 {
 	int error = 0;
+	ktime_t starttime = ktime_get();
 
 	TRACE_DEVICE(dev);
 	TRACE_RESUME(0);
@@ -347,6 +383,7 @@ static int device_resume_noirq(struct device *dev, pm_message_t state)
 	if (dev->bus->pm) {
 		pm_dev_dbg(dev, state, "EARLY ");
 		error = pm_noirq_op(dev, dev->bus->pm, state);
+		device_show_time(dev, starttime, state, "early");
 	}
  End:
 	TRACE_RESUME(error);
@@ -363,6 +400,7 @@ static int device_resume_noirq(struct device *dev, pm_message_t state)
 void dpm_resume_noirq(pm_message_t state)
 {
 	struct device *dev;
+	ktime_t starttime = ktime_get();
 
 	mutex_lock(&dpm_list_mtx);
 	transition_started = false;
@@ -376,6 +414,7 @@ void dpm_resume_noirq(pm_message_t state)
 				pm_dev_err(dev, state, " early", error);
 		}
 	mutex_unlock(&dpm_list_mtx);
+	dpm_show_time(starttime, state, "early");
 	resume_device_irqs();
 }
 EXPORT_SYMBOL_GPL(dpm_resume_noirq);
@@ -388,6 +427,7 @@ EXPORT_SYMBOL_GPL(dpm_resume_noirq);
 static int device_resume(struct device *dev, pm_message_t state)
 {
 	int error = 0;
+	ktime_t starttime = ktime_get();
 
 	TRACE_DEVICE(dev);
 	TRACE_RESUME(0);
@@ -424,6 +464,7 @@ static int device_resume(struct device *dev, pm_message_t state)
 			error = dev->class->resume(dev);
 		}
 	}
+	device_show_time(dev, starttime, state, NULL);
  End:
 	up(&dev->sem);
 
@@ -441,6 +482,7 @@ static int device_resume(struct device *dev, pm_message_t state)
 static void dpm_resume(pm_message_t state)
 {
 	struct list_head list;
+	ktime_t starttime = ktime_get();
 
 	INIT_LIST_HEAD(&list);
 	mutex_lock(&dpm_list_mtx);
@@ -469,6 +511,7 @@ static void dpm_resume(pm_message_t state)
 	}
 	list_splice(&list, &dpm_list);
 	mutex_unlock(&dpm_list_mtx);
+	dpm_show_time(starttime, state, NULL);
 }
 
 /**
@@ -583,6 +626,7 @@ static pm_message_t resume_event(pm_message_t sleep_state)
 static int device_suspend_noirq(struct device *dev, pm_message_t state)
 {
 	int error = 0;
+	ktime_t starttime = ktime_get();
 
 	if (!dev->bus)
 		return 0;
@@ -590,6 +634,7 @@ static int device_suspend_noirq(struct device *dev, pm_message_t state)
 	if (dev->bus->pm) {
 		pm_dev_dbg(dev, state, "LATE ");
 		error = pm_noirq_op(dev, dev->bus->pm, state);
+		device_show_time(dev, starttime, state, "late");
 	}
 	return error;
 }
@@ -604,6 +649,7 @@ static int device_suspend_noirq(struct device *dev, pm_message_t state)
 int dpm_suspend_noirq(pm_message_t state)
 {
 	struct device *dev;
+	ktime_t starttime = ktime_get();
 	int error = 0;
 
 	suspend_device_irqs();
@@ -619,6 +665,8 @@ int dpm_suspend_noirq(pm_message_t state)
 	mutex_unlock(&dpm_list_mtx);
 	if (error)
 		dpm_resume_noirq(resume_event(state));
+	else
+		dpm_show_time(starttime, state, "late");
 	return error;
 }
 EXPORT_SYMBOL_GPL(dpm_suspend_noirq);
@@ -631,6 +679,7 @@ EXPORT_SYMBOL_GPL(dpm_suspend_noirq);
 static int device_suspend(struct device *dev, pm_message_t state)
 {
 	int error = 0;
+	ktime_t starttime = ktime_get();
 
 	down(&dev->sem);
 
@@ -666,6 +715,7 @@ static int device_suspend(struct device *dev, pm_message_t state)
 			suspend_report_result(dev->bus->suspend, error);
 		}
 	}
+	device_show_time(dev, starttime, state, NULL);
  End:
 	up(&dev->sem);
 
@@ -679,6 +729,7 @@ static int device_suspend(struct device *dev, pm_message_t state)
 static int dpm_suspend(pm_message_t state)
 {
 	struct list_head list;
+	ktime_t starttime = ktime_get();
 	int error = 0;
 
 	INIT_LIST_HEAD(&list);
@@ -704,6 +755,8 @@ static int dpm_suspend(pm_message_t state)
 	}
 	list_splice(&list, dpm_list.prev);
 	mutex_unlock(&dpm_list_mtx);
+	if (!error)
+		dpm_show_time(starttime, state, NULL);
 	return error;
 }
 

@@ -227,6 +227,11 @@ config X86_32_LAZY_GS
 
 config KTIME_SCALAR
 	def_bool X86_32
+
+config ARCH_CPU_PROBE_RELEASE
+	def_bool y
+	depends on HOTPLUG_CPU
+
 source "init/Kconfig"
 source "kernel/Kconfig.freezer"
 
@@ -369,6 +374,12 @@ config X86_UV
 
 # Following is an alphabetically sorted list of 32 bit extended platforms
 # Please maintain the alphabetic order if and when there are additions
+
+config X86_LPIA
+	bool "LPIA-compatible"
+	depends on X86_32 && X86_PC
+	help
+	  Choose this option if your computer is an LPIA platform.
 
 config X86_ELAN
 	bool "AMD Elan"
@@ -622,7 +633,7 @@ config GART_IOMMU
 	bool "GART IOMMU support" if EMBEDDED
 	default y
 	select SWIOTLB
-	depends on X86_64 && PCI
+	depends on X86_64 && PCI && K8_NB
 	---help---
 	  Support for full DMA access of devices with 32bit memory access only
 	  on systems with more than 3GB. This is usually needed for USB,
@@ -748,6 +759,17 @@ config SCHED_MC
 	  making when dealing with multi-core CPU chips at a cost of slightly
 	  increased overhead in some places. If unsure say N here.
 
+config IRQ_TIME_ACCOUNTING
+	bool "Fine granularity task level IRQ time accounting"
+	default n
+	---help---
+	  Select this option to enable fine granularity task irq time
+	  accounting. This is done by reading a timestamp on each
+	  transitions between softirq and hardirq state, so there can be a
+	  small performance impact.
+
+	  If in doubt, say N here.
+
 source "kernel/Kconfig.preempt"
 
 config X86_UP_APIC
@@ -826,6 +848,14 @@ config X86_MCE_INTEL
 	---help---
 	   Additional support for intel specific MCE features such as
 	   the thermal monitor.
+
+config X86_MCE_XEON75XX
+	tristate "Intel Xeon 7500 series corrected memory error driver"
+	depends on X86_MCE_INTEL && PCI
+	---help---
+	   Add support for a Intel Xeon 7500 series specific memory error driver.
+	   This allows to report the DIMM and physical address on a corrected
+	   memory error machine check event.
 
 config X86_MCE_AMD
 	def_bool y
@@ -983,12 +1013,6 @@ config X86_CPUID
 	  be executed on a specific processor.  It is a character device
 	  with major 203 and minors 0 to 31 for /dev/cpu/0/cpuid to
 	  /dev/cpu/31/cpuid.
-
-config X86_CPU_DEBUG
-	tristate "/sys/kernel/debug/x86/cpu/* - CPU Debug support"
-	---help---
-	  If you select this option, this will provide various x86 CPUs
-	  information through debugfs.
 
 choice
 	prompt "High Memory Support"
@@ -1241,6 +1265,11 @@ config ARCH_SELECT_MEMORY_MODEL
 config ARCH_MEMORY_PROBE
 	def_bool X86_64
 	depends on MEMORY_HOTPLUG
+
+config ILLEGAL_POINTER_VALUE
+       hex
+       default 0 if X86_32
+       default 0xdead000000000000 if X86_64
 
 source "mm/Kconfig"
 
@@ -2028,7 +2057,7 @@ endif # X86_32
 
 config K8_NB
 	def_bool y
-	depends on AGP_AMD64 || (X86_64 && (GART_IOMMU || (PCI && NUMA)))
+	depends on CPU_SUP_AMD && PCI
 
 source "drivers/pcmcia/Kconfig"
 
@@ -2078,6 +2107,8 @@ config HAVE_ATOMIC_IOMAP
 source "net/Kconfig"
 
 source "drivers/Kconfig"
+
+source "ubuntu/Kconfig"
 
 source "drivers/firmware/Kconfig"
 

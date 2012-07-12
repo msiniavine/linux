@@ -67,6 +67,8 @@ struct mce {
 	__u32 socketid;	/* CPU socket ID */
 	__u32 apicid;	/* CPU initial apic ID */
 	__u64 mcgcap;	/* MCGCAP MSR: machine check capabilities of CPU */
+	__u64 aux0;	/* model specific */
+	__u64 aux1;	/* model specific */
 };
 
 /*
@@ -213,6 +215,12 @@ extern void (*threshold_cpu_callback)(unsigned long action, unsigned int cpu);
 void intel_init_thermal(struct cpuinfo_x86 *c);
 
 void mce_log_therm_throt_event(__u64 status);
+
+#ifdef CONFIG_X86_THERMAL_VECTOR
+extern void mcheck_intel_therm_init(void);
+#else
+static inline void mcheck_intel_therm_init(void) { }
+#endif
 
 #endif /* __KERNEL__ */
 #endif /* _ASM_X86_MCE_H */

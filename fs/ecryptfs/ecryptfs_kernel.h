@@ -219,12 +219,21 @@ ecryptfs_get_key_payload_data(struct key *key)
 					  * dentry name */
 #define ECRYPTFS_TAG_73_PACKET_TYPE 0x49 /* FEK-encrypted filename as
 					  * metadata */
+#define ECRYPTFS_MIN_PKT_LEN_SIZE 1 /* Min size to specify packet length */
+#define ECRYPTFS_MAX_PKT_LEN_SIZE 2 /* Pass at least this many bytes to
+				     * ecryptfs_parse_packet_length() and
+				     * ecryptfs_write_packet_length()
+				     */
 /* Constraint: ECRYPTFS_FILENAME_MIN_RANDOM_PREPEND_BYTES >=
  * ECRYPTFS_MAX_IV_BYTES */
 #define ECRYPTFS_FILENAME_MIN_RANDOM_PREPEND_BYTES 16
 #define ECRYPTFS_NON_NULL 0x42 /* A reasonable substitute for NULL */
 #define MD5_DIGEST_SIZE 16
 #define ECRYPTFS_TAG_70_DIGEST_SIZE MD5_DIGEST_SIZE
+#define ECRYPTFS_TAG_70_MIN_METADATA_SIZE (1 + ECRYPTFS_MIN_PKT_LEN_SIZE \
+					   + ECRYPTFS_SIG_SIZE + 1 + 1)
+#define ECRYPTFS_TAG_70_MAX_METADATA_SIZE (1 + ECRYPTFS_MAX_PKT_LEN_SIZE \
+					   + ECRYPTFS_SIG_SIZE + 1 + 1)
 #define ECRYPTFS_FEK_ENCRYPTED_FILENAME_PREFIX "ECRYPTFS_FEK_ENCRYPTED."
 #define ECRYPTFS_FEK_ENCRYPTED_FILENAME_PREFIX_SIZE 23
 #define ECRYPTFS_FNEK_ENCRYPTED_FILENAME_PREFIX "ECRYPTFS_FNEK_ENCRYPTED."
@@ -270,6 +279,7 @@ struct ecryptfs_crypt_stat {
 #define ECRYPTFS_ENCFN_USE_MOUNT_FNEK 0x00001000
 #define ECRYPTFS_ENCFN_USE_FEK        0x00002000
 #define ECRYPTFS_UNLINK_SIGS	      0x00004000
+#define ECRYPTFS_I_SIZE_INITIALIZED   0x00008000
 	u32 flags;
 	unsigned int file_version;
 	size_t iv_bytes;
@@ -619,6 +629,7 @@ struct ecryptfs_open_req {
 int ecryptfs_interpose(struct dentry *hidden_dentry,
 		       struct dentry *this_dentry, struct super_block *sb,
 		       u32 flags);
+void ecryptfs_i_size_init(const char *page_virt, struct inode *inode);
 int ecryptfs_lookup_and_interpose_lower(struct dentry *ecryptfs_dentry,
 					struct dentry *lower_dentry,
 					struct inode *ecryptfs_dir_inode,
@@ -760,6 +771,8 @@ ecryptfs_parse_tag_70_packet(char **filename, size_t *filename_size,
 			     size_t *packet_size,
 			     struct ecryptfs_mount_crypt_stat *mount_crypt_stat,
 			     char *data, size_t max_packet_size);
+int ecryptfs_set_f_namelen(long *namelen, long lower_namelen,
+			   struct ecryptfs_mount_crypt_stat *mount_crypt_stat);
 int ecryptfs_derive_iv(char *iv, struct ecryptfs_crypt_stat *crypt_stat,
 		       loff_t offset);
 

@@ -91,6 +91,9 @@ static void default_decode_mce(struct mce *m)
 	pr_emerg("Run the message through 'mcelog --ascii' to decode.\n");
 }
 
+void				(*mce_cpu_specific_poll)(struct mce *);
+EXPORT_SYMBOL_GPL(mce_cpu_specific_poll);
+
 /*
  * CPU/chipset specific EDAC code can register a callback here to print
  * MCE errors in a human-readable form:
@@ -350,6 +353,11 @@ static void mce_wrmsrl(u32 msr, u64 v)
 	wrmsrl(msr, v);
 }
 
+static int under_injection(void)
+{
+	return __get_cpu_var(injectm).finished;
+}
+
 /*
  * Simple lockless ring to communicate PFNs from the exception handler with the
  * process context work function. This is vastly simplified because there's
@@ -553,6 +561,10 @@ void machine_check_poll(enum mcp_flags flags, mce_banks_t *b)
 
 		if (!(flags & MCP_TIMESTAMP))
 			m.tsc = 0;
+
+		if (mce_cpu_specific_poll && !under_injection() && !mce_dont_log_ce)
+			mce_cpu_specific_poll(&m);
+
 		/*
 		 * Don't get the IP here because it's unlikely to
 		 * have anything to do with the actual error location.
@@ -1374,13 +1386,14 @@ static void mce_init_timer(void)
 	struct timer_list *t = &__get_cpu_var(mce_timer);
 	int *n = &__get_cpu_var(mce_next_interval);
 
+	setup_timer(t, mcheck_timer, smp_processor_id());
+
 	if (mce_ignore_ce)
 		return;
 
 	*n = check_interval * HZ;
 	if (!*n)
 		return;
-	setup_timer(t, mcheck_timer, smp_processor_id());
 	t->expires = round_jiffies(jiffies + *n);
 	add_timer_on(t, smp_processor_id());
 }
@@ -1991,9 +2004,11 @@ mce_cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		break;
 	case CPU_DOWN_FAILED:
 	case CPU_DOWN_FAILED_FROZEN:
-		t->expires = round_jiffies(jiffies +
+		if (!mce_ignore_ce && check_interval) {
+			t->expires = round_jiffies(jiffies +
 					   __get_cpu_var(mce_next_interval));
-		add_timer_on(t, cpu);
+			add_timer_on(t, cpu);
+		}
 		smp_call_function_single(cpu, mce_reenable_cpu, &action, 1);
 		break;
 	case CPU_POST_DEAD:

@@ -87,9 +87,9 @@ static unsigned long mmap_rnd(void)
 	*/
 	if (current->flags & PF_RANDOMIZE) {
 		if (mmap_is_ia32())
-			rnd = (long)get_random_int() % (1<<8);
+			rnd = get_random_int() % (1<<8);
 		else
-			rnd = (long)(get_random_int() % (1<<28));
+			rnd = get_random_int() % (1<<28);
 	}
 	return rnd << PAGE_SHIFT;
 }
@@ -131,6 +131,11 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 	} else {
 		mm->mmap_base = mmap_base();
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
+#ifdef CONFIG_X86_32
+		if (!nx_enabled && !(current->personality & READ_IMPLIES_EXEC)
+		    && mmap_is_ia32())
+			mm->get_unmapped_exec_area = arch_get_unmapped_exec_area;
+#endif
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }

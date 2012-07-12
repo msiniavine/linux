@@ -408,7 +408,12 @@ static inline u32 get_wcaps(struct hda_codec *codec, hda_nid_t nid)
 }
 
 /* get the widget type from widget capability bits */
-#define get_wcaps_type(wcaps) (((wcaps) & AC_WCAP_TYPE) >> AC_WCAP_TYPE_SHIFT)
+static inline int get_wcaps_type(unsigned int wcaps)
+{
+	if (!wcaps)
+		return -1; /* invalid type */
+	return (wcaps & AC_WCAP_TYPE) >> AC_WCAP_TYPE_SHIFT;
+}
 
 static inline unsigned int get_wcaps_channels(u32 wcaps)
 {
@@ -435,6 +440,15 @@ void snd_hda_ctls_clear(struct hda_codec *codec);
 int snd_hda_create_hwdep(struct hda_codec *codec);
 #else
 static inline int snd_hda_create_hwdep(struct hda_codec *codec) { return 0; }
+#endif
+
+#ifdef CONFIG_SND_HDA_POWER_SAVE
+int snd_hda_hwdep_add_power_sysfs(struct hda_codec *codec);
+#else
+static inline int snd_hda_hwdep_add_power_sysfs(struct hda_codec *codec)
+{
+	return 0;
+}
 #endif
 
 #ifdef CONFIG_SND_HDA_RECONFIG

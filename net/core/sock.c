@@ -323,6 +323,10 @@ int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
 
 	skb->dev = NULL;
 
+	if (sk_rcvqueues_full(sk, skb)) {
+		atomic_inc(&sk->sk_drops);
+		goto discard_and_relse;
+	}
 	if (nested)
 		bh_lock_sock_nested(sk);
 	else
@@ -336,8 +340,12 @@ int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
 		rc = sk_backlog_rcv(sk, skb);
 
 		mutex_release(&sk->sk_lock.dep_map, 1, _RET_IP_);
-	} else
-		sk_add_backlog(sk, skb);
+	} else if (sk_add_backlog(sk, skb)) {
+		bh_unlock_sock(sk);
+		atomic_inc(&sk->sk_drops);
+		goto discard_and_relse;
+	}
+
 	bh_unlock_sock(sk);
 out:
 	sock_put(sk);
@@ -1114,6 +1122,7 @@ struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
 		sock_lock_init(newsk);
 		bh_lock_sock(newsk);
 		newsk->sk_backlog.head	= newsk->sk_backlog.tail = NULL;
+		newsk->sk_backlog.len = 0;
 
 		atomic_set(&newsk->sk_rmem_alloc, 0);
 		/*
@@ -1181,6 +1190,10 @@ struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
 
 		if (newsk->sk_prot->sockets_allocated)
 			percpu_counter_inc(newsk->sk_prot->sockets_allocated);
+
+		if (sock_flag(newsk, SOCK_TIMESTAMP) ||
+		    sock_flag(newsk, SOCK_TIMESTAMPING_RX_SOFTWARE))
+			net_enable_timestamp();
 	}
 out:
 	return newsk;
@@ -1513,6 +1526,12 @@ static void __release_sock(struct sock *sk)
 
 		bh_lock_sock(sk);
 	} while ((skb = sk->sk_backlog.head) != NULL);
+
+	/*
+	 * Doing the zeroing here guarantee we can not loop forever
+	 * while a wild producer attempts to flood us.
+	 */
+	sk->sk_backlog.len = 0;
 }
 
 /**

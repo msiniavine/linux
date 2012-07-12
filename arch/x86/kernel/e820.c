@@ -79,7 +79,7 @@ EXPORT_SYMBOL_GPL(e820_any_mapped);
  * Note: this function only works correct if the e820 table is sorted and
  * not-overlapping, which is the case
  */
-int __init e820_all_mapped(u64 start, u64 end, unsigned type)
+int e820_all_mapped(u64 start, u64 end, unsigned type)
 {
 	int i;
 
@@ -106,6 +106,7 @@ int __init e820_all_mapped(u64 start, u64 end, unsigned type)
 	}
 	return 0;
 }
+EXPORT_SYMBOL_GPL(e820_all_mapped);
 
 /*
  * Add a memory region to the kernel e820 map.
@@ -1236,15 +1237,21 @@ static int __init parse_memopt(char *p)
 	if (!p)
 		return -EINVAL;
 
-#ifdef CONFIG_X86_32
 	if (!strcmp(p, "nopentium")) {
+#ifdef CONFIG_X86_32
 		setup_clear_cpu_cap(X86_FEATURE_PSE);
 		return 0;
-	}
+#else
+		printk(KERN_WARNING "mem=nopentium ignored! (only supported on x86_32)\n");
+		return -EINVAL;
 #endif
+	}
 
 	userdef = 1;
 	mem_size = memparse(p, &p);
+	/* don't remove all of memory when handling "mem={invalid}" param */
+	if (mem_size == 0)
+		return -EINVAL;
 	e820_remove_range(mem_size, ULLONG_MAX - mem_size, E820_RAM, 1);
 
 	return 0;

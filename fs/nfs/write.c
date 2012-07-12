@@ -1485,7 +1485,6 @@ out:
 static int nfs_write_mapping(struct address_space *mapping, int how)
 {
 	struct writeback_control wbc = {
-		.bdi = mapping->backing_dev_info,
 		.sync_mode = WB_SYNC_ALL,
 		.nr_to_write = LONG_MAX,
 		.range_start = 0,
@@ -1514,7 +1513,6 @@ int nfs_wb_page_cancel(struct inode *inode, struct page *page)
 	loff_t range_start = page_offset(page);
 	loff_t range_end = range_start + (loff_t)(PAGE_CACHE_SIZE - 1);
 	struct writeback_control wbc = {
-		.bdi = page->mapping->backing_dev_info,
 		.sync_mode = WB_SYNC_ALL,
 		.nr_to_write = LONG_MAX,
 		.range_start = range_start,
@@ -1542,6 +1540,7 @@ int nfs_wb_page_cancel(struct inode *inode, struct page *page)
 			break;
 		}
 		ret = nfs_wait_on_request(req);
+		nfs_release_request(req);
 		if (ret < 0)
 			goto out;
 	}
@@ -1558,7 +1557,6 @@ static int nfs_wb_page_priority(struct inode *inode, struct page *page,
 	loff_t range_start = page_offset(page);
 	loff_t range_end = range_start + (loff_t)(PAGE_CACHE_SIZE - 1);
 	struct writeback_control wbc = {
-		.bdi = page->mapping->backing_dev_info,
 		.sync_mode = WB_SYNC_ALL,
 		.nr_to_write = LONG_MAX,
 		.range_start = range_start,
@@ -1612,15 +1610,16 @@ int nfs_migrate_page(struct address_space *mapping, struct page *newpage,
 	if (ret)
 		goto out_unlock;
 	page_cache_get(newpage);
+	spin_lock(&mapping->host->i_lock);
 	req->wb_page = newpage;
 	SetPagePrivate(newpage);
-	set_page_private(newpage, page_private(page));
+	set_page_private(newpage, (unsigned long)req);
 	ClearPagePrivate(page);
 	set_page_private(page, 0);
+	spin_unlock(&mapping->host->i_lock);
 	page_cache_release(page);
 out_unlock:
 	nfs_clear_page_tag_locked(req);
-	nfs_release_request(req);
 out:
 	return ret;
 }

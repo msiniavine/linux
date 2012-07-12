@@ -368,16 +368,21 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 		/* 2D, 3D, CUBE */
 		switch (tmp) {
 		case 0:
+		case 3:
+		case 4:
 		case 5:
 		case 6:
 		case 7:
+			/* 1D/2D */
 			track->textures[i].tex_coord_type = 0;
 			break;
 		case 1:
-			track->textures[i].tex_coord_type = 1;
+			/* CUBE */
+			track->textures[i].tex_coord_type = 2;
 			break;
 		case 2:
-			track->textures[i].tex_coord_type = 2;
+			/* 3D */
+			track->textures[i].tex_coord_type = 1;
 			break;
 		}
 		break;
@@ -395,13 +400,15 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 			track->textures[i].width = 1 << ((idx_value >> RADEON_TXFORMAT_WIDTH_SHIFT) & RADEON_TXFORMAT_WIDTH_MASK);
 			track->textures[i].height = 1 << ((idx_value >> RADEON_TXFORMAT_HEIGHT_SHIFT) & RADEON_TXFORMAT_HEIGHT_MASK);
 		}
+		if (idx_value & R200_TXFORMAT_LOOKUP_DISABLE)
+			track->textures[i].lookup_disable = true;
 		switch ((idx_value & RADEON_TXFORMAT_FORMAT_MASK)) {
 		case R200_TXFORMAT_I8:
 		case R200_TXFORMAT_RGB332:
 		case R200_TXFORMAT_Y8:
 			track->textures[i].cpp = 1;
+			track->textures[i].compress_format = R100_TRACK_COMP_NONE;
 			break;
-		case R200_TXFORMAT_DXT1:
 		case R200_TXFORMAT_AI88:
 		case R200_TXFORMAT_ARGB1555:
 		case R200_TXFORMAT_RGB565:
@@ -412,15 +419,24 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 		case R200_TXFORMAT_DVDU88:
 		case R200_TXFORMAT_AVYU4444:
 			track->textures[i].cpp = 2;
+			track->textures[i].compress_format = R100_TRACK_COMP_NONE;
 			break;
 		case R200_TXFORMAT_ARGB8888:
 		case R200_TXFORMAT_RGBA8888:
 		case R200_TXFORMAT_ABGR8888:
 		case R200_TXFORMAT_BGR111110:
 		case R200_TXFORMAT_LDVDU8888:
+			track->textures[i].cpp = 4;
+			track->textures[i].compress_format = R100_TRACK_COMP_NONE;
+			break;
+		case R200_TXFORMAT_DXT1:
+			track->textures[i].cpp = 1;
+			track->textures[i].compress_format = R100_TRACK_COMP_DXT1;
+			break;
 		case R200_TXFORMAT_DXT23:
 		case R200_TXFORMAT_DXT45:
-			track->textures[i].cpp = 4;
+			track->textures[i].cpp = 1;
+			track->textures[i].compress_format = R100_TRACK_COMP_DXT1;
 			break;
 		}
 		track->textures[i].cube_info[4].width = 1 << ((idx_value >> 16) & 0xf);

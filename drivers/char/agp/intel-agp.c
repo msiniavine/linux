@@ -8,7 +8,11 @@
 #include <linux/kernel.h>
 #include <linux/pagemap.h>
 #include <linux/agp_backend.h>
+#include <asm/smp.h>
 #include "agp.h"
+
+int intel_agp_enabled;
+EXPORT_SYMBOL(intel_agp_enabled);
 
 /*
  * If we have Intel graphics, we're not going to have anything other than
@@ -48,6 +52,8 @@
 #define PCI_DEVICE_ID_INTEL_Q33_IG          0x29D2
 #define PCI_DEVICE_ID_INTEL_B43_HB          0x2E40
 #define PCI_DEVICE_ID_INTEL_B43_IG          0x2E42
+#define PCI_DEVICE_ID_INTEL_B43_1_HB        0x2E90
+#define PCI_DEVICE_ID_INTEL_B43_1_IG        0x2E92
 #define PCI_DEVICE_ID_INTEL_GM45_HB         0x2A40
 #define PCI_DEVICE_ID_INTEL_GM45_IG         0x2A42
 #define PCI_DEVICE_ID_INTEL_IGD_E_HB        0x2E00
@@ -95,6 +101,7 @@
 		agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_GM45_HB || \
 		agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_G41_HB || \
 		agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_B43_HB || \
+		agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_B43_1_HB || \
 		agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_IGDNG_D_HB || \
 		agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_IGDNG_M_HB || \
 		agp_bridge->dev->device == PCI_DEVICE_ID_INTEL_IGDNG_MA_HB || \
@@ -178,6 +185,7 @@ static struct _intel_private {
 	 * popup and for the GTT.
 	 */
 	int gtt_entries;			/* i830+ */
+	int gtt_total_size;
 	union {
 		void __iomem *i9xx_flush_page;
 		void *i8xx_flush_page;
@@ -814,12 +822,6 @@ static void intel_i830_setup_flush(void)
 		intel_i830_fini_flush();
 }
 
-static void
-do_wbinvd(void *null)
-{
-	wbinvd();
-}
-
 /* The chipset_flush interface needs to get data that has already been
  * flushed out of the CPU all the way out to main memory, because the GPU
  * doesn't snoop those buffers.
@@ -836,12 +838,10 @@ static void intel_i830_chipset_flush(struct agp_bridge_data *bridge)
 
 	memset(pg, 0, 1024);
 
-	if (cpu_has_clflush) {
+	if (cpu_has_clflush)
 		clflush_cache_range(pg, 1024);
-	} else {
-		if (on_each_cpu(do_wbinvd, NULL, 1) != 0)
-			printk(KERN_ERR "Timed out waiting for cache flush.\n");
-	}
+	else if (wbinvd_on_all_cpus() != 0)
+		printk(KERN_ERR "Timed out waiting for cache flush.\n");
 }
 
 /* The intel i830 automatically initializes the agp aperture during POST.
@@ -1153,7 +1153,7 @@ static int intel_i915_configure(void)
 	readl(intel_private.registers+I810_PGETBL_CTL);	/* PCI Posting. */
 
 	if (agp_bridge->driver->needs_scratch_page) {
-		for (i = intel_private.gtt_entries; i < current_size->num_entries; i++) {
+		for (i = intel_private.gtt_entries; i < intel_private.gtt_total_size; i++) {
 			writel(agp_bridge->scratch_page, intel_private.gtt+i);
 		}
 		readl(intel_private.gtt+i-1);	/* PCI Posting. */
@@ -1308,6 +1308,8 @@ static int intel_i915_create_gatt_table(struct agp_bridge_data *bridge)
 	if (!intel_private.gtt)
 		return -ENOMEM;
 
+	intel_private.gtt_total_size = gtt_map_size / 4;
+
 	temp &= 0xfff80000;
 
 	intel_private.registers = ioremap(temp, 128 * 4096);
@@ -1357,6 +1359,7 @@ static void intel_i965_get_gtt_range(int *gtt_offset, int *gtt_size)
 	case PCI_DEVICE_ID_INTEL_G45_HB:
 	case PCI_DEVICE_ID_INTEL_G41_HB:
 	case PCI_DEVICE_ID_INTEL_B43_HB:
+	case PCI_DEVICE_ID_INTEL_B43_1_HB:
 	case PCI_DEVICE_ID_INTEL_IGDNG_D_HB:
 	case PCI_DEVICE_ID_INTEL_IGDNG_M_HB:
 	case PCI_DEVICE_ID_INTEL_IGDNG_MA_HB:
@@ -1394,6 +1397,8 @@ static int intel_i965_create_gatt_table(struct agp_bridge_data *bridge)
 
 	if (!intel_private.gtt)
 		return -ENOMEM;
+
+	intel_private.gtt_total_size = gtt_size / 4;
 
 	intel_private.registers = ioremap(temp, 128 * 4096);
 	if (!intel_private.registers) {
@@ -2354,6 +2359,8 @@ static const struct intel_driver_description {
 	    "G45/G43", NULL, &intel_i965_driver },
 	{ PCI_DEVICE_ID_INTEL_B43_HB, PCI_DEVICE_ID_INTEL_B43_IG, 0,
 	    "B43", NULL, &intel_i965_driver },
+	{ PCI_DEVICE_ID_INTEL_B43_1_HB, PCI_DEVICE_ID_INTEL_B43_1_IG, 0,
+	    "B43", NULL, &intel_i965_driver },
 	{ PCI_DEVICE_ID_INTEL_G41_HB, PCI_DEVICE_ID_INTEL_G41_IG, 0,
 	    "G41", NULL, &intel_i965_driver },
 	{ PCI_DEVICE_ID_INTEL_IGDNG_D_HB, PCI_DEVICE_ID_INTEL_IGDNG_D_IG, 0,
@@ -2373,7 +2380,7 @@ static int __devinit agp_intel_probe(struct pci_dev *pdev,
 	struct agp_bridge_data *bridge;
 	u8 cap_ptr = 0;
 	struct resource *r;
-	int i;
+	int i, err;
 
 	cap_ptr = pci_find_capability(pdev, PCI_CAP_ID_AGP);
 
@@ -2461,7 +2468,10 @@ static int __devinit agp_intel_probe(struct pci_dev *pdev,
 				"set gfx device dma mask 36bit failed!\n");
 
 	pci_set_drvdata(pdev, bridge);
-	return agp_add_bridge(bridge);
+	err = agp_add_bridge(bridge);
+	if (!err)
+		intel_agp_enabled = 1;
+	return err;
 }
 
 static void __devexit agp_intel_remove(struct pci_dev *pdev)
@@ -2562,6 +2572,7 @@ static struct pci_device_id agp_intel_pci_table[] = {
 	ID(PCI_DEVICE_ID_INTEL_G45_HB),
 	ID(PCI_DEVICE_ID_INTEL_G41_HB),
 	ID(PCI_DEVICE_ID_INTEL_B43_HB),
+	ID(PCI_DEVICE_ID_INTEL_B43_1_HB),
 	ID(PCI_DEVICE_ID_INTEL_IGDNG_D_HB),
 	ID(PCI_DEVICE_ID_INTEL_IGDNG_M_HB),
 	ID(PCI_DEVICE_ID_INTEL_IGDNG_MA_HB),

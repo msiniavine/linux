@@ -242,6 +242,7 @@ struct sock {
 	struct {
 		struct sk_buff *head;
 		struct sk_buff *tail;
+		int len;
 	} sk_backlog;
 	wait_queue_head_t	*sk_sleep;
 	struct dst_entry	*sk_dst_cache;
@@ -565,8 +566,8 @@ static inline int sk_stream_memory_free(struct sock *sk)
 	return sk->sk_wmem_queued < sk->sk_sndbuf;
 }
 
-/* The per-socket spinlock must be held here. */
-static inline void sk_add_backlog(struct sock *sk, struct sk_buff *skb)
+/* OOB backlog add */
+static inline void __sk_add_backlog(struct sock *sk, struct sk_buff *skb)
 {
 	if (!sk->sk_backlog.tail) {
 		sk->sk_backlog.head = sk->sk_backlog.tail = skb;
@@ -575,6 +576,27 @@ static inline void sk_add_backlog(struct sock *sk, struct sk_buff *skb)
 		sk->sk_backlog.tail = skb;
 	}
 	skb->next = NULL;
+}
+
+/*
+ * Take into account size of receive queue and backlog queue
+ */
+static inline bool sk_rcvqueues_full(const struct sock *sk, const struct sk_buff *skb)
+{
+	unsigned int qsize = sk->sk_backlog.len + atomic_read(&sk->sk_rmem_alloc);
+
+	return qsize + skb->truesize > sk->sk_rcvbuf;
+}
+
+/* The per-socket spinlock must be held here. */
+static inline int sk_add_backlog(struct sock *sk, struct sk_buff *skb)
+{
+	if (sk_rcvqueues_full(sk, skb))
+		return -ENOBUFS;
+
+	__sk_add_backlog(sk, skb);
+	sk->sk_backlog.len += skb->truesize;
+	return 0;
 }
 
 static inline int sk_backlog_rcv(struct sock *sk, struct sk_buff *skb)
@@ -1358,20 +1380,7 @@ extern void sk_stop_timer(struct sock *sk, struct timer_list* timer);
 
 extern int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb);
 
-static inline int sock_queue_err_skb(struct sock *sk, struct sk_buff *skb)
-{
-	/* Cast skb->rcvbuf to unsigned... It's pointless, but reduces
-	   number of warnings when compiling with -W --ANK
-	 */
-	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
-	    (unsigned)sk->sk_rcvbuf)
-		return -ENOMEM;
-	skb_set_owner_r(skb, sk);
-	skb_queue_tail(&sk->sk_error_queue, skb);
-	if (!sock_flag(sk, SOCK_DEAD))
-		sk->sk_data_ready(sk, skb->len);
-	return 0;
-}
+extern int sock_queue_err_skb(struct sock *sk, struct sk_buff *skb);
 
 /*
  *	Recover an error report and clear atomically
@@ -1601,5 +1610,9 @@ extern int sysctl_optmem_max;
 
 extern __u32 sysctl_wmem_default;
 extern __u32 sysctl_rmem_default;
+
+#ifdef CONFIG_NET_NS
+extern int max_netns_count;
+#endif
 
 #endif	/* _SOCK_H */

@@ -177,6 +177,7 @@ struct swap_info_struct {
 	unsigned int max;
 	unsigned int inuse_pages;
 	unsigned int old_block_size;
+	void (*notify_swap_entry_free_fn) (unsigned long);
 };
 
 struct swap_list_t {
@@ -218,19 +219,9 @@ static inline void lru_cache_add_anon(struct page *page)
 	__lru_cache_add(page, LRU_INACTIVE_ANON);
 }
 
-static inline void lru_cache_add_active_anon(struct page *page)
-{
-	__lru_cache_add(page, LRU_ACTIVE_ANON);
-}
-
 static inline void lru_cache_add_file(struct page *page)
 {
 	__lru_cache_add(page, LRU_INACTIVE_FILE);
-}
-
-static inline void lru_cache_add_active_file(struct page *page)
-{
-	__lru_cache_add(page, LRU_ACTIVE_FILE);
 }
 
 /* linux/mm/vmscan.c */
@@ -323,6 +314,7 @@ extern struct swap_info_struct *get_swap_info_struct(unsigned);
 extern int reuse_swap_page(struct page *);
 extern int try_to_free_swap(struct page *);
 struct backing_dev_info;
+extern void set_notify_swap_entry_free(unsigned, void (*) (unsigned long));
 
 /* linux/mm/thrash.c */
 extern struct mm_struct *swap_token_mm;
