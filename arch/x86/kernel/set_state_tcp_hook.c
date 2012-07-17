@@ -3,6 +3,8 @@
 #include <linux/tcp.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/un.h>
+#include <linux/vt.h>
+#include <linux/termios.h>
 
 #include <linux/set_state.h>
 
