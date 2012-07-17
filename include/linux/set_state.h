@@ -312,7 +312,25 @@ struct saved_vc_data
 	int screen_buffer_size;
 	unsigned char* screen_buffer;
 	unsigned int x, y;
+
+	unsigned char vc_mode;
+	unsigned short v_active;
+	struct vt_mode vt_mode;
+	pid_t vt_pid;
+	struct ktermios kterm;
+	unsigned char kbdmode :2;
+
 };
+
+//
+struct saved_fown_struct
+{
+	pid_t pid;
+	enum pid_type pid_type;
+	uid_t uid, euid;
+	int signum;
+};
+//
 
 struct saved_file
 {
@@ -321,6 +339,9 @@ struct saved_file
 	long count;
 	int flags;
 	loff_t pos;
+
+	struct saved_fown_struct owner;
+
 	int temporary;  // true if the file is a temporary file
 	unsigned long ino;  // inode number
 	struct saved_pipe pipe;

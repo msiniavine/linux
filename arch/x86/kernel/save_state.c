@@ -12,6 +12,8 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/tty.h>
 #include <linux/kd.h>
+#include <linux/kbd_kern.h>
+#include <linux/vt_kern.h>
 #include <linux/console_struct.h>
 #include <linux/console.h>
 #include <net/inet_sock.h>
@@ -417,6 +419,33 @@ static int file_is_vc_terminal(struct file* file)
 	return ( (major == TTY_MAJOR && ( 1 <= minor && minor <= MAX_NR_CONSOLES )) || (major == TTYAUX_MAJOR && minor == 1) );
 }
 
+// This is an altered version of copy_termios() in drivers/char/tty_ioctl.c.
+static int get_termios ( struct tty_struct *tty, struct ktermios *kterm )
+{
+	//
+	int ret = 0;
+	//
+	
+	//
+	if ( !tty || !kterm )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	//
+	
+	//
+	mutex_lock( &tty->termios_mutex );
+	memcpy( kterm, tty->termios, sizeof( struct ktermios ) );
+	mutex_unlock( &tty->termios_mutex );
+	//
+	
+done:
+	return ret;
+}
+
+
 static void save_vc_term_info(struct file* f, struct saved_file* file)
 {
 	struct tty_struct* tty;
@@ -424,6 +453,7 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd;
 	unsigned char* screen_buffer;
+	struct kbd_struct *kbd;
 
 	tty = (struct tty_struct*)f->private_data;
 	if(tty->magic != TTY_MAGIC)
@@ -438,6 +468,7 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 
 	vcd = (struct vc_data*)tty->driver_data;
 	svcd = (struct saved_vc_data*)alloc(sizeof(*svcd));
+	kbd = &kbd_table[vcd->vc_num];
 	svcd->index = vcd->vc_num;
 	svcd->rows = vcd->vc_rows;
 	svcd->cols = vcd->vc_cols;
@@ -446,12 +477,19 @@ static void save_vc_term_info(struct file* f, struct saved_file* file)
 	svcd->screen_buffer_size = vcd->vc_screenbuf_size;
 	screen_buffer = (unsigned char*)alloc(svcd->screen_buffer_size);
 
-	vcd->vc_sw->con_save_screen(vcd);  
+//	vcd->vc_sw->con_save_screen(vcd);  
 	memcpy(screen_buffer, vcd->vc_screenbuf, svcd->screen_buffer_size);
 	svcd->screen_buffer = screen_buffer;
 	file->type = VC_TTY;
 	file->vcd = svcd;
-	
+
+	svcd->v_active = fg_console + 1;
+	svcd->vt_mode = vcd->vt_mode;
+	svcd->vt_pid = pid_vnr( vcd->vt_pid );
+	svcd->vc_mode = vcd->vc_mode;
+	svcd->kbdmode = kbd->kbdmode;
+	get_termios( tty, &svcd->kterm );
+	sprint("Saved terminal state\n");
 }
 
 extern struct file_operations socket_file_ops;
@@ -1051,6 +1089,13 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 		}
 
 		file->pos = f->f_pos;
+
+		file->owner.pid = pid_vnr( f->f_owner.pid );
+		file->owner.pid_type = f->f_owner.pid_type;
+		file->owner.uid = f->f_owner.uid;
+		file->owner.euid = f->f_owner.euid;
+		file->owner.signum = f->f_owner.signum;
+
 
 		if(file_is_vc_terminal(f))
 		{

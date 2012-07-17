@@ -44,6 +44,9 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/tty.h>
 #include <linux/kd.h>
+#include <linux/kbd_kern.h>
+#include <linux/vt_kern.h>
+#include <linux/console.h>
 #include <linux/console_struct.h>
 #include <linux/rmap.h>
 
@@ -983,33 +986,386 @@ void restore_fifo(int fd, struct saved_file* f, struct state_info* info, struct 
 void restore_file(int fd, struct saved_file* f, struct state_info* info);
 void redraw_screen(struct vc_data*, int);
 
+// Warning: This function is right now only called for VC terminals.
+static void restore_fown_struct ( struct saved_file *saved_file, struct file *file )
+{
+	//
+	struct pid *pid;
+	//
+	
+	//
+	rcu_read_lock();
+	
+	security_file_set_fowner( file );
+	
+	pid = find_vpid( saved_file->owner.pid );
+	if ( !pid && saved_file->owner.pid )
+	{
+		panic( "Unable to restore file's \'struct fown_struct\' due to missing \'struct pid\' of pid %d\n", saved_file->owner.pid );
+	}
+	
+	write_lock_irq( &file->f_owner.lock );
+	
+	put_pid( file->f_owner.pid );
+	file->f_owner.pid = get_pid( pid );
+	file->f_owner.pid_type = saved_file->owner.pid_type;
+	file->f_owner.uid = saved_file->owner.uid;
+	file->f_owner.euid = saved_file->owner.euid;
+	file->f_owner.signum = saved_file->owner.signum;
+	
+	write_unlock_irq( &file->f_owner.lock );
+	
+	rcu_read_unlock();
+	//
+	
+	return;
+}
+
+#define NOSET_MASK(x, y, z) (x = ((x) & ~(z)) | ((y) & (z)))
+
+// This is an altered version of the combination of set_termios(), 
+// change_termios(), and unset_locked_termios() in drivers/char/tty_ioctl.c.
+int set_termios ( struct tty_struct *tty, struct ktermios *kterm )
+{
+	//
+	struct tty_ldisc *ld;
+	
+	int i;
+	
+	struct ktermios old_kterm;
+	unsigned long flags;
+	
+	int retval = 0;
+	//
+
+	//
+	if ( !tty || !kterm )
+	{
+		return -EINVAL;
+	}
+	
+	retval = tty_check_change( tty );
+	if ( retval )
+	{
+		return retval;
+	}
+	//
+
+	//
+	ld = tty_ldisc_ref( tty );
+	if ( ld )
+	{
+		tty_ldisc_deref( ld );
+	}
+	//
+
+	//
+	mutex_lock( &tty->termios_mutex );
+	
+	old_kterm = *tty->termios;
+	*tty->termios = *kterm;
+	
+	//
+	if ( tty->termios_locked )
+	{
+		NOSET_MASK( tty->termios->c_iflag, old_kterm.c_iflag, tty->termios_locked->c_iflag );
+		NOSET_MASK( tty->termios->c_oflag, old_kterm.c_oflag, tty->termios_locked->c_oflag );
+		NOSET_MASK( tty->termios->c_cflag, old_kterm.c_cflag, tty->termios_locked->c_cflag );
+		NOSET_MASK( tty->termios->c_lflag, old_kterm.c_lflag, tty->termios_locked->c_lflag );
+		tty->termios->c_line = tty->termios_locked->c_line ? old_kterm.c_line : tty->termios->c_line;
+		for ( i = 0; i < NCCS; i++ )
+		{
+			tty->termios->c_cc[i] = tty->termios_locked->c_cc[i] ? old_kterm.c_cc[i] : tty->termios->c_cc[i];
+		}
+	}
+	//
+
+	// See if packet mode change of state.
+	if ( tty->link && tty->link->packet )
+	{
+		int old_flow = ((old_kterm.c_iflag & IXON) &&
+				(old_kterm.c_cc[VSTOP] == '\023') &&
+				(old_kterm.c_cc[VSTART] == '\021'));
+		int new_flow = (I_IXON(tty) &&
+				STOP_CHAR(tty) == '\023' &&
+				START_CHAR(tty) == '\021');
+		if ( old_flow != new_flow )
+		{
+			//
+			spin_lock_irqsave( &tty->ctrl_lock, flags );
+			
+			tty->ctrl_status &= ~( TIOCPKT_DOSTOP | TIOCPKT_NOSTOP );
+			if ( new_flow )
+			{
+				tty->ctrl_status |= TIOCPKT_DOSTOP;
+			}
+			else
+			{
+				tty->ctrl_status |= TIOCPKT_NOSTOP;
+			}
+			
+			spin_unlock_irqrestore( &tty->ctrl_lock, flags );
+			//
+			
+			wake_up_interruptible( &tty->link->read_wait );
+		}
+	}
+
+	if ( tty->ops->set_termios )
+	{
+		tty->ops->set_termios( tty, &old_kterm );
+	}
+	else
+	{
+		tty_termios_copy_hw( tty->termios, &old_kterm );
+	}
+
+	ld = tty_ldisc_ref( tty );
+	if ( ld )
+	{
+		if ( ld->ops->set_termios )
+		{
+			ld->ops->set_termios( tty, &old_kterm );
+		}
+		tty_ldisc_deref( ld );
+	}
+	
+	mutex_unlock( &tty->termios_mutex );
+	//
+
+	return 0;
+}
+//
+
+
 struct file* restore_vc_terminal(struct saved_file* f)
 {
+	//
 	struct file* file;
 	struct tty_struct* tty;
 	struct tty_driver* driver;
 	struct vc_data* vcd;
 	struct saved_vc_data* svcd = f->vcd;
+	
+	struct kbd_struct *kbd;
+	
 	char full_name[PATH_LENGTH];
-	strncpy(full_name, f->name, PATH_LENGTH);
-	full_name[PATH_LENGTH-1] = '\0';
-	file = do_filp_open(-100, full_name, f->flags, 0, 0);
+	unsigned long arg = 0;
+	int ret;
+	//
+	
+	strcpy( full_name, f->name );
+	file = filp_open( full_name, f->flags, 0 );
 	if(IS_ERR(file))
 	{
 		panic("Could not open terminal file with error: %ld\n", PTR_ERR(file));
 	}
+	
+	tty = file->private_data;
+	driver = tty->driver;
+	vcd = tty->driver_data;
+	kbd = &kbd_table[vcd->vc_num];
+	//
+	
+	//
+	restore_fown_struct( f, file );
+	//
+	
+	lock_kernel();
+	
+	//
+	sprint( "##### start 1\n" );
+	sprint( "vcd->vt_mode.mode: %d\n", vcd->vt_mode.mode );
+	sprint( "vcd->vt_mode.waitv: %d\n", vcd->vt_mode.waitv );
+	sprint( "vcd->vt_mode.relsig: %d\n", vcd->vt_mode.relsig );
+	sprint( "vcd->vt_mode.acqsig: %d\n", vcd->vt_mode.acqsig );
+	sprint( "vcd->vt_mode.frsig: %d\n", vcd->vt_mode.frsig );
+	sprint( "vcd->vc_mode: %u\n", vcd->vc_mode );
+	sprint( "kbd->kbdmode: %u\n", kbd->kbdmode );
+	sprint( "##### end 1\n" );
+	//
+	
+	sprint( "##### start 1\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 1\n" );
+	
+	// Set the active VT and wait for VT to become active.
+	
+	if ( fg_console + 1 != svcd->v_active )
+	{
+		arg = svcd->v_active;
+		if ( arg == 0 || arg > MAX_NR_CONSOLES )
+		{
+			panic( "Unable to continue due to invalid VT number, %d.\n", arg );
+		}
+		else
+		{
+			acquire_console_sem();
+			ret = vc_allocate( arg - 1 );
+			release_console_sem();
+			if ( ret )
+			{
+				panic( "Function vc_allocate() failed.\n" );
+			}
+			set_console( arg - 1 );
+		}
+		
+		ret = vt_waitactive( arg );
+		if ( ret )
+		{
+			panic( "Function vt_waitactive() failed.\n" );
+		}
+	}
+	
+	sprint( "##### start 2\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 2\n" );
+	
+	
+	// Set the VT mode of the VT.
+	
+	if ( svcd->vt_mode.mode != VT_AUTO && svcd->vt_mode.mode != VT_PROCESS )
+	{
+		panic( "Unable to continue due to invalid VT modes.\n" );
+	}
+	acquire_console_sem();
+	vcd->vt_mode = svcd->vt_mode;
+	put_pid( vcd->vt_pid );
+	vcd->vt_pid = find_vpid( svcd->vt_pid );
+	vcd->vt_newvt = -1;
+	release_console_sem();
+	if ( !vcd->vt_pid && svcd->vt_pid )
+	{
+		sprint( "Unable to find \'struct pid\' for pid %d.\n", svcd->vt_pid );
+	}
+	
+	sprint( "##### start 3\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 3\n" );
+	
+	// Set the VC mode of the VT.
+	//lock_kernel();
+	
+	arg = svcd->vc_mode;
+	switch ( arg )
+	{
+		case KD_GRAPHICS:
+			break;
+		case KD_TEXT0:
+		case KD_TEXT1:
+			arg = KD_TEXT;
+		case KD_TEXT:
+			break;
+		default:
+			panic( "Unable to continue due to invalid VC modes.\n" );
+	}
+	if ( vcd->vc_mode != ( unsigned char ) arg )
+	{
+		vcd->vc_mode = ( unsigned char ) arg;
+		if ( vcd->vc_num == fg_console )
+		{
+			//
+			// explicitly blank/unblank the screen if switching modes
+			//
+			acquire_console_sem();
+			if ( arg == KD_TEXT )
+			{
+				do_unblank_screen( 1 );
+			}
+			else
+			{
+				do_blank_screen( 1 );
+			}
+			release_console_sem();
+		}
+	}
+	
+	sprint( "##### start 4\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 4\n" );
+	
+	
+	// Set the KBD mode of the VT.
+	
+	arg = ((svcd->kbdmode == VC_RAW) ? K_RAW :
+				 (kbd->kbdmode == VC_MEDIUMRAW) ? K_MEDIUMRAW :
+				 (kbd->kbdmode == VC_UNICODE) ? K_UNICODE :
+				 K_XLATE);
+	
+	switch ( arg )
+	{
+		case K_RAW:
+			kbd->kbdmode = VC_RAW;
+			break;
+		case K_MEDIUMRAW:
+			kbd->kbdmode = VC_MEDIUMRAW;
+			break;
+		case K_XLATE:
+			kbd->kbdmode = VC_XLATE;
+			compute_shiftstate();
+			break;
+		case K_UNICODE:
+			kbd->kbdmode = VC_UNICODE;
+			compute_shiftstate();
+			break;
+		default:
+			panic( "Unable to restore VC terminal due to invalid KBD mode %d.\n", arg );
+	}
+	tty_ldisc_flush(tty);
+	
+	sprint( "##### start 5\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 5\n" );
+	
+	
+	// Set the terminal attributes.
+	//lock_kernel();
+	
+	ret = set_termios( tty, &svcd->kterm );
+	if ( ret < 0 )
+	{
+		panic( "Unable to restore VC terminal attributes.  Error: %d\n", ret );
+	}
+	
+	sprint( "##### start 6\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 6\n" );
+	
+	//unlock_kernel();
+	//
 
-	tty = (struct tty_struct*)file->private_data;
+	// Restore the terminal screen buffer.
+	//lock_kernel();
+	
+	//tty = (struct tty_struct*)file->private_data;
 	if(tty->magic != TTY_MAGIC)
 	{
 		panic("tty magic value does not match\n");
 	}
-	driver = tty->driver;
+	//driver = tty->driver;
 	if(driver->type != TTY_DRIVER_TYPE_CONSOLE || driver->subtype !=0)
 	{
 		panic("Driver type des not match\n");
 	}
-	vcd = (struct vc_data*)tty->driver_data;
+	//vcd = (struct vc_data*)tty->driver_data;
 	if(vcd->vc_screenbuf_size != svcd->screen_buffer_size)
 	{
 		panic("Screen buffer sizes do not match\n");
@@ -1018,8 +1374,34 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	vcd->vc_x = svcd->x;
 	vcd->vc_y = svcd->y;
 	redraw_screen(vcd, 0);
+	
+	sprint( "##### start 7\n" );
+	sprint( "full_name: \"%s\"\n", full_name );
+	sprint( "fg_console + 1: %d\n", fg_console + 1 );
+	sprint( "svcd->v_active: %d\n" , svcd->v_active );
+	sprint( "tty->count: %d\n", tty->count );
+	sprint( "##### end 7\n" );
+	
+	//unlock_kernel();
+	//
+	
+	//
+	sprint( "##### start 2\n" );
+	sprint( "vcd->vt_mode.mode: %d\n", vcd->vt_mode.mode );
+	sprint( "vcd->vt_mode.waitv: %d\n", vcd->vt_mode.waitv );
+	sprint( "vcd->vt_mode.relsig: %d\n", vcd->vt_mode.relsig );
+	sprint( "vcd->vt_mode.acqsig: %d\n", vcd->vt_mode.acqsig );
+	sprint( "vcd->vt_mode.frsig: %d\n", vcd->vt_mode.frsig );
+	sprint( "vcd->vc_mode: %u\n", vcd->vc_mode );
+	sprint( "kbd->kbdmode: %u\n", kbd->kbdmode );
+	sprint( "##### end 2\n" );
+	//
+	
+	unlock_kernel();
+	
 	return file;
 }
+
 
 #include <linux/fs.h>
 #include <linux/jbd.h>
