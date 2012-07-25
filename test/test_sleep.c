@@ -6,9 +6,10 @@
 int main()
 {
 	enable_save_state();
-	while(!was_state_restored())
+	while(1)
 	{
 		sleep(10);
+	        was_state_restored();
 	}
 	sleep(30);
 

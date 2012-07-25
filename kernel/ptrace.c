@@ -147,7 +147,8 @@ int __ptrace_may_access(struct task_struct *task, unsigned int mode)
 	     cred->gid != tcred->egid ||
 	     cred->gid != tcred->sgid ||
 	     cred->gid != tcred->gid) &&
-	    !capable(CAP_SYS_PTRACE)) {
+	    !capable(CAP_SYS_PTRACE))
+	{
 		rcu_read_unlock();
 		if(was_state_restored(task)) return 0; // HACK: for the set state
 		return -EPERM;

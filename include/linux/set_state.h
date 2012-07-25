@@ -1,3 +1,14 @@
+#include <linux/fb.h>
+#include <linux/vt.h>
+#include <linux/mousedev.h>
+#include <linux/socket.h>
+#include <linux/un.h>
+#include <net/af_unix.h>
+#include <linux/termios.h>
+
+#ifdef unix
+#undef unix
+#endif
 
 #define FASTREBOOT_REGION_SIZE 64 * 1024 * 1024
 #define FASTREBOOT_REGION_START (0x1000000 + FASTREBOOT_REGION_SIZE)
@@ -80,12 +91,16 @@ struct saved_state
 	struct list_head processes;
 	unsigned long checkpoint_size;
 	struct timespec start_quiescence, end_quiescence, start_checkpoint, end_checkpoint;
+	int counter;
 };
 
-
 #ifndef SET_STATE_ONLY_FUNCTIONS
+
+// Warning: Is the maximum path length 256 or 4096?  It says 4096 in linux/limits.h.
 #define PATH_LENGTH 256
+#define MAX_PATH PATH_LENGTH
 #define PIPE_BUFFERS (16)
+//
 
 // File types
 #define REGULAR_FILE 0
@@ -96,6 +111,8 @@ struct saved_state
 // Terminal that outputs to a virtual console
 #define VC_TTY  5
 #define SOCKET 6
+#define FRAMEBUFFER 7
+#define MOUSE 8
 
 struct saved_inet_sock
 {     
@@ -123,6 +140,7 @@ struct saved_sk_buff
 struct saved_tcp_state
 {
 	int state;
+	int backlog;
 	__be32 daddr;
 	__be32 saddr;
 	__be16 sport;  // source port in host format
@@ -322,6 +340,52 @@ struct saved_vc_data
 
 };
 
+struct saved_fb_info
+{
+	struct fb_var_screeninfo var;
+	struct fb_cmap cmap;
+	//struct fb_con2fbmap con2fbs[MAX_NR_CONSOLES];
+};
+
+struct saved_fb
+{
+	int minor;
+	struct saved_fb_info *info;
+	char *contents;
+	
+	struct fb_con2fbmap *con2fbs;
+};
+
+//
+struct saved_mousedev
+{
+	struct mousedev_hw_data packet;
+	unsigned int pkt_count;
+	int old_x[4], old_y[4];
+	int frac_dx, frac_dy;
+	unsigned long touch;
+};
+
+struct saved_mousedev_client
+{
+	struct mousedev_motion packets[PACKET_QUEUE_LEN];
+	unsigned int head, tail;
+	int pos_x, pos_y;
+
+	signed char ps2[6];
+	unsigned char ready, buffer, bufsiz;
+	unsigned char imexseq, impsseq;
+	enum mousedev_emul mode;
+	unsigned long last_buttons;
+};
+
+struct saved_mouse
+{
+	struct saved_mousedev mousedev;
+	struct saved_mousedev_client client;
+};
+//
+
 //
 struct saved_fown_struct
 {
@@ -344,9 +408,12 @@ struct saved_file
 
 	int temporary;  // true if the file is a temporary file
 	unsigned long ino;  // inode number
+
 	struct saved_pipe pipe;
 	struct saved_vc_data* vcd;
 	struct saved_socket socket;
+	struct saved_fb fb;
+	struct saved_mouse mouse;
 };
 
 struct saved_page
@@ -428,8 +495,6 @@ struct saved_task_struct
 	unsigned int gs;                                      // gs registor is not saved automatically
 	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];  // Thread local storage segment descriptors
 
-
-
 	char exe_file[PATH_LENGTH];         // name of the executable file
 	struct saved_files* open_files;
 	struct saved_fs_struct* fs;
@@ -448,8 +513,6 @@ struct saved_task_struct
 
 };
 
-
-
 struct global_state_info
 {
 	wait_queue_head_t wq;
@@ -458,6 +521,10 @@ struct global_state_info
 	struct completion all_done;
 	struct pipe_restore_temp *pipe_restore_head;
 	struct pipes_to_close *pipe_close_head;
+	
+	//
+	struct completion all_parents_restored;
+	//
 };
 
 struct map_entry
@@ -467,5 +534,10 @@ struct map_entry
 	void* second;
 };
 
+
+struct map_entry* new_map(void);
+void delete_map(struct map_entry*);
+void insert_entry(struct map_entry* head, void* first, void* second);
+void* find_by_first(struct map_entry* head,  void* first);
 
 #endif

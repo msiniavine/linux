@@ -44,7 +44,6 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/tty.h>
 #include <linux/kd.h>
-#include <linux/kbd_kern.h>
 #include <linux/vt_kern.h>
 #include <linux/console.h>
 #include <linux/console_struct.h>
@@ -64,6 +63,39 @@
 
 #include <linux/set_state.h>
 
+#include <linux/mousedev.h>
+
+#include <linux/kbd_kern.h>
+#include <linux/smp_lock.h>
+
+#include <linux/termios.h>
+
+#define NOSET_MASK(x, y, z) (x = ((x) & ~(z)) | ((y) & (z)))
+
+static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_info );
+static int restore_fb_contents ( struct fb_info *info, char *contents );
+static int restore_con2fbmaps ( struct fb_info *info, struct fb_con2fbmap *con2fbs );
+static struct file *restore_fb ( struct saved_file *saved_file );
+static struct file *restore_mouse ( struct saved_file *saved_file );
+
+// These three are altered versions of the socket(), bind(), and listen() system calls, respectively.
+struct file *create_socket ( int fd, int flags_additional, int family, int type, int protocol );
+int bind_socket ( struct file *file, struct sockaddr *address, int address_length );
+int listen_socket ( struct file *file, int backlog );
+//
+
+// The function set_owner() is an altered version of the chown() system call in fs/open.c.
+static int chown_common ( struct path *path, uid_t user, gid_t group );
+int set_owner ( char *path, uid_t user, gid_t group );
+//
+
+//
+static void restore_fown_struct ( struct saved_file *saved_file, struct file *file );
+//
+
+// This is an altered version of the combination of set_termios() and change_termios() in drivers/char/tty_ioctl.c.
+int set_termios ( struct tty_struct *tty, struct ktermios *kterm );
+//
 
 int debug_was_state_restored = 0;
 
@@ -205,6 +237,8 @@ struct used_file
 	struct file* filep;
 };
 
+// This function allocates memory for a new used_file object, initializes its
+// list_head object, and then returns a pointer to the new used_file object.
 static struct used_file* init_used_files(void)
 {
 	struct used_file* ret = (struct used_file*)kmalloc(sizeof(struct used_file), GFP_KERNEL);
@@ -215,6 +249,7 @@ static struct used_file* init_used_files(void)
 	INIT_LIST_HEAD(&ret->list);
 	return ret;
 }
+//
 
 struct file* find_file(struct used_file* head, char* filename)
 {
@@ -337,6 +372,21 @@ static int create_vmas(struct linux_binprm* bprm, struct saved_task_struct* stat
 static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* state, struct used_file* files,
 	struct map_entry* head)
 {
+  	// The code below first checks to see if the "saved" memory descriptor has been
+  	// encountered before.  If it has been encountered, then increment the mm_users
+  	// field of the associated "real" memory descriptor by 1 and then set the mm field
+  	// of bprm to point to that mm_struct; otherwise, allocate
+  	// memory and initialize that memory for a new mm_struct, and then "insert" it
+  	// and the associated saved_mm_struct into the map_entry objects list...
+  	//
+  	// If memory could not be allocated for a new mm_struct, then -ENOMEM is returned.
+  	// -ENOMEM is the out of memory error number.
+  	//
+  	// nr_ptes is...?
+  	//
+  	// clone_pgd_range(mm->pgd, state->mm->pgd, SAVED_PGD_SIZE) appears to
+  	// copy SAVED_PGD_SIZE amount of PGDs starting from state->mm->pgd to
+  	// mm->pgd...
 	int err;
 	struct mm_struct *mm = NULL;
 	struct mm_struct* old_mm = NULL;
@@ -362,10 +412,14 @@ static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* s
 	sprint( "Setting nr_ptes to: %lu\n", mm->nr_ptes);
 	sprint("mm->pgd: %p, state->pgd: %p\n", mm->pgd, state->mm->pgd);
 	clone_pgd_range(mm->pgd, state->mm->pgd, SAVED_PGD_SIZE);
+	//
 
+	// Copy over the heap start and end addresses.
 	mm->start_brk = state->mm->start_brk;
 	mm->brk = state->mm->brk;
+	//
 
+	// ???
 	err = init_new_context(current, mm);
 	if (err)
 		goto err;
@@ -375,7 +429,9 @@ static int bprm_mm_create(struct linux_binprm *bprm, struct saved_task_struct* s
 		goto err;
 	sprint("Created vmas\n");
 	return 0;
+	//
 
+	// ???
 err:
 	if (mm) {
 		bprm->mm = NULL;
@@ -383,6 +439,7 @@ err:
 	}
 
 	return err;
+	//
 }
 
 // Finds the other pipe end from the global table
@@ -970,7 +1027,6 @@ int set_termios ( struct tty_struct *tty, struct ktermios *kterm )
 }
 //
 
-
 struct file* restore_vc_terminal(struct saved_file* f)
 {
 	//
@@ -1026,7 +1082,6 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	sprint( "##### end 1\n" );
 	
 	// Set the active VT and wait for VT to become active.
-	
 	if ( fg_console + 1 != svcd->v_active )
 	{
 		arg = svcd->v_active;
@@ -1059,9 +1114,6 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	sprint( "svcd->v_active: %d\n" , svcd->v_active );
 	sprint( "tty->count: %d\n", tty->count );
 	sprint( "##### end 2\n" );
-	
-	
-	// Set the VT mode of the VT.
 	
 	if ( svcd->vt_mode.mode != VT_AUTO && svcd->vt_mode.mode != VT_PROCESS )
 	{
@@ -1129,7 +1181,6 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	sprint( "tty->count: %d\n", tty->count );
 	sprint( "##### end 4\n" );
 	
-	
 	// Set the KBD mode of the VT.
 	
 	arg = ((svcd->kbdmode == VC_RAW) ? K_RAW :
@@ -1164,7 +1215,6 @@ struct file* restore_vc_terminal(struct saved_file* f)
 	sprint( "svcd->v_active: %d\n" , svcd->v_active );
 	sprint( "tty->count: %d\n", tty->count );
 	sprint( "##### end 5\n" );
-	
 	
 	// Set the terminal attributes.
 	//lock_kernel();
@@ -1335,6 +1385,12 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 	        case VC_TTY:
 			file = restore_vc_terminal(f);
 			break;
+		case FRAMEBUFFER:
+			file = restore_fb( f );
+			break;
+		case MOUSE:
+			file = restore_mouse( f );
+			break;
 		default:
 			file = do_filp_open(AT_FDCWD, f->name, f->flags, 0, 0); 
 
@@ -1364,7 +1420,6 @@ void restore_file(int fd, struct saved_file* f, struct state_info* info)
 
 	atomic_long_set(&(file->f_count), f->count);
 	sprint("Set file count value to %ld\n", f->count);
-
 
 	if(IS_ERR(file))
 	{
@@ -1444,6 +1499,13 @@ ok:
 
 	local_bh_enable();
 	return 0;
+	
+
+	
+/*	inet_sk(sk)->sport = htons(desired_port);
+	__inet_hash_nolisten(sk);
+	return 0;
+	*/
 }
 
 // calculates tcp checksum on the saved socket buffers
@@ -1980,6 +2042,7 @@ void restore_udp_socket(int fd, struct saved_file* f){
 	int flags = sock.flags;
 
 	//create a socket using the original spec
+	sprint("Restoring udp socket\n");
 
 	retval = sock_create(sock.sock_family, sock.type, sock.sock_protocol, &socket);
 	if (retval < 0){
@@ -2643,6 +2706,7 @@ void restore_socket(int fd, struct saved_file* f, struct state_info* info)
 		break;
 
 	}
+	//
 }
 
 void restore_files(struct saved_task_struct* state, struct state_info* info)
@@ -2669,6 +2733,7 @@ void restore_files(struct saved_task_struct* state, struct state_info* info)
 		if (f->fd > max_fd)
 			max_fd = f->fd;
 	}
+	//
 
 	list_for_each_entry(f, &state->open_files->files, list)
 	{
@@ -2691,8 +2756,9 @@ void restore_files(struct saved_task_struct* state, struct state_info* info)
 				restore_file(f->fd, sfile, info);
 				break;
 		}
+		
+		
 	}
-	
 	insert_entry(info->head, state->open_files, current->files);
 }
 
@@ -2852,12 +2918,16 @@ static struct pid *alloc_orig_pid(pid_t original_pid, struct pid_namespace *ns)
 	struct pid_namespace *tmp;
 	struct upid *upid;
 
+	// Appears to be allocating memory from some kind of cache for a single
+	// struct pid object.
 	sprint("Changing pid from %d to %d/n", task_pid_nr(current), original_pid);
 	pid = kmem_cache_alloc(ns->pid_cachep, GFP_KERNEL);
 	if (!pid)
 		goto out;
 	sprint("Allocated pid structure\n");
+	//
 
+	// ???
 	sprint("pid_namespace has %d levels\n", ns->level);
 	tmp = ns;
 	for (i = ns->level; i >= 0; i--) {
@@ -2869,13 +2939,23 @@ static struct pid *alloc_orig_pid(pid_t original_pid, struct pid_namespace *ns)
 		pid->numbers[i].ns = tmp;
 		tmp = tmp->parent;
 	}
+	//
 
+	// level is...?
+	//
+	// atomic_set(&pid->count, 1) sets the number of tasks using this pid to 1...
+	//
+	// INIT_HLIST_HEAD() sets the first field of the object pointed to by the 
+	// passed in pointer to NULL...
+	//
 	//get_pid_ns(ns);
 	pid->level = ns->level;
 	atomic_set(&pid->count, 1);
 	for (type = 0; type < PIDTYPE_MAX; ++type)
 		INIT_HLIST_HEAD(&pid->tasks[type]);
+	//
 
+	// ???
 	spin_lock_irq(&pidmap_lock);
 	for (i = ns->level; i >= 0; i--) {
 		upid = &pid->numbers[i];
@@ -2883,6 +2963,7 @@ static struct pid *alloc_orig_pid(pid_t original_pid, struct pid_namespace *ns)
 				&pid_hash[pid_hashfn(upid->nr, upid->ns)]);
 	}
 	spin_unlock_irq(&pidmap_lock);
+	//
 
 out:
 	return pid;
@@ -2910,7 +2991,6 @@ void restore_signals(struct saved_task_struct* state)
 	
 	current->blocked = state->sighand.blocked;
 	current->pending.signal = state->sighand.pending;
-
 	current->signal->shared_pending.signal = state->sighand.shared_pending;
 	spin_unlock_irq(&sighand->siglock);	
 
@@ -2934,7 +3014,7 @@ void restore_signals(struct saved_task_struct* state)
 
 void become_user_process(void)
 {
-	current->flags = current->flags & ~PF_KTHREAD;
+	current->flags &= ~PF_KTHREAD;
 }
 
 void restore_creds(struct saved_task_struct* state)
@@ -3034,7 +3114,7 @@ void restore_registers(struct saved_task_struct* state)
 }
 
 
-static struct global_state_info global_state;
+struct global_state_info global_state;
 static struct pipe_restore_temp pipe_restore_head;
 static struct pipes_to_close pipe_close_head;
 
@@ -3048,6 +3128,7 @@ void resume_saved_state(void)
 	asm_resume_saved_state(task_pt_regs(current));
 }
 
+// Why is this function required if it pretty much just calls another function?
 int do_restore(void* data)
 {
 	struct state_info* info = (struct state_info*)data;
@@ -3057,6 +3138,7 @@ int do_restore(void* data)
 	sprint("state restored need to return to user space\n");
 	return 0;
 }
+//
 
 static void restore_children(struct saved_task_struct* state, struct state_info* p_info)
 {
@@ -3141,7 +3223,7 @@ static void reparent_to_init(struct task_struct* task)
 	write_unlock_irq(&tasklist_lock);
 }
 
-
+// What calls this function?  Where is this function called?
 int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 {
 	struct task_struct* thread;
@@ -3152,9 +3234,29 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 //	DECLARE_COMPLETION_ONSTACK(all_done);
 //	wait_queue_head_t wq;
 
+	//
+	static struct map_entry *map_entry_head = NULL;
+	//
+	
+	//
+	if ( !map_entry_head )
+	{
+		map_entry_head = new_map();
+	}
+	//
+
+	// init_waitqueue_head() sets the variable pointed to by the argument to NULL.
+	//
+	// atomic_set() sets (v)->counter to equal to its second argument, where v is
+	// the function's first argument.
+	//
+	// init_completion() sets x->done to equal to 0 and passes in &x->wait as an
+	// argument into init_wait_queue_head(), where x is the function's first and
+	// and only argument.
 	init_waitqueue_head(&global_state.wq);
 	atomic_set(&global_state.processes_left, count_processes(state));
 	init_completion(&global_state.all_done);
+	//
 
 //int restore_count;
 //DEFINE_MUTEX(lock);
@@ -3162,13 +3264,14 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 // DECLARE_COMPLETION(all_done);
 
 
-
-
 	sprint("Restoring pid parent: %d\n", state->pid);
 	sprint("Need to restore %d processes\n", atomic_read(&global_state.processes_left));
 
+	// Some setting up of the state_info object...
+	//
+	// What is the stuff after info->parent = NULL;?
 	info = (struct state_info*)kmalloc(sizeof(*info), GFP_KERNEL);
-	info->head = new_map();
+	info->head = map_entry_head;
 	info->state = state;
 	info->parent = NULL;
 	info->global_state = &global_state;
@@ -3178,16 +3281,19 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	info->global_state->pipe_restore_head->processlist = NULL;
 	info->global_state->pipe_close_head = &pipe_close_head;
 	info->global_state->pipe_close_head->next = NULL;
+	//
 
+	// Creates a thread that begins executing do_restore().  The variable
+	// info is the argument into do_restore().
 	thread = kthread_create(do_restore, info, "test_thread");
 	if(IS_ERR(thread))
 	{
 		sprint("Failed to create a thread\n");
 		return 0;
 	}
+	//
 
 	reparent_to_init(thread);
-
  	wake_up_process(thread);
 	sprint("parent waiting for children\n");
 	wait_event(global_state.wq, atomic_read(&global_state.processes_left) == 0);
@@ -3195,23 +3301,34 @@ int set_state(struct pt_regs* regs, struct saved_task_struct* state)
 	unregister_set_state_hook();
 	complete_all(&global_state.all_done);
 	return 0;
+	//
 }
+//
 
 int do_set_state(struct state_info* info)
 {
+  	// ???
 	struct linux_binprm* bprm;
 	struct files_struct* displaced;
 	int retval;
 	struct file* file;
 	struct used_file* used_files;
 	struct saved_task_struct* state = info->state;
-
+	// current is the task_struct of the current process, which is
+	// the process that is executing this code.
+	//
+	// Besides setting displaced to point to the "current" task's files
+	// descriptor, what else does unshare_files() do?
 	sprint("Ptrace flags: %x, thread_info flags: %x\n", current->ptrace, task_thread_info(current)->flags);
 	retval = unshare_files(&displaced); // this seems to copy the open files of the current task (displaced is released later)
 	if(retval)
 		goto out_ret;
 	sprint( "Unsared files\n");
+	//
 
+	// Allocating memory for a single struct linux_binprm object.
+	//
+	// -ENOMEM is the out of memory error number.
 	retval = -ENOMEM;
 	bprm = kzalloc(sizeof(*bprm), GFP_KERNEL);
 	if(!bprm)
@@ -3224,12 +3341,35 @@ int do_set_state(struct state_info* info)
 	if(retval < 0)
 		goto out_kfree;
 	sprint( "Allocated bprm\n");
-
+	
+	// open_exec() "opens" the file specified by the given path and returns a 
+	// pointer to a struct file object?  Which process descriptor is the open file
+	// "associated" with?  The kernel process?
+	//
+	// PTR_ERR() appears to just type-cast the passed in pointer into a long type and then
+	// returns that value.
 	file = open_exec(state->exe_file);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		goto out_kfree;
+	//
 
+	// file is a pointer to a struct file object representing the executable file.
+	//
+	// filename is the full path and name of the executable...
+	//
+	// interp is the full path and name of the file being executed...
+	//
+	//
+	// init_used_files() creates a new used_file object, does some initializing, and then
+	// returns a pointer to it.
+	//
+	// filename appears to be the full path and name of the same executable.
+	//
+	// filep is the pointer to the struct file object representing the executable file.
+	//
+	//
+	// What does get_file() do?
 	bprm->file = file;
 	bprm->filename = state->exe_file;
 	bprm->interp = state->exe_file;
@@ -3238,22 +3378,28 @@ int do_set_state(struct state_info* info)
 	used_files->filep = file;
 	get_file(file);
 	sprint( "Opened executable file\n");
+	//
 
+	// ???
 	retval = bprm_mm_create(bprm, state, used_files, info->head);
 	if(retval)
 		goto out_file;
 	sprint( "Allocated new mm_struct\n");
-//	print_mm(bprm->mm);
 
 	sprint( "Allocated security\n");
 
 	//here original exec was changing the value of bprm->p which has something to do with the stack
 	//but i am skipping that for now, since I dont know what it does
 
+	// ???
 	retval = prepare_binprm(bprm);
 	if(retval < 0)
 		goto out;
 	sprint( "bprm prepared\n");
+	//
+	
+	sprint( "##### state->name: %s\n", state->name );
+	sprint( "####1 current->comm: %s\n", current->comm );
 
 	//here execve used to call load_elf_binary
 	retval = load_saved_binary(bprm, state);
@@ -3263,34 +3409,56 @@ int do_set_state(struct state_info* info)
 		struct pid* pid;
 		struct pid* current_pid;
 
+		// Turn off the "current" process'PF_KTHREAD flag.
+		// The PF_KTHREAD flag is an indication that that process is
+		// a kernel process.
 		become_user_process();
+		//
 
+		// ???
 		current_pid = task_pid(current);
 		sprint("Current pid count:%d\n", atomic_read(&current_pid->count));
 		sprint("Saved gs %x\n", state->gs);
 		
+		// First line gets the processor that is currently executing this code?
+		//
+		// Is gs a register?  What is this one for?
+		//
+		// The third line is copying over the contents of Thread-Local Storage of the
+		// saved process into the current process?
+		//
+		// What is load_TLS()?
+		// What does put_cpu() do?
+		// What does loadsegment do?
 		cpu = get_cpu();
 		current->thread.gs = state->gs;
 		memcpy(current->thread.tls_array, state->tls_array, GDT_ENTRY_TLS_ENTRIES*sizeof(struct desc_struct));
 		load_TLS(&current->thread, cpu);
 		put_cpu();
 		loadsegment(gs, state->gs);
-		
-	       
-	
+
+		// This at least changes this process' pid to, perhaps, the one that
+		// the saved process that this process will become used to have...
+		//
+		// ???
 		pid = alloc_orig_pid(state->pid, current->nsproxy->pid_ns);
 		change_pid(current, PIDTYPE_PID, pid);
 		current->pid = pid_nr(pid);
 		current->tgid = current->pid;
+		//
 
 
+		// ???
 		tracehook_report_exec(NULL, bprm, &state->registers);
+		//
 
+		// ???
 		acct_update_integrals(current);
 		free_files(used_files);
 		free_bprm(bprm);
 		if (displaced)
 			put_files_struct(displaced);
+		//
 
 		debug_was_state_restored = 1;
 		restore_fs(state, info);
@@ -3298,8 +3466,15 @@ int do_set_state(struct state_info* info)
 		sprint("Ptrace flags: %x, thread_info flags: %lx\n", current->ptrace, task_thread_info(current)->flags);
 		restore_signals(state);
 		restore_creds(state);
+		//
 
 		restore_registers(state);
+		
+		//
+		strcpy( current->comm, state->name );
+		sprint( "##### state->name: %s\n", state->name );
+		sprint( "####2 current->comm: %s\n", current->comm );
+		//
 
 		add_to_restored_list(current);
 
@@ -3318,22 +3493,26 @@ int do_set_state(struct state_info* info)
 			write_unlock_irq(&tasklist_lock);
 		}
 
-
 		sprint("Current %d, parent %d %s\n", current->pid, current->real_parent->pid, current->real_parent->comm);
 
 		if (atomic_dec_and_test(&info->global_state->processes_left)) {
 			sprint("child wakes up parent\n");
 			wake_up(&info->global_state->wq);
+			sprint("after child wakes up parent\n");
 		}
 		wait_for_completion(&info->global_state->all_done);
-
+		
 		// Post-restore, pre-wakeup tasks
 		close_unused_pipes(state, info->global_state);
 		kfree(info);
-
 		resume_saved_state();
+		
+		sprint( "####3 current->comm: %s\n", current->comm );
+		
 		return 0;
 	}
+	
+	sprint( "####4 current->comm: %s\n", current->comm );
 
 out:
 	if(bprm->mm)
@@ -3354,6 +3533,319 @@ out_ret:
 	return retval;
 }
 
+static int restore_fb_info ( struct fb_info *info, struct saved_fb_info *saved_info )
+{
+	//
+	int ret = 0;
+	//
 
+	if ( !info || !saved_info )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		ret = -ENODEV;
+		
+		goto done;
+	}
+	
+	// Restore struct fb_var_screeninfo.
+	sprint( "####1 info: 0x%.8X\t&saved_info->var: 0x%.8X\n", info, &saved_info->var );
+	
+	acquire_console_sem();
+	
+	info->flags |= FBINFO_MISC_USEREVENT;
+	fb_set_var( info, &saved_info->var );
+	info->flags &= ~FBINFO_MISC_USEREVENT;
+	
+	release_console_sem();
+	
+	sprint( "####2 info: 0x%.8X\t&saved_info->var: 0x%.8X\n", info, &saved_info->var );
+	//
+	
+	// Restore the struct fb_cmap object.
+	sprint( "####3 &saved_info->cmap: 0x%.8X\tinfo: 0x%.8X\n", &saved_info->cmap, info );
+	
+	fb_set_cmap( &saved_info->cmap, info );
+	
+	sprint( "####4 &saved_info->cmap: 0x%.8X\tinfo: 0x%.8X\n", &saved_info->cmap, info );
+	//
+	
+	//
+unlock:
+	unlock_fb_info( info );
+	//
+	
+	//
+done:
+	return ret;
+	//
+}
 
+// This function is an altered version of fb_write() in the file drivers/video/fbmem.c.
+static int restore_fb_contents ( struct fb_info *info, char *contents )
+{
+	u32 *src;
+	u32 __iomem *dst;
+	int c, i, cnt = 0;
+	int count = 0;
+	int ret = 0;
+	
+	if ( !info || !contents )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		ret = -ENODEV;
+		
+		goto done;
+	}
+		
+	if ( !info->screen_base )
+	{
+		ret = -ENODEV;
+		
+		goto unlock;
+	}
+
+	if ( info->state != FBINFO_STATE_RUNNING )
+	{
+		ret = -EPERM;
+		
+		goto unlock;
+	}
+	
+	//
+	count = info->screen_size;
+
+	if ( count == 0 )
+		count = info->fix.smem_len;
+	//
+
+	dst = ( u32 __iomem  *) ( info->screen_base );
+
+	if (info->fbops->fb_sync)
+		info->fbops->fb_sync(info);
+		
+	src = ( u32 * ) contents;
+
+	while ( count > 0 )
+	{
+		c = ( count > PAGE_SIZE ) ? PAGE_SIZE : count;
+
+		for ( i = c >> 2; i > 0; i-- )
+		{
+			fb_writel( *src, dst );
+			
+			src++;
+			dst++;
+		}
+
+		if ( c & 3 )
+		{
+			u8 *src8 = ( u8 * ) src;
+			u8 __iomem *dst8 = ( u8 __iomem * ) dst;
+
+			for ( i = c & 3; i > 0; i-- )
+			{
+				fb_writeb( *src8, dst8 );
+				
+				src8++;
+				dst8++;
+			}
+
+			src = ( u32 __iomem * ) src8;
+			dst = ( u32 __iomem * ) dst8;
+		}
+
+		cnt += c;
+		count -= c;
+	}
+
+	//ret = cnt;
+	ret = 0;
+	
+unlock:
+	unlock_fb_info( info );
+	
+done:
+	return ret;
+}
+//
+
+static int restore_con2fbmaps ( struct fb_info *info, struct fb_con2fbmap *con2fbs )
+{
+	//
+	int ret = 0;
+	
+	struct fb_event event;
+	
+	int index = 0;
+	//
+	
+	if ( !info || !con2fbs )
+	{
+		ret = -EINVAL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		ret = -ENODEV;
+		
+		goto done;
+	}
+
+	//
+	for ( index = 0; index < MAX_NR_CONSOLES; index++ )
+	{
+		request_module( "fb%d", con2fbs[index].framebuffer );
+		
+		event.data = &con2fbs[index];
+		event.info = info;
+		fb_notifier_call_chain( FB_EVENT_SET_CONSOLE_MAP, &event );
+	}
+	//
+	
+unlock:
+	unlock_fb_info( info );
+
+done:
+	return ret;
+}
+
+static struct file *restore_fb ( struct saved_file *saved_file )
+{
+	//
+	//struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	struct file *file = NULL;
+	char filename[MAX_PATH] = "";
+	
+	int status = 0;
+	//
+	
+	//sprintf( filename, "/dev/fb%d", saved_file->fb.minor );
+	strcpy( filename, saved_file->name );
+	
+	// The function filp_open() does not return NULL on error?
+	file = filp_open( filename, saved_file->flags, 0 );
+	if ( IS_ERR( file ) )
+	{
+		panic( "Unable to open framebuffer file \'%s\'.\n", filename );
+	}
+	//
+	
+	sprint( "##### Restoring framebuffer %d.\n", saved_file->fb.minor );
+	
+	//
+	if ( saved_file->fb.info )
+	{
+		sprint( "##### Restoring the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		status = restore_fb_info( file->private_data, saved_file->fb.info );
+		if ( status )
+		{
+			panic( "Unable to restore the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		}
+	}
+	
+	if ( saved_file->fb.contents )
+	{
+		sprint( "##### Restoring the contents of framebuffer %d.\n", saved_file->fb.minor );
+		status = restore_fb_contents( file->private_data, saved_file->fb.contents );
+		if ( status )
+		{
+			panic( "Unable to restore the contents of framebuffer %d.\n", saved_file->fb.minor );
+		}
+		
+		//state->saved_fb_contents = 0;
+	}
+	
+	if ( saved_file->fb.con2fbs )
+	{
+		sprint( "##### Restoring the con2fbmaps.\n" );
+		status = restore_con2fbmaps( file->private_data, saved_file->fb.con2fbs );
+		if ( status )
+		{
+			panic( "Unable to restore the con2fbmaps.\n" );
+		}
+		
+		//state->saved_con2fbmaps = 0;
+	}
+	
+	/*if ( status1 || status2 || status3 )
+	{
+		panic( "Unable to restore framebuffer %d.\n", saved_file->fb.minor );
+	}*/
+	//
+	
+	return file;
+}
+
+static struct file *restore_mouse ( struct saved_file *saved_file )
+{
+	//
+	struct file *file;
+	
+	struct mousedev_client *client;
+	struct mousedev *mousedev;
+	
+	struct saved_mousedev_client *saved_client = &saved_file->mouse.client;
+	struct saved_mousedev *saved_mousedev = &saved_file->mouse.mousedev;
+	//
+	
+	//
+	file = filp_open( saved_file->name, saved_file->flags, 0 );
+	if ( IS_ERR( file ) )
+	{
+		panic( "Unable to open mouse file \'%s\'.\n", saved_file->name );
+	}
+	
+	client = file->private_data;
+	mousedev = client->mousedev;
+	//
+	
+	//
+	//
+	
+	//
+	spin_lock_irq( &client->packet_lock );
+	memcpy( client->packets, saved_client->packets, sizeof( client->packets ) );
+	spin_unlock_irq( &client->packet_lock );
+	
+	client->head = saved_client->head;
+	client->tail = saved_client->tail;
+	client->pos_x = saved_client->pos_x;
+	client->pos_y = saved_client->pos_y;
+
+	memcpy( client->ps2, saved_client->ps2, sizeof( client->ps2 ) );
+	client->ready = saved_client->ready;
+	client->buffer = saved_client->buffer;
+	client->bufsiz = saved_client->bufsiz;
+	client->imexseq = saved_client->imexseq;
+	client->impsseq = saved_client->impsseq;
+	client->mode = saved_client->mode;
+	client->last_buttons = saved_client->last_buttons;
+	
+	
+	mousedev->packet = saved_mousedev->packet;
+	mousedev->pkt_count = saved_mousedev->pkt_count;
+	memcpy( mousedev->old_x, saved_mousedev->old_x, sizeof( mousedev->old_x ) );
+	memcpy( mousedev->old_y, saved_mousedev->old_y, sizeof( mousedev->old_y ) );
+	mousedev->frac_dx = saved_mousedev->frac_dx;
+	mousedev->frac_dy = saved_mousedev->frac_dy;
+	mousedev->touch = saved_mousedev->touch;
+	//
+	
+	return file;
+}
 

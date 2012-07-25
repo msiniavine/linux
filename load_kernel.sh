@@ -19,7 +19,11 @@ cd test
 
 #./launcher `pidof mysqld`
 
-./test_runner
+#./test_runner
+
+Xfbdev -dumb -softCursor -retro &
+sleep 3
+./launcher `pidof Xfbdev`
 
 
 #kexec -l /boot/vmlinuz-`uname -r` --initrd=/boot/initrd.img-`uname -r` --append="root=/dev/sda1 1 irqpoll maxcpus=4 reset_devices load_state debug early_printk bootmem_debug"

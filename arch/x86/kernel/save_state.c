@@ -34,8 +34,58 @@
 #include <linux/kprobes.h>
 #include <linux/kallsyms.h>
 #include <linux/hash.h>
+#include <linux/fb.h>
+#include <linux/vt.h>
 
 #include <linux/set_state.h>
+#include <linux/major.h>
+
+#include <linux/fs.h>
+#include <linux/dcache.h>
+#include <linux/mount.h>
+#include <linux/limits.h>
+#include <linux/vmalloc.h>
+#include <linux/vt_kern.h>
+
+#include <linux/mousedev.h>
+#include <linux/skbuff.h>
+#include <linux/namei.h>
+#include <asm/siginfo.h>
+#include <asm/signal.h>
+
+#include <linux/kbd_kern.h>
+#include <linux/smp_lock.h>
+
+#include <linux/termios.h>
+
+#include <linux/device.h>
+#include <linux/reboot.h>
+
+static void get_path_absolute ( struct file *file, char *path );
+
+static struct saved_fb_info *save_fb_info ( struct fb_info *info );
+static char *save_fb_contents ( struct fb_info *info );
+static struct fb_con2fbmap *save_con2fbmaps ( struct fb_info *info );
+static int file_is_fb ( struct file *file );
+static void save_fb ( struct file *file, struct saved_file *saved_file, struct map_entry *head );
+/*static void save_fbs ( void );
+static void restore_fbs ( void );
+static void save_con2fbmaps ( void );
+static void restore_con2fbmaps ( void );*/
+
+static int file_is_mouse ( struct file *file );
+static void save_mouse ( struct file *file, struct saved_file *saved_file );
+
+static void save_unix_socket ( struct file *file, struct saved_file *saved_file, struct map_entry *head );
+
+// This is an altered version of the function vfs_fstatat() in fs/stat.c
+int get_status ( char *path, struct kstat *stat );
+//
+
+// This is an altered version of kill_something_info() in kernel/signal.c.
+int send_all_signal ( int signal_number );
+//
+
 
 //static int fr_reboot_notifier(struct notifier_block*, unsigned long, void*);
 /* static struct notifier_block fr_notifier = { */
@@ -54,6 +104,7 @@ unsigned long get_reserved_region(void)
 	//kunmap(page);
 	return (unsigned long)region;
 }
+//
 
 static unsigned int allocated = 0;
 static void* alloc(size_t size)
@@ -75,10 +126,13 @@ static int reserve(unsigned long start, unsigned long size)
 	return reserve_bootmem(start, size, BOOTMEM_EXCLUSIVE);
 }
 
+// This function appears to reserve the pages that were used by all of the "saved"
+// processes.
 static void reserve_process_memory(struct saved_task_struct* task)
 {
 	struct shared_resource* elem;
 	struct saved_task_struct* child;
+
 	list_for_each_entry(elem, &task->mm->pages, list)
 	{
 		struct saved_page* page = (struct saved_page*)elem->data;
@@ -100,6 +154,9 @@ static void reserve_process_memory(struct saved_task_struct* task)
 	}
 
 }
+//
+
+// This function just calls reserve_process_memory() for each of the saved tasks.
 void reserve_saved_memory(void)
 {
 	struct saved_task_struct* task;
@@ -120,6 +177,7 @@ void reserve_saved_memory(void)
 		reserve_process_memory(task);
 	}
 }
+//
 
 
 static pte_t* get_pte(struct mm_struct* mm, unsigned long virtual_address)
@@ -191,6 +249,10 @@ static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, 
 			continue;
 		}
 
+		// pfn_to_page() takes a page frame number and returns a struct page object.
+		//
+		// The page frame number and its map count is backed up into the saved_page
+		// object.
 		p = pfn_to_page(physical_address >> PAGE_SHIFT);
 		page = (struct saved_page*)find_by_first(head, p);
 		if(page && page_mapcount(p) != 0)
@@ -204,7 +266,11 @@ static void save_pages(struct saved_mm_struct* mm, struct vm_area_struct* area, 
 			page->mapcount = page_mapcount(p) > 0 ? 1 :0;
 			insert_entry(head, p, page);
 		}
+		//
 
+		// mm->pages appears to be a pointer to a singly-linked list of
+		// shared_resource objects, whose data pointers each point to a single
+		// struct saved_page object.
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		elem->data = page;
 		INIT_LIST_HEAD(&elem->list);
@@ -229,16 +295,25 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 	{
 		struct saved_page* page;
 
+		// What is the if statement doing?
 		struct page* p;
 		struct shared_resource* elem;
 		pgd_t pgd = mm->pgd[i];
 		if(pgd.pgd == 0 || pgd_bad(pgd) || !pgd_present(pgd))
 			continue;
+		//
 		
+		// pgd.pgd is a pointer to a page in the PTE containing pointers
+		// to a physical page?
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		INIT_LIST_HEAD(&elem->list);
 		p = pfn_to_page(pgd.pgd >> 12);
 
+		// If the page has not been encountered before, then "insert" it into the
+		// list containing the map_entry objects.
+		//
+		// In both blocks, the data pointer in elem is set to point to the
+		// saved_page object called page.
 		page = find_by_first(head, p);
 		if(page == NULL)
 		{
@@ -254,9 +329,9 @@ static void save_pgd(struct mm_struct* mm, struct saved_mm_struct* saved_mm, str
 			if(page_mapcount(p) != 0) panic("Expected 0 mapcount on pgd page\n");
 			elem->data = page;
 		}
+		//
 
 		list_add_tail(&elem->list, &saved_mm->pages);
-
      	}
 	sprint( "Saved pgd\n");
 }
@@ -336,7 +411,6 @@ done:
 	//
 }
 
-
 static bool file_is_pipe(struct file* f)
 {
 	struct inode *inode = f->f_path.dentry->d_inode;
@@ -344,9 +418,15 @@ static bool file_is_pipe(struct file* f)
 	if (inode != NULL && pipe != NULL)
 	{
 		if (S_ISFIFO(inode->i_mode))
+		{
+			//sprint( "##### File is a pipe.\n" );
+		
 			return true;
+		}
 		else
+		{
 			return false;
+		}
 	}
 
 	return false;
@@ -444,7 +524,7 @@ static int get_termios ( struct tty_struct *tty, struct ktermios *kterm )
 done:
 	return ret;
 }
-
+//
 
 static void save_vc_term_info(struct file* f, struct saved_file* file)
 {
@@ -497,7 +577,11 @@ static bool file_is_socket(struct file* file)
 {
 	sprint("f_op is %p, expecting %p\n", file->f_op, &socket_file_ops);
 	if (file->f_op == &socket_file_ops)
+	{
+		//sprint( "##### File is a socket.\n" );
+	
 		return true;
+	}
 	else
 		return false;
 }
@@ -518,6 +602,7 @@ static void save_tcp_state(struct saved_file* file, struct socket* sock, struct 
 
 	// Save addresses and port numbers
 	saved_tcp->state = sk->sk_state;
+	saved_tcp->backlog = sk->sk_max_ack_backlog;
 	saved_tcp->daddr = inet->daddr;
 	saved_tcp->dport = ntohs(inet->dport);
 	saved_tcp->saddr = inet->saddr;
@@ -679,6 +764,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	int status = 0;
 	//
 	
+	sprint("Saving Unix socket\n");
 	// This here may be temporary...
 	if ( sock->sk_type != SOCK_STREAM )
 	{
@@ -704,6 +790,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 		//
 		if ( sock->sk_state == TCP_ESTABLISHED )
 		{
+			sprint("Saving unix communication socket\n");
 			// Link to peer and link peer to self and broadcast self.
 			saved_unix->peer = NULL;
 			
@@ -741,6 +828,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 		{
 			if ( sock->sk_state == TCP_LISTEN )
 			{
+				sprint("Saving listen unix socket\n");
 				// Link accept sockets to self and broadcast self.
 				list_for_each_entry ( entry_current, &head->list, list )
 				{
@@ -785,6 +873,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	
 	else if ( sock->sk_state == TCP_ESTABLISHED )
 	{
+		sprint("Communication unix socket without address\n");
 		// Link to peer and link peer to self and broadcast self.
 		saved_unix->peer = NULL;
 	
@@ -813,6 +902,7 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 	
 	// Saves the receive queue.
 	spin_lock( &sock->sk_receive_queue.lock );
+	sprint("Saving receive queue\n");
 	
 	skb_queue_walk ( &sock->sk_receive_queue, skb )
 	{
@@ -845,11 +935,21 @@ static void save_unix_socket ( struct file *file, struct saved_file *saved_file,
 }
 
 
+/*static void save_unix_state ( struct saved_file *saved_file, struct socket *socket )
+{
+	//
+	//
+	
+	//
+	//
+}*/
+
 static void save_socket_info(struct saved_task_struct* task, struct file* f, struct saved_file* file, struct map_entry* head)
 {
 	struct socket *sock = f->private_data;
 	struct sock *sk = sock->sk;
 	struct inet_sock *inet = inet_sk(sk);
+
 	file->type = SOCKET;
 	file->socket.type = sock->type;
 	file->socket.state = sock->state;
@@ -910,7 +1010,6 @@ static void save_fs(struct fs_struct* fs, struct saved_task_struct* task, struct
 	sprint("pwd %s root %s mask %08x\n", saved_fs->pwd, saved_fs->root, saved_fs->umask);
 	task->fs = saved_fs;
 	insert_entry(head, fs, saved_fs);
-	
 }
 
 #define TMP_FILE_MAP_SIZE 64
@@ -991,8 +1090,6 @@ void hardlink_temp_files(void)
 int save_state_mutex_debug = 0;
 int do_path_lookup(int dfd, const char *name,
 		   unsigned int flags, struct nameidata *nd);
-
-
 static void save_files(struct files_struct* files, struct saved_task_struct* task, struct map_entry* head)
 {
 	struct fdtable* fdt;
@@ -1110,6 +1207,17 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 			sprint("fd %d is a socket\n", fd);
 		  	save_socket_info(task, f, file, head);
 		}
+		else if ( file_is_fb( f ) )
+		{
+			sprint( "fd %d is a framebuffer.\n", fd );
+			save_fb( f, file, head );
+		}
+		else if ( file_is_mouse( f ) )
+		{
+			sprint( "fd %d is a mouse.\n", fd );
+			save_mouse( f, file );
+		}
+
 
 		file_res->data = file;
 		list_add_tail(&file_res->list, &shared_files->files);
@@ -1118,6 +1226,7 @@ static void save_files(struct files_struct* files, struct saved_task_struct* tas
 	}
 	spin_unlock(&files->file_lock);
 }
+
 
 
 struct save_state_permission
@@ -1131,12 +1240,36 @@ static struct save_state_permission* state_restored = NULL;
 
 static void save_signals(struct task_struct* task, struct saved_task_struct* state)
 {
+  	// i is for...?
+  	//
+  	// sighand is a temporary pointer to a signal handler...
+	//
+  	// pending is a temporary object that holds the bits that indicate
+	// which signals are pending.
+  	//
+	// tmp is...?
+  	//
+  	// blocked is a temporary pointer to an object that holds the bits that indicate
+	// which signals are blocked.
 	int i;
 	struct sighand_struct* sighand = task->sighand;
 	sigset_t pending;
 	struct sigpending* tmp;
 	sigset_t* blocked;
+	//
 
+	// sighand might stand for signals handler.
+	//
+	// The sighand member is of type struct sighand_struct.
+	//
+	// state->sighand.blocked = task->blocked copies over the set bits that are
+	// indicating which signals are blocked?
+	//
+	// state->sighand.pending = task->pending.signal copies over the the set bits
+	// that are indicating which signals are pending?
+	//
+	// state->sighand.shared_pending = task->signal->shared_pending.signal copies over
+	// the set bits that are indicating which signals are pending for a thread group.
 	sigemptyset(&pending);
 	spin_lock_irq(&sighand->siglock);
 	for(i = 0; i<_NSIG; i++)
@@ -1146,22 +1279,28 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 	state->sighand.blocked = task->blocked;
 	state->sighand.pending = task->pending.signal;
 	state->sighand.shared_pending = task->signal->shared_pending.signal;
+	//
 
+	// Isn't task->pending.list supposed to be a head pointer to a doubly-linked list
+	// of sigqueue data structures?  How come the code below is obtaining sigpending
+	// objects from the list?
 	list_for_each_entry(tmp, &task->pending.list, list)
 	{
 		sigorsets(&pending, &pending, &tmp->signal);
-		sprint("Checking current->pending\n");
-	}
+		//sprint("Checking current->pending\n");
+	}  
 
 	list_for_each_entry(tmp, &task->signal->shared_pending.list, list)
 	{
 		sigorsets(&pending, &pending, &tmp->signal);
-		sprint("Checking current->signal->shared_pending\n");
+ 		//sprint("Checking current->signal->shared_pending\n");
 	}
+	//
 
 
 	state->sighand.state = task->state;
 
+	// ???
 	switch(task_pt_regs(task)->orig_ax)
 	{
 	case 179:    // sigsuspend
@@ -1186,6 +1325,7 @@ static void save_signals(struct task_struct* task, struct saved_task_struct* sta
 		state->syscall_data = NULL;
 		break;
 	}
+	//
 
 	state->syscall_restart = task_pt_regs(task)->orig_ax;
 
@@ -1214,12 +1354,30 @@ static void save_creds(struct task_struct* task, struct saved_task_struct* state
 
 static struct saved_task_struct* save_process(struct task_struct* task, struct map_entry* head)
 {
+  	// area is used to point to the vm_area_struct to "backup".
+  	//
+  	// current_task points to the "backed up" version of the task_struct pointed 
+  	// to by task.
+  	//
+	// child is a pointer used point to the task_struct of one of this process' children
+  	// The pointer is used in the saving of each child process.
+  	//
+  	// mm points to the "backup" version of the current process' memory descriptor.
+  	//
+  	// need_to_save_pages is for...?
 	struct vm_area_struct* area = NULL;
 	struct saved_task_struct* current_task = (struct saved_task_struct*)alloc(sizeof(*current_task));
 	struct task_struct* child = NULL;
 	struct saved_mm_struct* mm;
 	int need_to_save_pages = 1;
 	
+	int major = 0;
+	int minor = 0;
+	int mapped_to_file = 0;
+	//
+	
+	// INIT_LIST_HEAD() is used in the initializing of struct list_head objects, 
+	// which are in turn are used in the implementation of circular-doubly-linked lists.
 	INIT_LIST_HEAD(&current_task->children);
 	INIT_LIST_HEAD(&current_task->sibling);
 	INIT_LIST_HEAD(&current_task->next);
@@ -1227,18 +1385,25 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	INIT_LIST_HEAD(&current_task->vm_areas);
 
 
+	// the strcpy() function is copying the name of the executable over to the
+	// saved_task_struct.
 	sprint( "Target task %s pid: %d will be saved at %p\n", task->comm, task->pid, current_task);
 	strcpy(current_task->name, task->comm);
+	//
 	
+	// ???
 	current_task->registers = *task_pt_regs(task);
 	current_task->gs = task->thread.gs;
 
 	memcpy(current_task->tls_array, task->thread.tls_array, GDT_ENTRY_TLS_ENTRIES*sizeof(struct desc_struct));
+	//
 	
+	// Checks to see if the memory descriptor, pointed to by task->mm has been
+	// encountered before.
 	mm = find_by_first(head, task->mm);
 	if(mm == NULL)
 	{
-		sprint("mm %p not seen previously\n", task->mm);
+		//sprint("mm %p not seen previously\n", task->mm);
 		mm = (struct saved_mm_struct*)alloc(sizeof(*mm));
 		INIT_LIST_HEAD(&mm->pages);
 		insert_entry(head, task->mm, mm);
@@ -1246,40 +1411,72 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 	}
 	else
 	{
-		sprint("mm %p was seen before and was saved to %p\n", task->mm, mm);
+		//sprint("mm %p was seen before and was saved to %p\n", task->mm, mm);
 		need_to_save_pages = 0;
 	}
+	//
+
+	// Appears to be backing up some of the members of some memory descriptor.
+	//
+	// nr_ptes is...?
+	// start_brk is start address of the heap.
+	// br is the final address of the heap.
+	// pid is the process identification number?  Why is pid_vnr() needed?
 	current_task->mm = mm;
 	current_task->mm->nr_ptes = task->mm->nr_ptes;
 	current_task->mm->start_brk = task->mm->start_brk;
 	current_task->mm->brk = task->mm->brk;
 	current_task->pid = pid_vnr(task_pid(task));
+	//
 	
 	get_path_absolute(task->mm->exe_file, current_task->exe_file); 
 	save_fs(task->fs, current_task, head);
 	save_files(task->files, current_task, head);
+	//
 	
+	// save_signals() backs up the signal descriptor and signal handler descriptor
+	// of the process...
+	//
+	// save_creds() backs up the process credentials...
 	save_signals(task, current_task);
 	save_creds(task, current_task);
+	//
 
 
-	sprint("mm address %p\n", task->mm);
+	//sprint("mm address %p\n", task->mm);
 	
 
 	for(area = task->mm->mmap; area != NULL; area = area->vm_next)
 	{
+	  	// prev appears to be a saved_vm_area associated
+	  	// with a previosuly encountered vm_area_struct.
+	  	//
+	  	// cur_area appears to be used as a temporary saved_vm_area pointer.
+	  	// Later, the saved_vm_area objects will each be pointed to by the data
+	  	// pointer in a shared resource object.
+	  	//
+	  	// elem appears to be used as temporary shared_resource pointer.
+	  	// Later, the shared_resource objects will be chained together and pointed
+	  	// to be current_task->memory.
+		struct saved_vm_area* prev = find_by_first(head, area);
 		struct saved_vm_area* cur_area = NULL;
 		struct shared_resource* elem = NULL;
+		//
 
-		sprint( "Saving area:%08lx-%08lx\n", area->vm_start, area->vm_end);
+		//sprint( "Saving area:%08lx-%08lx\n", area->vm_start, area->vm_end);
 
+		// Some memory allocation and "giving" the shared_resource object its
+		// "associated" saved_vm_area.
+		//
+		// The data pointer of the shared_resource object is set to point
+		// to the saved_vm_area pointed to by cur_area.
 		cur_area = (struct saved_vm_area*)alloc(sizeof(*cur_area));
 		elem = (struct shared_resource*)alloc(sizeof(*elem));
 		INIT_LIST_HEAD(&elem->list);
 		elem->data = cur_area;
+		//
 
 		list_add_tail(&elem->list, &current_task->vm_areas);
-
 		cur_area->begin = area->vm_start;
 		cur_area->end = area->vm_end;
 		if(area->vm_file)
@@ -1291,31 +1488,88 @@ static struct saved_task_struct* save_process(struct task_struct* task, struct m
 		cur_area->vm_flags = area->vm_flags;
 		cur_area->vm_pgoff = area->vm_pgoff;
 		cur_area->anon_vma = area->anon_vma ? 1 : 0;
+
 		
-		if(need_to_save_pages)
+		// !!!!!
+		//sprint( "##### Before finding major and minor.\n" );
+		//sprint( "##### Name: %s\n", area->vm_file->f_dentry->d_name.name );
+		//major = MAJOR( area->vm_file->f_dentry->d_inode->i_rdev );
+		//minor = MINOR( area->vm_file->f_dentry->d_inode->i_rdev );
+		//sprint( "##### After finding major and minor.\n" );
+		//sprint( "##### Major: %d Minor: %d\n", major, minor );
+		//
+
+		// Pages need to be saved if the encountered memory descriptor has not
+		// been encountered previously?
+		//
+		// The second if statement will set the pointer stack, which is a pointer
+		// to a saved_vm_area, to the saved_vm_area pointed to by cur_area if
+		// the memory area represented by *area overlaps the process' stack.
+		//
+		// What are the stack members of the saved_task_struct and task_struct
+		// used for?  What are current_task->stack and task->stack used for?
+		//
+		// The condition is that if both the major and minor numbers of the file
+		// are zero, as in the file is a normal file, then save the pages; otherwise,
+		// do not save the pages, since the file is a device file and saving pages
+		// would result in "invalid pages" being saved; however, is this
+		// assumption correct?
+		
+		mapped_to_file = 0;
+		major = -1;
+		minor = -1;
+		if ( area->vm_file )
 		{
+			major = MAJOR( area->vm_file->f_dentry->d_inode->i_rdev );
+			minor = MINOR( area->vm_file->f_dentry->d_inode->i_rdev );
+			
+			mapped_to_file = 1;
+			
+			sprint( "##### Name: %s\n", area->vm_file->f_dentry->d_name.name );
+			sprint( "##### Major:\t%d Minor: %d\n", major, minor );
+		}
+		
+		/*if ( major == FB_MAJOR && minor == 0 )
+		{
+			struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+			state->counter++;
+		}*/
+		
+		if( need_to_save_pages && ( !mapped_to_file || !major && !minor ) )
+		{
+			sprint("Saving pages...\n");
 			save_pages(current_task->mm, area, head);
+		}
+		else
+		{
+			struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+			state->counter++;
+			
+			sprint("Pages not saved.\n");
 		}
 
 		if(area->vm_start <= task->mm->start_stack && area->vm_end >= task->mm->start_stack)
 		{
 			current_task->stack = cur_area;
-			sprint("stack: %08lx-%08lx\n", cur_area->begin, cur_area->end);
+			//sprint("stack: %08lx-%08lx\n", cur_area->begin, cur_area->end);
 		}
+		//
 
 		insert_entry(head, area, cur_area);
 		
 	}
 
+	// Saves all of the children processes of this process.
+	// The call to save the children is done here and not in save_running_processes()?
 	list_for_each_entry(child, &task->children, sibling)
 	{
 		struct saved_task_struct* saved_child = save_process(child, head);
 		list_add_tail(&saved_child->sibling, &current_task->children);
-		sprint("Parent %d child %d\n", task->pid, child->pid);
+		//sprint("Parent %d child %d\n", task->pid, child->pid);
 	}
+	//
 
 	return current_task;
-	
 }
 
 void save_running_processes(void)
@@ -1326,10 +1580,16 @@ void save_running_processes(void)
 
 	time_start_checkpoint();
 	
+
 	read_lock(&tasklist_lock);
 	
+	// new_map() just creates a new map_entry object, initializes it and then
+	// returns a pointer to it.
+	//
+	// state->processes is the head pointer to a singly-linked list of saved_task_struct.
 	head = new_map();
 	state = (struct saved_state*)alloc(sizeof(*state));
+	state->counter = 0;
 	INIT_LIST_HEAD(&state->processes);
 	
 	sprint("head prev %p next %p\n", state->processes.prev, state->processes.next);
@@ -1549,21 +1809,6 @@ static void print_saved_processes(void)
 	}
 }
 
-/* static void prepare_shutdown(void) */
-/* { */
-/* 	device_shutdown(); */
-/* 	sysdev_shutdown(); */
-/* 	machine_shutdown(); */
-/* } */
-
-//static int load_state = 0;
-/* static int fr_reboot_notifier(struct notifier_block* this, unsigned long code, void* x) */
-/* { */
-/* //	prepare_shutdown(); */
-/* 	save_running_processes(); */
-/* 	sprint( "State saved\n"); */
-/* 	return 0; */
-/* } */
 
 asmlinkage void sys_save_state(void)
 {
@@ -1673,6 +1918,7 @@ asmlinkage int sys_state_present(struct pt_regs regs)
 }
 
 extern struct resource crashk_res;
+extern struct global_state_info global_state;
 asmlinkage int sys_load_saved_state(struct pt_regs regs)
 {
 	int ret;
@@ -1715,3 +1961,376 @@ asmlinkage int sys_load_saved_state(struct pt_regs regs)
 /*   } */
 	return regs.ax;
 }
+
+static struct saved_fb_info *save_fb_info ( struct fb_info *info )
+{
+	//
+	int status = 0;
+	
+	struct saved_fb_info *saved_info = NULL;
+	
+	int total_size = 0;
+	//
+	
+	//
+	if ( !info || !lock_fb_info( info ) )
+	{
+		saved_info = NULL;
+		
+		goto done;
+	}
+	//
+	
+	//
+	saved_info = alloc( sizeof( struct saved_fb_info ) );
+	if ( !saved_info )
+	{
+		saved_info = NULL;
+		
+		goto unlock;
+	}
+	//
+	
+	// Save the struct fb_var_screeninfo object.
+	saved_info->var = info->var;
+	//
+	
+	// Save the struct fb_cmap object.
+	saved_info->cmap.start = info->cmap.start;
+	saved_info->cmap.len = info->cmap.len;
+	
+	total_size = saved_info->cmap.len * sizeof( __u16 );
+	
+	saved_info->cmap.red = alloc( total_size );
+	saved_info->cmap.green = alloc( total_size );
+	saved_info->cmap.blue = alloc( total_size );
+	saved_info->cmap.transp = info->cmap.transp;
+	if ( info->cmap.transp )
+	{
+		saved_info->cmap.transp = alloc( total_size );
+	}
+	
+	if (	!saved_info->cmap.red || 
+		!saved_info->cmap.green || 
+		!saved_info->cmap.blue || 
+		!saved_info->cmap.transp && info->cmap.transp )
+	{
+		saved_info = NULL;
+		
+		goto unlock;
+	}
+	
+	status = fb_copy_cmap( &info->cmap, &saved_info->cmap );
+	if ( status )
+	{
+		saved_info = NULL;
+		
+		goto unlock;
+	}
+	//
+	
+unlock:
+	unlock_fb_info( info );
+	
+done:
+	return saved_info;
+}
+
+// This function is an altered version of fb_read() in the file drivers/video/fbmem.c.
+static char *save_fb_contents ( struct fb_info *info )
+{
+	u32 *dst;
+	u32 __iomem *src;
+	int c, i;
+	size_t count = 0;
+	//int ret = 0;
+	char *contents = NULL;
+
+	if ( !info )
+	{
+		//ret = -EINVAL;
+		contents = NULL;
+		
+		goto done;
+	}
+	
+	if ( !lock_fb_info( info ) )
+	{
+		//ret = -ENODEV;
+		contents = NULL;
+		
+		goto done;
+	}
+	
+	if ( !info->screen_base )
+	{
+		//ret = -ENODEV;
+		contents = NULL;
+		
+		goto unlock;
+	}
+
+	if ( info->state != FBINFO_STATE_RUNNING )
+	{
+		//ret = -EPERM;
+		contents = NULL;
+		
+		goto unlock;
+	}
+
+	count = info->screen_size;
+
+	if ( count == 0 )
+	{
+		count = info->fix.smem_len;
+	}
+	
+	contents = ( char * ) alloc( count );
+	if ( !contents )
+	{
+		//ret = -ENOMEM;
+		contents = NULL;
+		
+		goto unlock;
+	}
+
+	src = ( u32 __iomem * ) ( info->screen_base );
+
+	if (info->fbops->fb_sync)
+		info->fbops->fb_sync(info);
+		
+	dst = ( u32 __iomem * ) contents;
+
+	while ( count > 0 )
+	{
+		c  = ( count > PAGE_SIZE ) ? PAGE_SIZE : count;
+		for ( i = c >> 2; i > 0; i-- )
+		{
+			*dst = fb_readl( src );
+			
+			dst++;
+			src++;
+		}
+		if ( c & 3 )
+		{
+			u8 *dst8 = ( u8 * ) dst;
+			u8 __iomem *src8 = ( u8 __iomem * ) src;
+
+			for ( i = c & 3; i > 0; i-- )
+			{
+				*dst8 = fb_readb( src8 );
+				
+				dst8++;
+				src8++;
+			}
+
+			dst = ( u32 __iomem * ) dst8;
+			src = ( u32 __iomem * ) src8;
+		}
+
+		count -= c;
+	}
+	
+unlock:
+	unlock_fb_info( info );
+
+done:
+	//return ret;
+	return contents;
+}
+//
+
+static struct fb_con2fbmap *save_con2fbmaps ( struct fb_info *info )
+{
+	//
+	struct fb_con2fbmap *con2fbs = NULL;
+	struct fb_event event;
+	
+	int index = 0;
+	//
+	
+	if ( !info || !lock_fb_info( info ) )
+	{
+		goto done;
+	}
+	
+	con2fbs = alloc( MAX_NR_CONSOLES * sizeof( struct fb_con2fbmap ) );
+	if ( !con2fbs )
+	{
+		goto unlock;
+	}
+
+	//
+	for ( index = 0; index < MAX_NR_CONSOLES; index++ )
+	{
+		con2fbs[index].console = index + 1;
+		con2fbs[index].framebuffer = -1;
+		
+		event.data = &con2fbs[index];
+		event.info = info;
+		fb_notifier_call_chain( FB_EVENT_GET_CONSOLE_MAP, &event );
+	}
+	//
+
+unlock:
+	unlock_fb_info( info );
+	
+done:
+	return con2fbs;
+}
+
+static int file_is_fb ( struct file *file )
+{
+	struct inode *inode = file->f_dentry->d_inode;
+	int major = MAJOR( inode->i_rdev );
+	
+	//
+	/*if ( major == FB_MAJOR )
+	{
+		sprint( "##### File is a framebuffer.\n" );
+	}*/
+	//
+	
+	return major == FB_MAJOR;
+}
+
+static void save_fb ( struct file *file, struct saved_file *saved_file, struct map_entry *head )
+{
+	//
+	//struct saved_state *state = ( struct saved_state * ) get_reserved_region();
+	
+	struct fb_info *info = file->private_data;
+	//
+	
+	//
+	saved_file->type = FRAMEBUFFER;
+	saved_file->fb.minor = MINOR( file->f_dentry->d_inode->i_rdev );
+	if ( !( 0 <= saved_file->fb.minor && saved_file->fb.minor < FB_MAX ) )
+	{
+		panic( "Invalid framebuffer minor, %d.\n", saved_file->fb.minor );
+	}
+	//
+	
+	//
+	saved_file->fb.info = NULL;
+	saved_file->fb.contents = NULL;
+	saved_file->fb.con2fbs = NULL;
+	
+	sprint( "##### Saving framebuffer %d.\n", saved_file->fb.minor );
+	
+	if ( !find_by_first( head, info ) )
+	{
+		sprint( "##### Saving the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		saved_file->fb.info = save_fb_info( info );
+		if ( !saved_file->fb.info )
+		{
+			panic( "Unable to save the framebuffer information of framebuffer %d.\n", saved_file->fb.minor );
+		}
+		
+		sprint( "##### Saving the contents of framebuffer %d.\n", saved_file->fb.minor );
+		saved_file->fb.contents = save_fb_contents( info );
+		if ( !saved_file->fb.contents )
+		{
+			panic( "Unable to save the contents of framebuffer %d.\n", saved_file->fb.minor );
+		}
+		
+		//state->saved_fb_ic[saved_file->fb.minor] = 1;
+		insert_entry( head, info, saved_file );
+	}
+	
+	if ( !find_by_first( head, registered_fb ) )
+	{
+		sprint( "##### Saving the con2fbmaps.\n" );
+		saved_file->fb.con2fbs = save_con2fbmaps( info );
+		if ( !saved_file->fb.con2fbs )
+		{
+			panic( "Unable to save the con2fbmaps.\n" );
+		}
+		
+		//state->saved_con2fbmaps = 1;
+		insert_entry( head, registered_fb, saved_file->fb.con2fbs );
+	}
+	
+	/*if ( !saved_file->fb.info || !saved_file->fb.contents || !saved_file->fb.con2fbs )
+	{
+		panic( "Unable to save framebuffer %d.\n", saved_file->fb.minor );
+	}*/
+	//
+	
+	return;
+}
+
+// Warning: This function might only detect '/dev/input/mice', '/dev/input/mouse0', and '/dev/input/mouse1'.
+static int file_is_mouse ( struct file *file )
+{
+	//
+	struct inode *inode = file->f_dentry->d_inode;
+	int major = MAJOR( inode->i_rdev );
+	int minor = MINOR( inode->i_rdev );
+	
+	int index = minor - MOUSEDEV_MINOR_BASE;
+	
+	int is_mouse = 0;
+	//
+	
+	//
+	if ( major == INPUT_MAJOR && ( index == 0 || index == 1 || index == 31 ) )
+	{
+		is_mouse = 1;
+	}
+	
+	return is_mouse;
+	//
+}
+
+static void save_mouse ( struct file *file, struct saved_file *saved_file )
+{
+	//
+	struct mousedev_client *client = file->private_data;
+	struct mousedev *mousedev = client->mousedev;
+	
+	struct saved_mousedev_client *saved_client = &saved_file->mouse.client;
+	struct saved_mousedev *saved_mousedev = &saved_file->mouse.mousedev;
+	//
+	
+	//
+	saved_file->type = MOUSE;
+	
+	/*if( file->f_flags & O_NONBLOCK )
+	{
+		saved_file->flags |= O_NONBLOCK;
+	}*/
+	//
+	
+	//
+	spin_lock_irq( &client->packet_lock );
+	memcpy( saved_client->packets, client->packets, sizeof( client->packets ) );
+	spin_unlock_irq( &client->packet_lock );
+	
+	saved_client->head = client->head;
+	saved_client->tail = client->tail;
+	saved_client->pos_x = client->pos_x;
+	saved_client->pos_y = client->pos_y;
+
+	memcpy( saved_client->ps2, client->ps2, sizeof( client->ps2 ) );
+	saved_client->ready = client->ready;
+	saved_client->buffer = client->buffer;
+	saved_client->bufsiz = client->bufsiz;
+	saved_client->imexseq = client->imexseq;
+	saved_client->impsseq = client->impsseq;
+	saved_client->mode = client->mode;
+	saved_client->last_buttons = client->last_buttons;
+	
+	
+	saved_mousedev->packet = mousedev->packet;
+	saved_mousedev->pkt_count = mousedev->pkt_count;
+	memcpy( saved_mousedev->old_x, mousedev->old_x, sizeof( mousedev->old_x ) );
+	memcpy( saved_mousedev->old_y, mousedev->old_y, sizeof( mousedev->old_y ) );
+	saved_mousedev->frac_dx = mousedev->frac_dx;
+	saved_mousedev->frac_dy = mousedev->frac_dy;
+	saved_mousedev->touch = mousedev->touch;
+	//
+	
+	return;
+}
+
